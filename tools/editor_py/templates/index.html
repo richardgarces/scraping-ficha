@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Editor de Productos - Admin</title>
+  <style>body{font-family:Arial,Helvetica,sans-serif;margin:20px}table{width:100%;border-collapse:collapse}th,td{padding:8px;border:1px solid #ddd}th{background:#f2f2f2}</style>
+</head>
+<body>
+  <h1>Productos</h1>
+  <p><a href="/admin">Recargar</a></p>
+  <p><a href="/admin/export_opencompare">Exportar OpenCompare (JSON)</a></p>
+  <table>
+    <thead><tr><th>Store</th><th>Product ID</th><th>Nombre</th><th>Brand</th><th>Rating</th><th></th></tr></thead>
+    <tbody>
+      {% for p in products %}
+      <tr>
+        <td>{{ p.store }}</td>
+        <td>{{ p.product_id }}</td>
+        <td>{{ p.name or '' }}</td>
+        <td>{{ p.brand or '' }}</td>
+        <td>{{ p.rating or '' }}{% if p.reviews %} · {{ p.reviews }}{% endif %}</td>
+        <td><a href="/admin/edit/{{ p.store }}/{{ p.product_id }}">Editar</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</body>
+</html>

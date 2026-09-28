@@ -1,0 +1,12 @@
+from retail.platforms.vtex import make_vtex_store, parse_vtex_target
+
+parse___STORE_ID___target = parse_vtex_target
+
+__CLASS_NAME__ = make_vtex_store(
+    store_id="__STORE_ID__",
+    title="__TITLE__",
+    site="__SITE__",
+    base="https://__SITE__",
+    default_brand=__DEFAULT_BRAND__,
+    category_help="Slug VTEX, por ejemplo ropa/polerones",
+)

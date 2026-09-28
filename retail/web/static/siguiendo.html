@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#258fdf">
+  <title>Siguiendo</title>
+  <script>(function(){var m=localStorage.getItem("retail-theme");if(m==="day"||m==="night"){document.documentElement.dataset.theme=m;return;}var h=new Date().getHours();document.documentElement.dataset.theme=(h>=7&&h<19)?"day":"night";})();</script>
+  <link rel="stylesheet" href="/static/styles.css?v=68">
+</head>
+<body>
+  <header class="top">
+    <div>
+      <p class="eyebrow">Retail Chile</p>
+      <h1>Productos que sigo</h1>
+    </div>
+    <form class="desktop-quick-search" action="/catalogo" method="get" role="search">
+      <label class="desktop-search-field"><span class="sr-only">Buscar un producto</span><input name="q" type="search" placeholder="Busca un producto…"></label>
+      <label class="quick-search-toggle" title="Buscar solo en la base de datos"><input name="quick" type="checkbox" value="1" checked><span class="quick-search-long">Búsqueda rápida</span><span class="quick-search-short">Rápida</span></label>
+      <button type="submit" aria-label="Buscar">Buscar</button>
+    </form>
+    <nav class="nav">
+      <a href="/">Explorar</a>
+      <a href="/catalogo">Catálogo</a>
+      <a href="/hoy">Ofertas de hoy</a>
+      <a href="/reales">Ofertas reales</a>
+      <a href="/tiendas">Tiendas</a>
+      <details class="nav-menu" data-login>
+        <summary>Cuenta</summary>
+        <div class="nav-menu-list">
+          <a href="/entrar" data-login-mode="entrar">Entrar</a>
+          <a href="/entrar?modo=inscribir" data-login-mode="inscribir">Inscribirse</a>
+        </div>
+      </details>
+      <details class="nav-menu" data-auth hidden>
+        <summary class="current" data-user-label>Cuenta</summary>
+        <div class="nav-menu-list">
+          <a href="/siguiendo" class="current">Siguiendo</a>
+          <a href="/cron" data-admin hidden>Cron / lotes</a>
+          <a href="/analisis-producto" data-admin hidden>Análisis de producto</a>
+          <a href="/estadisticas" data-admin hidden>Estadísticas</a>
+          <a href="/usuarios" data-admin hidden>Usuarios</a>
+          <a href="/ofertas" data-admin hidden>Configurar</a>
+          <a href="#" data-logout>Salir</a>
+        </div>
+      </details>
+    </nav>
+    <div class="theme-toggle" role="group" aria-label="Apariencia">
+      <button type="button" class="secondary" data-theme-set="auto" title="Según la hora y tu ubicación">Auto</button>
+      <button type="button" class="secondary" data-theme-set="day">Día</button>
+      <button type="button" class="secondary" data-theme-set="night">Noche</button>
+    </div>
+  </header>
+
+  <main class="settings">
+    <p id="flash" class="summary" hidden></p>
+
+    <section class="panel" id="guest-box">
+      <h2>Guarda productos para seguimiento</h2>
+      <p>Inscríbete para seguir precios y avisar cuando suban o bajen. No necesitas ser administrador.</p>
+      <p class="auth-actions">
+        <a class="btn" href="/entrar?modo=inscribir&amp;next=/siguiendo">Inscribirse</a>
+        <a class="btn secondary" href="/entrar?next=/siguiendo">Entrar</a>
+      </p>
+    </section>
+
+    <section class="panel" id="watch-panel" hidden>
+      <h2>Agregar seguimiento</h2>
+      <p>Busca el producto exacto y usa el botón <strong>Seguir</strong> de su ficha.</p>
+      <p class="auth-actions"><a class="btn" href="/">Buscar productos</a></p>
+      <p class="muted">No necesitas ingresar un precio: te avisamos ante cualquier cambio, sin importar cuánto suba o baje.</p>
+    </section>
+
+    <section class="panel" id="notification-panel" hidden>
+      <h2>Mis notificaciones</h2>
+      <form id="notification-form" class="form-grid">
+        <fieldset class="sources">
+          <legend>Enviar por</legend>
+          <label><input type="checkbox" name="notice-channel" value="email"> Correo</label>
+          <label><input type="checkbox" name="notice-channel" value="telegram"> Telegram</label>
+          <label><input type="checkbox" name="notice-channel" value="push"> Notificación push</label>
+        </fieldset>
+        <div class="push-preference span">
+          <div>
+            <strong>Notificaciones en este dispositivo</strong>
+            <p id="push-status" class="muted">Comprobando compatibilidad del navegador…</p>
+          </div>
+          <button id="push-toggle" type="button" class="secondary">Activar en este dispositivo</button>
+        </div>
+        <label>Correo de la cuenta <input id="notice-email" type="email" disabled></label>
+        <label>Usuario de Telegram <input id="notice-telegram" type="text" placeholder="@usuario"></label>
+        <div class="auth-actions span">
+          <button id="telegram-connect" type="button">Conectar Telegram</button>
+          <button id="telegram-verify" type="button" class="secondary">Verificar conexión</button>
+        </div>
+        <p id="telegram-status" class="muted span telegram-connection">Para recibir mensajes privados debes abrir el bot, presionar Iniciar y verificar la conexión.</p>
+        <fieldset class="sources notice-kind-grid">
+          <legend>Qué quieres recibir</legend>
+          <label><input type="checkbox" name="notice-kind" value="common"> Descuentos comunes</label>
+          <label><input type="checkbox" name="notice-kind" value="real"> Descuentos reales</label>
+          <label><input type="checkbox" name="notice-kind" value="super"> Super ofertas (más de 50%)</label>
+          <label><input type="checkbox" name="notice-kind" value="watch"> Productos que sigo</label>
+          <label><input type="checkbox" name="notice-kind" value="predictive"> Alertas predictivas y anticipadas experimentales</label>
+        </fieldset>
+        <p id="predictive-status" class="muted span notice-status"></p>
+        <fieldset class="email-filters">
+          <legend>Filtros exclusivos del correo</legend>
+          <p class="muted email-filter-intro">Personaliza únicamente los mensajes que llegan a tu correo. Telegram conserva sus propios filtros.</p>
+          <div class="email-filter-grid">
+            <section class="email-category-panel" aria-labelledby="email-category-title">
+              <div class="email-filter-heading">
+                <div>
+                  <h3 id="email-category-title">Categorías de interés</h3>
+                  <p id="email-category-count" class="muted">Todas las categorías</p>
+                </div>
+                <div class="category-actions">
+                  <button id="email-categories-all" type="button" class="secondary">Todas</button>
+                  <button id="email-categories-none" type="button" class="secondary">Ninguna</button>
+                </div>
+              </div>
+              <div id="email-categories" class="choice-grid"></div>
+              <p class="muted email-filter-help">Sin categorías seleccionadas se consideran todas.</p>
+            </section>
+            <section class="email-discount-panel" aria-labelledby="email-discount-title">
+              <div class="email-discount-icon" aria-hidden="true">%</div>
+              <h3 id="email-discount-title">Descuento real mínimo</h3>
+              <p class="muted">Solo enviaremos ofertas reales que alcancen este porcentaje.</p>
+              <label for="email-min-real-discount">Porcentaje mínimo</label>
+              <div class="percent-input">
+                <input id="email-min-real-discount" type="number" min="0" max="100" step="1" value="0">
+                <span>%</span>
+              </div>
+              <p class="muted email-filter-help">Se compara con el historial del producto o con otras tiendas. Usa 0 para no exigir un mínimo adicional.</p>
+            </section>
+          </div>
+        </fieldset>
+        <label>Descuento mínimo vs. su propio historial (%)
+          <input id="min-discount-self" type="number" min="0" max="100" step="1" value="0">
+        </label>
+        <label>Descuento mínimo vs. otras tiendas (%)
+          <input id="min-discount-stores" type="number" min="0" max="100" step="1" value="0">
+        </label>
+        <p class="muted span">Los mínimos se aplican a ofertas generales. En “Productos que sigo” avisamos ante cualquier cambio de precio.</p>
+        <button type="submit">Guardar mis notificaciones</button>
+      </form>
+    </section>
+
+    <section class="panel" id="store-preferences-panel" hidden>
+      <div class="preference-heading">
+        <div>
+          <p class="eyebrow">Resultados personalizados</p>
+          <h2>Mis tiendas</h2>
+          <p class="muted">Elige cómo quieres que tratemos cada tienda al buscar productos.</p>
+        </div>
+        <label class="store-filter">Filtrar tiendas
+          <input id="store-preference-filter" type="search" placeholder="Nombre de tienda…">
+        </label>
+      </div>
+      <form id="store-preferences-form">
+        <div class="store-preference-overview" aria-live="polite">
+          <div><span class="preference-symbol favorite">★</span><strong id="favorite-store-count">0</strong><span>preferidas</span></div>
+          <div><span class="preference-symbol excluded">⊘</span><strong id="excluded-store-count">0</strong><span>excluidas</span></div>
+          <p>Las preferidas aparecen primero. Las excluidas no se consultan ni se muestran.</p>
+        </div>
+        <div id="store-preference-list" class="store-preference-list"></div>
+        <div class="store-preference-footer">
+          <p id="store-preference-summary" class="muted">Sin preferencias especiales.</p>
+          <button type="submit">Guardar cambios</button>
+        </div>
+      </form>
+    </section>
+
+    <section class="panel" id="password-panel" hidden>
+      <p class="eyebrow">Seguridad</p>
+      <h2>Cambiar clave</h2>
+      <form id="password-form" class="password-change-form">
+        <label>Clave actual <input id="current-password" type="password" autocomplete="current-password" required></label>
+        <label>Nueva clave <input id="new-password" type="password" autocomplete="new-password" minlength="8" required></label>
+        <label>Repite la nueva clave <input id="new-password2" type="password" autocomplete="new-password" minlength="8" required></label>
+        <button type="submit">Cambiar clave</button>
+      </form>
+    </section>
+
+    <section class="panel" id="watch-list" hidden>
+      <div class="table-wrap">
+        <table class="results">
+          <thead>
+            <tr><th>Producto</th><th>Búsqueda</th><th>Aviso</th><th>Último aviso</th><th></th></tr>
+          </thead>
+          <tbody id="watches"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+  <script src="/static/prices.js?v=27"></script>
+  <script src="/static/siguiendo.js?v=14"></script>
+</body>
+</html>

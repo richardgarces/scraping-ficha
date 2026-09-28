@@ -1,0 +1,11 @@
+[
+  {
+    "store": "lider",
+    "product_id": "00780469127018",
+    "name": "Ejemplo Producto",
+    "brand": "MarcaX",
+    "rating": 4.2,
+    "reviews": 128,
+    "specifications": {"Color": "Negro", "Peso": "1.2kg"}
+  }
+]

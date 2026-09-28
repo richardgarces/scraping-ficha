@@ -1,0 +1,21 @@
+{
+  "comment": "Reglas editables desde la interfaz web.",
+  "enabled": [
+    "price_drop_percent",
+    "cross_store_gap",
+    "below_median"
+  ],
+  "min_price": 10000,
+  "max_price": null,
+  "price_drop_percent": 40.0,
+  "price_drop_amount": 20000,
+  "cross_store_gap_percent": 40.0,
+  "below_median_percent": 40.0,
+  "ignore_fake_discounts": true,
+  "channels": [
+    "log",
+    "file",
+    "telegram",
+    "email"
+  ]
+}

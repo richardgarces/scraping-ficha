@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#258fdf">
+  <title>Ficha de producto</title>
+  <script>(function(){var m=localStorage.getItem("retail-theme");if(m==="day"||m==="night"){document.documentElement.dataset.theme=m;return;}var h=new Date().getHours();document.documentElement.dataset.theme=(h>=7&&h<19)?"day":"night";})();</script>
+  <link rel="stylesheet" href="/static/styles.css?v=68">
+</head>
+<body>
+  <header class="top">
+    <div>
+      <p class="eyebrow">Compara y ahorra</p>
+      <h1>Ficha de producto</h1>
+    </div>
+    <form class="desktop-quick-search" action="/catalogo" method="get" role="search">
+      <label class="desktop-search-field" for="desktop-product-search"><span class="sr-only">Buscar un producto</span><input id="desktop-product-search" name="q" type="search" placeholder="Busca un producto…"></label>
+      <label class="quick-search-toggle" title="Buscar solo en la base de datos"><input name="quick" type="checkbox" value="1" checked><span class="quick-search-long">Búsqueda rápida</span><span class="quick-search-short">Rápida</span></label>
+      <button type="submit" aria-label="Buscar">Buscar</button>
+    </form>
+    <nav class="nav">
+      <a href="/">Explorar</a>
+      <a href="/catalogo">Catálogo</a>
+      <a href="/hoy">Ofertas de hoy</a>
+      <a href="/reales">Ofertas reales</a>
+      <a href="/tiendas">Tiendas</a>
+      <details class="nav-menu" data-login>
+        <summary>Cuenta</summary>
+        <div class="nav-menu-list">
+          <a href="/entrar" data-login-mode="entrar">Entrar</a>
+          <a href="/entrar?modo=inscribir" data-login-mode="inscribir">Inscribirse</a>
+        </div>
+      </details>
+      <details class="nav-menu" data-auth hidden>
+        <summary data-user-label>Cuenta</summary>
+        <div class="nav-menu-list">
+          <a href="/siguiendo">Siguiendo</a>
+          <a href="/cron" data-admin hidden>Cron / lotes</a>
+          <a href="/analisis-producto" data-admin hidden>Análisis de producto</a>
+          <a href="/estadisticas" data-admin hidden>Estadísticas</a>
+          <a href="/usuarios" data-admin hidden>Usuarios</a>
+          <a href="/ofertas" data-admin hidden>Configurar</a>
+          <a href="#" data-logout>Salir</a>
+        </div>
+      </details>
+    </nav>
+    <div class="theme-toggle" role="group" aria-label="Apariencia">
+      <button type="button" class="secondary" data-theme-set="auto" title="Según la hora y tu ubicación">Auto</button>
+      <button type="button" class="secondary" data-theme-set="day">Día</button>
+      <button type="button" class="secondary" data-theme-set="night">Noche</button>
+    </div>
+  </header>
+
+  <main class="settings">
+    <a id="back-results" class="back-results" href="/" hidden>← Volver a resultados</a>
+    <p id="flash" class="summary" hidden></p>
+    <p id="price-notice" class="cheapest" hidden role="status"></p>
+    <p id="sweep-status" class="muted" hidden></p>
+    <div class="product-desktop-layout">
+      <div class="product-main-column">
+        <section class="panel" id="card"></section>
+        <section class="panel" id="chart-panel" hidden>
+          <h2>Historial de precios</h2>
+          <div class="chart-controls">
+            <div class="toolbar" id="windows" aria-label="Período del historial">
+              <button type="button" class="secondary" data-days="7">7 días</button>
+              <button type="button" class="secondary" data-days="30">30 días</button>
+              <button type="button" class="secondary current" data-days="90">90 días</button>
+              <button type="button" class="secondary" data-days="0">Todo</button>
+            </div>
+            <div class="chart-mode" role="group" aria-label="Presentación de los gráficos">
+              <button type="button" class="secondary current" data-chart-mode="separate" aria-pressed="true">Separados</button>
+              <button type="button" class="secondary" data-chart-mode="combined" aria-pressed="false">Unidos</button>
+            </div>
+          </div>
+          <div class="price-history-grid" id="chart-separated">
+            <section class="price-history-card" aria-labelledby="offer-chart-title">
+              <h3 id="offer-chart-title">Precio de oferta</h3>
+              <p class="muted">El precio efectivo publicado para comprar el producto.</p>
+              <div id="chart-offer" class="price-chart-scroll" tabindex="0" aria-label="Gráfico desplazable del precio de oferta por día"></div>
+              <p id="chart-offer-note" class="muted"></p>
+            </section>
+            <section class="price-history-card" aria-labelledby="normal-chart-title">
+              <h3 id="normal-chart-title">Precio normal</h3>
+              <p class="muted">El precio de referencia informado por la tienda.</p>
+              <div id="chart-normal" class="price-chart-scroll" tabindex="0" aria-label="Gráfico desplazable del precio normal por día"></div>
+              <p id="chart-normal-note" class="muted"></p>
+            </section>
+          </div>
+          <section class="price-history-card price-history-combined" id="chart-combined-card" aria-labelledby="combined-chart-title" hidden>
+            <h3 id="combined-chart-title">Precio de oferta y precio normal</h3>
+            <p class="muted">Ambos valores en la misma escala para comparar su evolución.</p>
+            <div class="price-chart-legend" aria-label="Leyenda">
+              <span><i class="offer"></i>Precio de oferta</span>
+              <span><i class="normal"></i>Precio normal</span>
+            </div>
+            <div id="chart-combined" class="price-chart-scroll" tabindex="0" aria-label="Gráfico desplazable de precios por día"></div>
+            <p id="chart-combined-note" class="muted"></p>
+          </section>
+        </section>
+      </div>
+      <aside class="product-side-column">
+        <section class="panel" id="others-panel" hidden>
+          <h2>Precios en otras tiendas</h2>
+          <p class="muted product-panel-intro">Compara el mismo producto antes de comprar.</p>
+          <div class="table-wrap">
+            <table class="results">
+              <thead><tr><th>Tienda</th><th>Precio</th><th>Habitual</th><th></th></tr></thead>
+              <tbody id="others"></tbody>
+            </table>
+          </div>
+        </section>
+        <section class="panel forecast-panel" id="forecast-panel" hidden>
+          <div class="forecast-title">
+            <h2>Pronóstico experimental</h2>
+            <span class="badge">Experimental</span>
+          </div>
+          <div id="forecast-content"></div>
+          <p class="forecast-disclaimer">Es una estimación basada en precios anteriores, no una garantía ni una recomendación de compra. Cuando supera la validación puede ayudar a priorizar el scraping y alimentar alertas predictivas opcionales, pero no reemplaza el análisis de ofertas reales.</p>
+        </section>
+      </aside>
+    </div>
+    <section class="panel product-reviews" id="reviews-panel" hidden>
+      <div class="product-reviews-head">
+        <div>
+          <p class="eyebrow">Comunidad</p>
+          <h2>Opiniones sobre este producto</h2>
+        </div>
+        <div id="reviews-summary" class="reviews-summary"></div>
+      </div>
+      <div class="product-reviews-layout">
+        <div class="review-compose">
+          <h3>¿Qué te pareció?</h3>
+          <p class="muted">Tu experiencia puede ayudar a otras personas a elegir mejor.</p>
+          <form id="review-form" hidden>
+            <input id="review-rating" type="hidden" value="0">
+            <div class="review-stars-input" role="radiogroup" aria-label="Calificación del producto">
+              <button type="button" data-review-rating="1" role="radio" aria-checked="false" aria-label="1 estrella">★</button>
+              <button type="button" data-review-rating="2" role="radio" aria-checked="false" aria-label="2 estrellas">★</button>
+              <button type="button" data-review-rating="3" role="radio" aria-checked="false" aria-label="3 estrellas">★</button>
+              <button type="button" data-review-rating="4" role="radio" aria-checked="false" aria-label="4 estrellas">★</button>
+              <button type="button" data-review-rating="5" role="radio" aria-checked="false" aria-label="5 estrellas">★</button>
+            </div>
+            <p id="review-rating-label" class="muted" aria-live="polite">Elige de 1 a 5 estrellas</p>
+            <label for="review-comment">Cuéntanos brevemente <span class="muted">(opcional)</span></label>
+            <textarea id="review-comment" maxlength="600" rows="4" placeholder="¿Qué te gustó o qué debería mejorar?"></textarea>
+            <div class="review-form-footer">
+              <span id="review-counter" class="muted">0/600</span>
+              <button id="review-submit" type="submit">Publicar opinión</button>
+            </div>
+            <p id="review-status" class="muted" role="status"></p>
+          </form>
+          <p id="review-login" class="review-login" hidden>Entra con tu cuenta para evaluar. <a href="/entrar">Entrar</a></p>
+        </div>
+        <div class="recent-reviews">
+          <h3>Últimos comentarios</h3>
+          <div id="reviews-list" class="reviews-list"></div>
+          <button id="reviews-toggle" type="button" class="secondary" hidden>Ver todos</button>
+        </div>
+      </div>
+    </section>
+    <section class="panel" id="specs-panel" hidden>
+      <h2>Características</h2>
+      <div id="specs"></div>
+      <button type="button" class="secondary" id="specs-toggle" hidden>Ver más características</button>
+      <div id="desc-block" hidden>
+        <h2>Descripción</h2>
+        <h3 id="desc-title"></h3>
+        <div id="desc" class="product-desc collapsed"></div>
+        <button type="button" class="secondary" id="desc-toggle" hidden>Ver más</button>
+      </div>
+    </section>
+    <section class="panel" id="related-panel" hidden>
+      <h2>Productos relacionados</h2>
+      <div class="related-row" id="related"></div>
+    </section>
+  </main>
+  <script src="/static/prices.js?v=27"></script>
+  <script src="/static/producto.js?v=28"></script>
+</body>
+</html>

@@ -1,0 +1,17 @@
+# Override: app detrás de platform-caddy (kit ubuntu).
+# Uso: EDGE=platform ./scripts/deploy-prod.sh
+#
+# Une precios-web a platform-net. No publica 80/443.
+# Mongo, Qdrant y Redis quedan en la red interna del compose.
+
+services:
+  web:
+    container_name: precios-web
+    networks:
+      - default
+      - platform-net
+
+networks:
+  platform-net:
+    external: true
+    name: platform-net

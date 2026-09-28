@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#258fdf">
+  <title>Entrar</title>
+  <script>(function(){var m=localStorage.getItem("retail-theme");if(m==="day"||m==="night"){document.documentElement.dataset.theme=m;return;}var h=new Date().getHours();document.documentElement.dataset.theme=(h>=7&&h<19)?"day":"night";})();</script>
+  <link rel="stylesheet" href="/static/styles.css?v=68">
+</head>
+<body>
+  <header class="top">
+    <div>
+      <p class="eyebrow">Retail Chile</p>
+      <h1>Tu cuenta</h1>
+    </div>
+    <form class="desktop-quick-search" action="/catalogo" method="get" role="search">
+      <label class="desktop-search-field"><span class="sr-only">Buscar un producto</span><input name="q" type="search" placeholder="Busca un producto…"></label>
+      <label class="quick-search-toggle" title="Buscar solo en la base de datos"><input name="quick" type="checkbox" value="1" checked><span class="quick-search-long">Búsqueda rápida</span><span class="quick-search-short">Rápida</span></label>
+      <button type="submit" aria-label="Buscar">Buscar</button>
+    </form>
+    <nav class="nav">
+      <a href="/">Explorar</a>
+      <a href="/catalogo">Catálogo</a>
+      <a href="/hoy">Ofertas de hoy</a>
+      <a href="/reales">Ofertas reales</a>
+      <a href="/tiendas">Tiendas</a>
+      <details class="nav-menu" data-login>
+        <summary class="current">Cuenta</summary>
+        <div class="nav-menu-list">
+          <a href="/entrar" data-login-mode="entrar">Entrar</a>
+          <a href="/entrar?modo=inscribir" data-login-mode="inscribir">Inscribirse</a>
+        </div>
+      </details>
+      <details class="nav-menu" data-auth hidden>
+        <summary data-user-label>Cuenta</summary>
+        <div class="nav-menu-list">
+          <a href="/siguiendo">Siguiendo</a>
+          <a href="/cron" data-admin hidden>Cron / lotes</a>
+          <a href="/analisis-producto" data-admin hidden>Análisis de producto</a>
+          <a href="/estadisticas" data-admin hidden>Estadísticas</a>
+          <a href="/usuarios" data-admin hidden>Usuarios</a>
+          <a href="/ofertas" data-admin hidden>Configurar</a>
+          <a href="#" data-logout>Salir</a>
+        </div>
+      </details>
+    </nav>
+    <div class="theme-toggle" role="group" aria-label="Apariencia">
+      <button type="button" class="secondary" data-theme-set="auto" title="Según la hora y tu ubicación">Auto</button>
+      <button type="button" class="secondary" data-theme-set="day">Día</button>
+      <button type="button" class="secondary" data-theme-set="night">Noche</button>
+    </div>
+  </header>
+  <main>
+    <section class="panel auth-box">
+      <div class="auth-tabs">
+        <button type="button" class="secondary current" id="tab-entrar">Entrar</button>
+        <button type="button" class="secondary" id="tab-inscribir">Inscribirse</button>
+      </div>
+      <h2 id="auth-title">Entrar</h2>
+      <p class="muted" id="auth-copy">Con tu cuenta puedes seguir productos y ver sus precios.</p>
+      <p id="flash" class="err" hidden></p>
+      <form id="login-form">
+        <label>Usuario o email
+          <input id="email" name="email" type="text" autocomplete="username" required>
+        </label>
+        <label>Clave
+          <span class="pwd-field">
+            <input id="password" name="password" type="password" autocomplete="current-password" required>
+            <button type="button" class="secondary pwd-toggle" aria-controls="password" aria-pressed="false" aria-label="Ver clave">Ver</button>
+          </span>
+        </label>
+        <button type="submit">Entrar</button>
+        <button type="button" class="link-button" id="forgot-link">¿Olvidaste tu clave?</button>
+      </form>
+      <form id="register-form" hidden>
+        <label>Nombre (opcional)
+          <input id="reg-name" name="name" type="text" autocomplete="name">
+        </label>
+        <label>Email
+          <input id="reg-email" name="email" type="email" autocomplete="email" required>
+        </label>
+        <label>Clave
+          <span class="pwd-field">
+            <input id="reg-password" name="password" type="password" autocomplete="new-password" minlength="8" required>
+            <button type="button" class="secondary pwd-toggle" aria-controls="reg-password" aria-pressed="false" aria-label="Ver clave">Ver</button>
+          </span>
+        </label>
+        <label>Repite la clave
+          <span class="pwd-field">
+            <input id="reg-password2" name="password2" type="password" autocomplete="new-password" minlength="8" required>
+            <button type="button" class="secondary pwd-toggle" aria-controls="reg-password2" aria-pressed="false" aria-label="Ver clave">Ver</button>
+          </span>
+        </label>
+        <button type="submit" id="register-submit">Crear cuenta</button>
+      </form>
+      <form id="forgot-form" hidden>
+        <p class="muted">Escribe el correo de tu cuenta. Si existe, recibirás un enlace válido durante 30 minutos.</p>
+        <label>Email
+          <input id="forgot-email" type="email" autocomplete="email" required>
+        </label>
+        <button type="submit">Enviar enlace</button>
+        <button type="button" class="secondary" id="forgot-back">Volver a entrar</button>
+      </form>
+      <form id="reset-form" hidden>
+        <p class="muted">Crea una clave nueva de al menos 8 caracteres.</p>
+        <label>Nueva clave
+          <span class="pwd-field">
+            <input id="reset-password" type="password" autocomplete="new-password" minlength="8" required>
+            <button type="button" class="secondary pwd-toggle" aria-controls="reset-password" aria-pressed="false">Ver</button>
+          </span>
+        </label>
+        <label>Repite la nueva clave
+          <input id="reset-password2" type="password" autocomplete="new-password" minlength="8" required>
+        </label>
+        <button type="submit">Guardar nueva clave</button>
+      </form>
+    </section>
+  </main>
+  <script src="/static/prices.js?v=27"></script>
+  <script src="/static/entrar.js?v=14"></script>
+</body>
+</html>

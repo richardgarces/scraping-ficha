@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#258fdf">
+  <title>Tiendas · Retail Chile</title>
+  <script>(function(){var m=localStorage.getItem("retail-theme");if(m==="day"||m==="night"){document.documentElement.dataset.theme=m;return;}var h=new Date().getHours();document.documentElement.dataset.theme=(h>=7&&h<19)?"day":"night";})();</script>
+  <link rel="stylesheet" href="/static/styles.css?v=68">
+</head>
+<body>
+  <header class="top">
+    <div>
+      <p class="eyebrow">Retail Chile</p>
+      <h1>Cuánto vale el "antes" de cada tienda</h1>
+    </div>
+    <form class="desktop-quick-search" action="/catalogo" method="get" role="search">
+      <label class="desktop-search-field"><span class="sr-only">Buscar un producto</span><input name="q" type="search" placeholder="Busca un producto…"></label>
+      <label class="quick-search-toggle" title="Buscar solo en la base de datos"><input name="quick" type="checkbox" value="1" checked><span class="quick-search-long">Búsqueda rápida</span><span class="quick-search-short">Rápida</span></label>
+      <button type="submit" aria-label="Buscar">Buscar</button>
+    </form>
+    <nav class="nav">
+      <a href="/">Explorar</a>
+      <a href="/catalogo">Catálogo</a>
+      <a href="/hoy">Ofertas de hoy</a>
+      <a href="/reales">Ofertas reales</a>
+      <a href="/tiendas" class="current">Tiendas</a>
+      <details class="nav-menu" data-login>
+        <summary>Cuenta</summary>
+        <div class="nav-menu-list">
+          <a href="/entrar" data-login-mode="entrar">Entrar</a>
+          <a href="/entrar?modo=inscribir" data-login-mode="inscribir">Inscribirse</a>
+        </div>
+      </details>
+      <details class="nav-menu" data-auth hidden>
+        <summary data-user-label>Cuenta</summary>
+        <div class="nav-menu-list">
+          <a href="/siguiendo">Siguiendo</a>
+          <a href="/cron" data-admin hidden>Cron / lotes</a>
+          <a href="/analisis-producto" data-admin hidden>Análisis de producto</a>
+          <a href="/estadisticas" data-admin hidden>Estadísticas</a>
+          <a href="/usuarios" data-admin hidden>Usuarios</a>
+          <a href="/ofertas" data-admin hidden>Configurar</a>
+          <a href="#" data-logout>Salir</a>
+        </div>
+      </details>
+    </nav>
+    <div class="theme-toggle" role="group" aria-label="Apariencia">
+      <button type="button" class="secondary" data-theme-set="auto" title="Según la hora y tu ubicación">Auto</button>
+      <button type="button" class="secondary" data-theme-set="day">Día</button>
+      <button type="button" class="secondary" data-theme-set="night">Noche</button>
+    </div>
+  </header>
+
+  <main class="settings">
+    <p id="flash" class="summary" hidden></p>
+
+    <section class="panel">
+      <p class="muted">
+        Cada vez que una tienda baja un precio se revisa si esa baja es real o si solo deshace
+        un alza de los días anteriores. El número de bajas abre justo esos productos.
+      </p>
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Tienda</th>
+            <th>Bajas de precio</th>
+            <th>De esas, infladas</th>
+            <th>Productos vigilados</th>
+          </tr>
+        </thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </section>
+  </main>
+
+  <script src="/static/prices.js?v=27"></script>
+  <script src="/static/tiendas.js?v=5"></script>
+</body>
+</html>

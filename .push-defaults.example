@@ -1,0 +1,8 @@
+# Defaults locales (NO versionar .push-defaults con secretos de identidad si no quieres).
+#   cp .push-defaults.example .push-defaults
+
+REMOTE_USER=richard
+REMOTE_IP=192.168.1.198
+REMOTE_DIR='~/precios'
+SSH_PORT=2222
+# SSH_IDENTITY=~/.ssh/id_ed25519

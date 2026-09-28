@@ -1,0 +1,13 @@
+version: '3.8'
+services:
+  editor:
+    build: .
+    container_name: precios-editor
+    restart: always
+    environment:
+      - PORT=5008
+      - MONGODB_URI=${MONGODB_URI:-mongodb://precios-mongo:27017/precios}
+    ports:
+      - "5008:5008"
+    volumes:
+      - ./:/app:ro

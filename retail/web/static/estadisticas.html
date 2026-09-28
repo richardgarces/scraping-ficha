@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#258fdf">
+  <title>Estadísticas</title>
+  <script>(function(){var m=localStorage.getItem("retail-theme");if(m==="day"||m==="night"){document.documentElement.dataset.theme=m;return;}var h=new Date().getHours();document.documentElement.dataset.theme=(h>=7&&h<19)?"day":"night";})();</script>
+  <link rel="stylesheet" href="/static/styles.css?v=68">
+</head>
+<body>
+  <header class="top">
+    <div>
+      <p class="eyebrow">Retail Chile</p>
+      <h1>Estadísticas</h1>
+    </div>
+    <form class="desktop-quick-search" action="/catalogo" method="get" role="search">
+      <label class="desktop-search-field"><span class="sr-only">Buscar un producto</span><input name="q" type="search" placeholder="Busca un producto…"></label>
+      <label class="quick-search-toggle" title="Buscar solo en la base de datos"><input name="quick" type="checkbox" value="1" checked><span class="quick-search-long">Búsqueda rápida</span><span class="quick-search-short">Rápida</span></label>
+      <button type="submit" aria-label="Buscar">Buscar</button>
+    </form>
+    <nav class="nav">
+      <a href="/">Explorar</a>
+      <a href="/catalogo">Catálogo</a>
+      <a href="/hoy">Ofertas de hoy</a>
+      <a href="/reales">Ofertas reales</a>
+      <a href="/tiendas">Tiendas</a>
+      <details class="nav-menu" data-login>
+        <summary>Cuenta</summary>
+        <div class="nav-menu-list">
+          <a href="/entrar" data-login-mode="entrar">Entrar</a>
+          <a href="/entrar?modo=inscribir" data-login-mode="inscribir">Inscribirse</a>
+        </div>
+      </details>
+      <details class="nav-menu" data-auth hidden>
+        <summary class="current" data-user-label>Cuenta</summary>
+        <div class="nav-menu-list">
+          <a href="/siguiendo">Siguiendo</a>
+          <a href="/cron" data-admin hidden>Cron / lotes</a>
+          <a href="/analisis-producto" data-admin hidden>Análisis de producto</a>
+          <a href="/estadisticas" class="current" data-admin hidden>Estadísticas</a>
+          <a href="/usuarios" data-admin hidden>Usuarios</a>
+          <a href="/ofertas" data-admin hidden>Configurar</a>
+          <a href="#" data-logout>Salir</a>
+        </div>
+      </details>
+    </nav>
+    <div class="theme-toggle" role="group" aria-label="Apariencia">
+      <button type="button" class="secondary" data-theme-set="auto" title="Según la hora y tu ubicación">Auto</button>
+      <button type="button" class="secondary" data-theme-set="day">Día</button>
+      <button type="button" class="secondary" data-theme-set="night">Noche</button>
+    </div>
+  </header>
+  <main class="settings">
+    <p id="flash" class="summary" hidden></p>
+    <section class="panel">
+      <div class="cron-head">
+        <div>
+          <h2>Ingresos</h2>
+          <p class="muted">Visitantes distintos por IP. No es dinero. Los inicios de sesión no se guardan, así que no hay un conteo de entradas a la cuenta.</p>
+        </div>
+      </div>
+      <div class="stat-cards">
+        <article class="stat-card"><span>Hoy</span><strong id="visitors-today">—</strong></article>
+        <article class="stat-card"><span>Últimos 7 días</span><strong id="visitors-week">—</strong></article>
+        <article class="stat-card"><span>Últimos 30 días</span><strong id="visitors-month">—</strong></article>
+      </div>
+      <div class="stat-follow">
+        <h3>Visitantes por día</h3>
+        <p class="muted">IPs distintas. Últimos 30 días, hora de Santiago.</p>
+      </div>
+      <div id="chart-visitors" class="bars-wrap" role="img" aria-label="Visitantes por día"></div>
+      <div class="stat-follow">
+        <h3>Visitas a páginas</h3>
+        <p id="page-visits-note" class="muted">Cada carga de HTML. Este contador partió con esta versión; los días anteriores salen en 0.</p>
+      </div>
+      <div class="stat-cards">
+        <article class="stat-card"><span>Hoy</span><strong id="pages-today">—</strong></article>
+        <article class="stat-card"><span>Últimos 7 días</span><strong id="pages-week">—</strong></article>
+        <article class="stat-card"><span>Últimos 30 días</span><strong id="pages-month">—</strong></article>
+      </div>
+    </section>
+    <section class="panel">
+      <div class="cron-head">
+        <div>
+          <h2>Búsquedas</h2>
+          <p id="searches-meta" class="muted">Consultas de la caja de búsqueda. No cuenta el cron ni los barridos automáticos.</p>
+        </div>
+      </div>
+      <div class="stat-cards">
+        <article class="stat-card"><span>Hoy</span><strong id="searches-today">—</strong></article>
+        <article class="stat-card"><span>Últimos 7 días</span><strong id="searches-week">—</strong></article>
+        <article class="stat-card"><span>Últimos 30 días</span><strong id="searches-month">—</strong></article>
+      </div>
+      <div class="stat-follow">
+        <h3>Por día</h3>
+        <p class="muted">Últimos 30 días, hora de Santiago.</p>
+      </div>
+      <div id="chart-searches" class="bars-wrap" role="img" aria-label="Búsquedas por día"></div>
+    </section>
+    <section class="panel">
+      <div class="cron-head">
+        <div>
+          <h2>Más buscado</h2>
+          <p class="muted">Últimos 30 días. Mayúsculas y tildes se suman en la misma consulta.</p>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table class="results">
+          <thead>
+            <tr>
+              <th>Consulta</th>
+              <th>Veces</th>
+              <th>Última</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="queries-body">
+            <tr><td colspan="4" class="muted">Cargando…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+    <section class="panel">
+      <div class="cron-head">
+        <div>
+          <h2>Clics</h2>
+          <p id="clicks-meta" class="muted">Cargando…</p>
+        </div>
+      </div>
+      <div class="stat-cards">
+        <article class="stat-card"><span>Hoy</span><strong id="clicks-today">—</strong></article>
+        <article class="stat-card"><span>Últimos 7 días</span><strong id="clicks-week">—</strong></article>
+        <article class="stat-card"><span>Últimos 30 días</span><strong id="clicks-month">—</strong></article>
+      </div>
+      <div class="stat-follow">
+        <h3>Qué se clickeó</h3>
+        <p class="muted">La fecha es el selector de día en Ofertas de hoy y el encabezado Fecha en Tiendas. Los enlaces externos son «Ver oferta» y las URLs que salen a la tienda.</p>
+      </div>
+      <div class="table-wrap">
+        <table class="results">
+          <thead>
+            <tr>
+              <th>Elemento</th>
+              <th>Hoy</th>
+              <th>7 días</th>
+              <th>30 días</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="clicks-body">
+            <tr><td colspan="5" class="muted">Cargando…</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="stat-follow">
+        <h3>Por día</h3>
+        <p class="muted">Últimos 30 días, hora de Santiago.</p>
+      </div>
+      <div id="chart-clicks" class="bars-wrap" role="img" aria-label="Clics por día"></div>
+    </section>
+    <section class="panel">
+      <div class="cron-head">
+        <div>
+          <h2>Peticiones</h2>
+          <p id="stats-meta" class="muted">Cargando…</p>
+        </div>
+        <p id="stats-refresh" class="muted"></p>
+      </div>
+      <div class="stat-cards" id="stat-cards">
+        <article class="stat-card"><span>Hoy</span><strong id="total-today">—</strong></article>
+        <article class="stat-card"><span>Últimos 7 días</span><strong id="total-week">—</strong></article>
+        <article class="stat-card"><span>Últimos 30 días</span><strong id="total-month">—</strong></article>
+      </div>
+    </section>
+    <section class="panel">
+      <div class="cron-head">
+        <div>
+          <h2>Por día</h2>
+          <p class="muted">Últimos 30 días, hora de Santiago.</p>
+        </div>
+      </div>
+      <div id="chart-days" class="bars-wrap" role="img" aria-label="Peticiones por día"></div>
+    </section>
+    <section class="panel">
+      <div class="cron-head">
+        <div>
+          <h2>Por hora del día</h2>
+          <p class="muted">Hoy y el promedio de los últimos 30 días.</p>
+        </div>
+        <p class="muted chart-legend"><span class="swatch today"></span> Hoy <span class="swatch avg"></span> Promedio</p>
+      </div>
+      <div id="chart-hours" class="bars-wrap" role="img" aria-label="Peticiones por hora"></div>
+    </section>
+    <section class="panel">
+      <div class="cron-head">
+        <div>
+          <h2>De dónde llegan</h2>
+          <p class="muted">IP del visitante (primera de X-Forwarded-For) y país si Cloudflare ya lo envió. Últimos 30 días.</p>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table class="results">
+          <thead>
+            <tr>
+              <th>IP</th>
+              <th>País</th>
+              <th>Peticiones</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="origins-body">
+            <tr><td colspan="4" class="muted">Cargando…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+    <section class="panel">
+      <div class="cron-head">
+        <div>
+          <h2>Por sección</h2>
+          <p class="muted">Misma ventana de 30 días.</p>
+        </div>
+      </div>
+      <div id="chart-groups" class="bars-wrap" role="img" aria-label="Peticiones por sección"></div>
+    </section>
+  </main>
+  <script src="/static/prices.js?v=27"></script>
+  <script src="/static/estadisticas.js?v=6"></script>
+</body>
+</html>

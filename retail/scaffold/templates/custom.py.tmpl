@@ -1,0 +1,102 @@
+from __future__ import annotations
+
+from collections.abc import Iterator
+from typing import Any
+from urllib.parse import urlparse
+
+from retail.base import StoreClient
+from retail.http import HttpError
+from retail.models import Product, Target
+from retail.parsers import now_iso
+from retail.registry import StoreSpec, register
+
+BASE = "https://__SITE__"
+HEADERS = {
+    "Origin": BASE,
+    "Referer": BASE + "/",
+    "Accept": "application/json, text/html;q=0.9, */*;q=0.8",
+}
+SORT_MAP = {
+    "recomendados": "relevance",
+    "precio_asc": "price_asc",
+    "precio_desc": "price_desc",
+    "rating": "rating",
+}
+
+
+def parse___STORE_ID___target(value: str) -> Target:
+    raw = value.strip()
+    if raw.startswith(("http://", "https://")):
+        parsed = urlparse(raw)
+        parts = [part for part in parsed.path.split("/") if part]
+        if parts:
+            return Target(kind="search", query=parts[-1], raw_url=raw)
+        return Target(kind="url", raw_url=raw)
+    return Target(kind="search", query=raw)
+
+
+def listing_item_to_product(item: dict[str, Any], *, source: str | None = None) -> Product:
+    product_id = str(item.get("id") or item.get("product_id") or "")
+    price = item.get("price")
+    return Product(
+        product_id=product_id,
+        sku_id=str(item.get("sku") or product_id),
+        name=str(item.get("name") or "").strip(),
+        brand=item.get("brand") or None,
+        url=item.get("url"),
+        price=int(price) if price not in (None, "") else None,
+        store="__STORE_ID__",
+        source=source,
+        scraped_at=now_iso(),
+    )
+
+
+@register(
+    StoreSpec(
+        id="__STORE_ID__",
+        title="__TITLE__",
+        site="__SITE__",
+        sort_map=SORT_MAP,
+        category_help="ID o slug de categoría",
+        extra_category=__EXTRA_CATEGORY__,
+        platform="custom",
+    )
+)
+class __CLASS_NAME__(StoreClient):
+    def __init__(self, delay: float = 1.0, timeout: float = 30.0, retries: int = 3) -> None:
+        super().__init__(delay=delay, timeout=timeout, retries=retries)
+        self.open_http(HEADERS)
+
+    def parse_target(self, value: str) -> Target:
+        return parse___STORE_ID___target(value)
+
+    def scrape(
+        self,
+        target: str | Target,
+        *,
+        max_pages: int | None = 1,
+        max_items: int | None = None,
+        sort: str | None = None,
+        detalle: bool = False,
+    ) -> list[Product]:
+        parsed = target if isinstance(target, Target) else self.parse_target(target)
+        products: list[Product] = []
+        for item in self._iter_listing(parsed, max_pages=max_pages, max_items=max_items, sort=sort):
+            products.append(listing_item_to_product(item, source=parsed.kind))
+            if max_items is not None and len(products) >= max_items:
+                break
+        return products
+
+    def _iter_listing(
+        self,
+        target: Target,
+        *,
+        max_pages: int | None,
+        max_items: int | None,
+        sort: str | None,
+    ) -> Iterator[dict[str, Any]]:
+        del max_pages, max_items, sort
+        raise HttpError(
+            "Implementa _iter_listing() en retail/sources/__STORE_ID__.py "
+            "usando la API o el HTML público de __TITLE__."
+        )

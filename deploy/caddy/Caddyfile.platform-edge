@@ -1,0 +1,54 @@
+# Bloque de sitio para platform-caddy — NO sustituye el Caddyfile entero.
+# Se fusiona con el existente (rent.meincart.com y el resto se conservan).
+# Instalar: ./scripts/link-platform-caddy.sh
+
+# --- BEGIN precios.meincart.com ---
+# http:// porque TLS termina en Cloudflare Tunnel (igual que rent.meincart.com)
+http://precios.meincart.com, http://precios.meincart.cl {
+	encode gzip zstd
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		Referrer-Policy strict-origin-when-cross-origin
+		-Server
+	}
+
+	handle /api/search/stream* {
+		reverse_proxy precios-web:8080 {
+			flush_interval -1
+		}
+	}
+
+	handle /api/* {
+		reverse_proxy precios-web:8080 {
+			flush_interval -1
+		}
+	}
+
+	handle {
+		reverse_proxy precios-web:8080
+	}
+}
+
+# Dominio corto de las fichas. Requiere que lnk.meincart.cl quede detrás de
+# Cloudflare apuntando a BMAX.
+http://lnk.meincart.cl {
+	encode gzip zstd
+
+	header {
+		X-Content-Type-Options nosniff
+		Referrer-Policy no-referrer
+		-Server
+	}
+
+	handle /o/* {
+		reverse_proxy precios-web:8080
+	}
+
+	handle {
+		redir https://precios.meincart.cl 302
+	}
+}
+# --- END precios.meincart.com ---

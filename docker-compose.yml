@@ -1,0 +1,42 @@
+services:
+  mongo:
+    image: mongo:7
+    container_name: scraping-mongo
+    restart: unless-stopped
+    # No publicar el puerto en el host en despliegues compartidos
+    environment:
+      MONGO_INITDB_DATABASE: scraping
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.runCommand({ ping: 1 }).ok"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  qdrant:
+    image: qdrant/qdrant:v1.13.6
+    container_name: scraping-qdrant
+    restart: unless-stopped
+    # No publicar puertos en el host; usar la red de Docker
+    volumes:
+      - qdrant_data:/qdrant/storage
+
+  redis:
+    image: redis:7-alpine
+    container_name: scraping-redis
+    restart: unless-stopped
+    # No publicar el puerto en el host en despliegues compartidos
+    command: redis-server --save 60 1 --loglevel warning
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+volumes:
+  mongo_data:
+  qdrant_data:
+  redis_data:

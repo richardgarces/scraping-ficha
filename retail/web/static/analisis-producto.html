@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#258fdf">
+  <title>Análisis de producto</title>
+  <script>(function(){var m=localStorage.getItem("retail-theme");if(m==="day"||m==="night"){document.documentElement.dataset.theme=m;return;}var h=new Date().getHours();document.documentElement.dataset.theme=(h>=7&&h<19)?"day":"night";})();</script>
+  <link rel="stylesheet" href="/static/styles.css?v=68">
+</head>
+<body>
+  <header class="top">
+    <div>
+      <p class="eyebrow">Administración</p>
+      <h1>Análisis de producto</h1>
+    </div>
+    <form class="desktop-quick-search" action="/catalogo" method="get" role="search">
+      <label class="desktop-search-field"><span class="sr-only">Buscar un producto</span><input name="q" type="search" placeholder="Busca un producto…"></label>
+      <label class="quick-search-toggle" title="Buscar solo en la base de datos"><input name="quick" type="checkbox" value="1" checked><span class="quick-search-long">Búsqueda rápida</span><span class="quick-search-short">Rápida</span></label>
+      <button type="submit" aria-label="Buscar">Buscar</button>
+    </form>
+    <nav class="nav">
+      <a href="/">Explorar</a>
+      <a href="/catalogo">Catálogo</a>
+      <a href="/hoy">Ofertas de hoy</a>
+      <a href="/reales">Ofertas reales</a>
+      <a href="/tiendas">Tiendas</a>
+      <details class="nav-menu" data-login>
+        <summary>Cuenta</summary>
+        <div class="nav-menu-list">
+          <a href="/entrar" data-login-mode="entrar">Entrar</a>
+          <a href="/entrar?modo=inscribir" data-login-mode="inscribir">Inscribirse</a>
+        </div>
+      </details>
+      <details class="nav-menu" data-auth hidden>
+        <summary class="current" data-user-label>Cuenta</summary>
+        <div class="nav-menu-list">
+          <a href="/siguiendo">Siguiendo</a>
+          <a href="/cron" data-admin hidden>Cron / lotes</a>
+          <a href="/analisis-producto" class="current" data-admin hidden>Análisis de producto</a>
+          <a href="/estadisticas" data-admin hidden>Estadísticas</a>
+          <a href="/usuarios" data-admin hidden>Usuarios</a>
+          <a href="/ofertas" data-admin hidden>Configurar</a>
+          <a href="#" data-logout>Salir</a>
+        </div>
+      </details>
+    </nav>
+    <div class="theme-toggle" role="group" aria-label="Apariencia">
+      <button type="button" class="secondary" data-theme-set="auto">Auto</button>
+      <button type="button" class="secondary" data-theme-set="day">Día</button>
+      <button type="button" class="secondary" data-theme-set="night">Noche</button>
+    </div>
+  </header>
+  <main class="settings">
+    <section class="panel">
+      <h2>Consultar precio</h2>
+      <p class="muted">Busca el producto nuevamente en las tiendas relacionadas. Se muestra la cantidad exacta cuando la tienda la publica; si solo informa disponibilidad, se indica sin inventar una cifra.</p>
+      <form id="analysis-form" class="analysis-form">
+        <label for="analysis-query">Nombre, modelo, SKU o código de barras</label>
+        <div class="analysis-search">
+          <input id="analysis-query" name="query" type="search" minlength="2" maxlength="160" placeholder="Ej.: Samsung Galaxy S25 256GB" required autofocus>
+          <button id="analysis-submit" type="submit">Analizar ahora</button>
+        </div>
+        <label class="check" data-admin hidden><input id="analysis-live" type="checkbox" checked> Consultar las tiendas ahora</label>
+      </form>
+      <p id="analysis-status" class="summary" aria-live="polite"></p>
+      <p id="analysis-error" class="err" hidden></p>
+      <div id="entity-actions" data-admin hidden>
+        <p class="muted">Selecciona publicaciones para corregir su identidad. Unir las compara como el mismo producto; separar impide que vuelvan a mezclarse automáticamente.</p>
+        <button id="entity-merge" type="button">Unir seleccionados</button>
+        <button id="entity-split" class="secondary" type="button">Separar seleccionados</button>
+        <button id="entity-reset" class="secondary" type="button">Volver a detección automática</button>
+      </div>
+    </section>
+    <section id="analysis-summary" class="panel" hidden></section>
+    <div id="analysis-results" class="analysis-results"></div>
+  </main>
+  <script src="/static/prices.js?v=27"></script>
+  <script src="/static/analisis-producto.js?v=6"></script>
+</body>
+</html>

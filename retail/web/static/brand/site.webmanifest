@@ -1,0 +1,22 @@
+{
+  "name": "Precios · Comparador Chile",
+  "short_name": "Precios",
+  "description": "Compara precios y detecta ofertas reales en tiendas de Chile.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#090b10",
+  "theme_color": "#141821",
+  "icons": [
+    {
+      "src": "/static/brand/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/static/brand/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

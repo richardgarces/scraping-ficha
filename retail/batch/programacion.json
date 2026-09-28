@@ -1,0 +1,12 @@
+{
+  "enabled": true,
+  "hour": 0,
+  "minute": 0,
+  "source": "scrape",
+  "pause": 3.0,
+  "groups": {
+    "mode": "per_group",
+    "stagger_minutes": 45,
+    "enabled": null
+  }
+}

@@ -1,0 +1,11 @@
+from retail.platforms.magento import make_magento_store, parse_magento_target
+
+parse___STORE_ID___target = parse_magento_target
+
+__CLASS_NAME__ = make_magento_store(
+    store_id="__STORE_ID__",
+    title="__TITLE__",
+    site="__SITE__",
+    base="https://__SITE__",
+    category_help="Slug Magento, por ejemplo camas-y-colchones/colchones",
+)

@@ -1,0 +1,498 @@
+{
+  "version": 1,
+  "products": [
+    {
+      "id": "sal",
+      "name": "Sal",
+      "aliases": ["sal de mar", "sal rosada", "sal de mesa"],
+      "groups": ["supermercados", "gastronomia", "farmacias", "retail"]
+    },
+    {
+      "id": "tv",
+      "name": "TV",
+      "aliases": ["televisor", "televisores", "smart tv", "television", "televisiones", "tvs", "tele", "mini led", "miniled"],
+      "groups": ["tecnologia", "retail", "hogar", "supermercados"]
+    },
+    {
+      "id": "celular",
+      "name": "Celular",
+      "aliases": ["celulares", "smartphone", "smartphones", "telefono", "telefonos", "iphone", "galaxy"],
+      "groups": ["tecnologia", "retail", "supermercados"]
+    },
+    {
+      "id": "notebook",
+      "name": "Notebook",
+      "aliases": ["notebooks", "laptop", "laptops", "macbook", "portatil", "portatiles", "computador", "computadora"],
+      "groups": ["tecnologia", "retail"]
+    },
+    {
+      "id": "tablet",
+      "name": "Tablet",
+      "aliases": ["tablets", "ipad", "galaxy tab"],
+      "groups": ["tecnologia", "retail"]
+    },
+    {
+      "id": "monitor",
+      "name": "Monitor",
+      "aliases": ["monitores"],
+      "groups": ["tecnologia", "retail"]
+    },
+    {
+      "id": "audifonos",
+      "name": "Audífonos",
+      "aliases": ["audifono", "auriculares", "airpods", "headphones"],
+      "groups": ["tecnologia", "retail"]
+    },
+    {
+      "id": "parlante",
+      "name": "Parlante",
+      "aliases": ["parlantes", "altavoz", "altavoces", "speaker", "speakers"],
+      "groups": ["tecnologia", "retail", "musica"]
+    },
+    {
+      "id": "consola",
+      "name": "Consola",
+      "aliases": ["consolas", "playstation", "xbox", "nintendo", "nintendo switch"],
+      "groups": ["tecnologia", "retail", "juguetes"]
+    },
+    {
+      "id": "impresora",
+      "name": "Impresora",
+      "aliases": ["impresoras"],
+      "groups": ["tecnologia", "retail"]
+    },
+    {
+      "id": "camara",
+      "name": "Cámara",
+      "aliases": ["camaras", "gopro"],
+      "groups": ["tecnologia", "retail"]
+    },
+    {
+      "id": "mouse",
+      "name": "Mouse",
+      "aliases": ["raton"],
+      "groups": ["tecnologia", "retail"]
+    },
+    {
+      "id": "teclado",
+      "name": "Teclado",
+      "aliases": ["teclados", "keyboard"],
+      "groups": ["tecnologia", "retail"]
+    },
+    {
+      "id": "router",
+      "name": "Router",
+      "aliases": ["routers", "wifi"],
+      "groups": ["tecnologia", "retail"]
+    },
+    {
+      "id": "disco",
+      "name": "Disco",
+      "aliases": ["ssd", "nvme", "hdd", "disco duro", "disco ssd"],
+      "groups": ["tecnologia", "retail"]
+    },
+    {
+      "id": "refrigerador",
+      "name": "Refrigerador",
+      "aliases": ["refrigeradores", "freezer", "congelador", "refrigeradora"],
+      "groups": ["hogar", "retail", "supermercados"]
+    },
+    {
+      "id": "lavadora",
+      "name": "Lavadora",
+      "aliases": ["lavadoras", "secadora", "secadoras"],
+      "groups": ["hogar", "retail"]
+    },
+    {
+      "id": "microondas",
+      "name": "Microondas",
+      "aliases": [],
+      "groups": ["hogar", "retail", "supermercados"]
+    },
+    {
+      "id": "aspiradora",
+      "name": "Aspiradora",
+      "aliases": ["aspiradoras"],
+      "groups": ["hogar", "retail", "ferreteria"]
+    },
+    {
+      "id": "colchon",
+      "name": "Colchón",
+      "aliases": ["colchones"],
+      "groups": ["hogar", "retail"]
+    },
+    {
+      "id": "cafetera",
+      "name": "Cafetera",
+      "aliases": ["cafeteras"],
+      "groups": ["hogar", "retail", "gastronomia"]
+    },
+    {
+      "id": "licuadora",
+      "name": "Licuadora",
+      "aliases": ["licuadoras", "blender"],
+      "groups": ["hogar", "retail", "supermercados"]
+    },
+    {
+      "id": "plancha",
+      "name": "Plancha",
+      "aliases": ["planchas"],
+      "groups": ["hogar", "retail"]
+    },
+    {
+      "id": "hervidor",
+      "name": "Hervidor",
+      "aliases": ["hervidores"],
+      "groups": ["hogar", "retail", "supermercados"]
+    },
+    {
+      "id": "freidora",
+      "name": "Freidora",
+      "aliases": ["freidoras", "air fryer", "airfryer", "freidora de aire"],
+      "groups": ["hogar", "retail", "supermercados"]
+    },
+    {
+      "id": "sofa",
+      "name": "Sofá",
+      "aliases": ["sofas", "sillon", "sillones"],
+      "groups": ["hogar", "retail"]
+    },
+    {
+      "id": "silla",
+      "name": "Silla",
+      "aliases": ["sillas"],
+      "groups": ["hogar", "retail"]
+    },
+    {
+      "id": "almohada",
+      "name": "Almohada",
+      "aliases": ["almohadas"],
+      "groups": ["hogar", "retail", "supermercados"]
+    },
+    {
+      "id": "toalla",
+      "name": "Toalla",
+      "aliases": ["toallas"],
+      "groups": ["hogar", "supermercados", "retail"]
+    },
+    {
+      "id": "sabanas",
+      "name": "Sábanas",
+      "aliases": ["sabana"],
+      "groups": ["hogar", "retail", "supermercados"]
+    },
+    {
+      "id": "aire-acondicionado",
+      "name": "Aire acondicionado",
+      "aliases": ["aire acondicionado", "split", "climatizador"],
+      "groups": ["hogar", "ferreteria", "retail"]
+    },
+    {
+      "id": "calefactor",
+      "name": "Calefactor",
+      "aliases": ["calefactores", "estufa electrica"],
+      "groups": ["hogar", "ferreteria", "retail"]
+    },
+    {
+      "id": "taladro",
+      "name": "Taladro",
+      "aliases": ["taladros"],
+      "groups": ["ferreteria", "retail"]
+    },
+    {
+      "id": "sierra",
+      "name": "Sierra",
+      "aliases": ["sierras"],
+      "groups": ["ferreteria", "retail"]
+    },
+    {
+      "id": "pintura",
+      "name": "Pintura",
+      "aliases": ["pinturas"],
+      "groups": ["ferreteria", "retail"]
+    },
+    {
+      "id": "ampolleta",
+      "name": "Ampolleta",
+      "aliases": ["ampolletas", "foco", "focos", "bombilla", "bombillas"],
+      "groups": ["ferreteria", "supermercados", "retail"]
+    },
+    {
+      "id": "guitarra",
+      "name": "Guitarra",
+      "aliases": ["guitarras"],
+      "groups": ["musica", "retail"]
+    },
+    {
+      "id": "piano",
+      "name": "Piano",
+      "aliases": ["pianos"],
+      "groups": ["musica", "retail"]
+    },
+    {
+      "id": "labial",
+      "name": "Labial",
+      "aliases": ["labiales", "lipstick", "barra de labios"],
+      "groups": ["belleza", "retail", "supermercados"]
+    },
+    {
+      "id": "perfume",
+      "name": "Perfume",
+      "aliases": ["perfumes", "colonia", "colonias", "fragancia"],
+      "groups": ["belleza", "retail"]
+    },
+    {
+      "id": "shampoo",
+      "name": "Shampoo",
+      "aliases": ["champu", "shampo"],
+      "groups": ["belleza", "supermercados", "farmacias", "retail"]
+    },
+    {
+      "id": "zapatillas",
+      "name": "Zapatillas",
+      "aliases": ["zapatilla", "sneakers", "tennis"],
+      "groups": ["calzado", "deporte", "retail"]
+    },
+    {
+      "id": "zapatos",
+      "name": "Zapatos",
+      "aliases": ["zapato"],
+      "groups": ["calzado", "retail"]
+    },
+    {
+      "id": "jeans",
+      "name": "Jeans",
+      "aliases": ["jean", "vaqueros"],
+      "groups": ["moda", "retail"]
+    },
+    {
+      "id": "polera",
+      "name": "Polera",
+      "aliases": ["poleras", "remera", "remeras"],
+      "groups": ["moda", "retail"]
+    },
+    {
+      "id": "pantalon",
+      "name": "Pantalón",
+      "aliases": ["pantalones"],
+      "groups": ["moda", "retail"]
+    },
+    {
+      "id": "chaqueta",
+      "name": "Chaqueta",
+      "aliases": ["chaquetas", "chamarra", "cortaviento"],
+      "groups": ["moda", "retail", "deporte"]
+    },
+    {
+      "id": "bicicleta",
+      "name": "Bicicleta",
+      "aliases": ["bicicletas", "bici", "bike"],
+      "groups": ["deporte", "retail"]
+    },
+    {
+      "id": "pesas",
+      "name": "Pesas",
+      "aliases": ["mancuerna", "mancuernas"],
+      "groups": ["deporte", "retail"]
+    },
+    {
+      "id": "carpa",
+      "name": "Carpa",
+      "aliases": ["carpas"],
+      "groups": ["deporte", "retail", "ferreteria"]
+    },
+    {
+      "id": "leche",
+      "name": "Leche",
+      "aliases": ["leches"],
+      "groups": ["supermercados"]
+    },
+    {
+      "id": "vino",
+      "name": "Vino",
+      "aliases": ["vinos"],
+      "groups": ["gastronomia", "supermercados", "retail"]
+    },
+    {
+      "id": "cerveza",
+      "name": "Cerveza",
+      "aliases": ["cervezas"],
+      "groups": ["supermercados", "gastronomia"]
+    },
+    {
+      "id": "cafe",
+      "name": "Café",
+      "aliases": ["cafes"],
+      "groups": ["supermercados", "gastronomia"]
+    },
+    {
+      "id": "arroz",
+      "name": "Arroz",
+      "aliases": [],
+      "groups": ["supermercados"]
+    },
+    {
+      "id": "aceite",
+      "name": "Aceite",
+      "aliases": [],
+      "groups": ["supermercados"]
+    },
+    {
+      "id": "pan",
+      "name": "Pan",
+      "aliases": [],
+      "groups": ["supermercados"]
+    },
+    {
+      "id": "detergente",
+      "name": "Detergente",
+      "aliases": ["detergentes"],
+      "groups": ["supermercados"]
+    },
+    {
+      "id": "juguete",
+      "name": "Juguete",
+      "aliases": ["juguetes"],
+      "groups": ["juguetes", "retail", "infantil"]
+    },
+    {
+      "id": "panales",
+      "name": "Pañales",
+      "aliases": ["panal"],
+      "groups": ["infantil", "supermercados", "farmacias", "retail"]
+    },
+    {
+      "id": "cuna",
+      "name": "Cuna",
+      "aliases": ["cunas"],
+      "groups": ["infantil", "hogar", "retail"]
+    },
+    {
+      "id": "silla-auto",
+      "name": "Silla de auto",
+      "aliases": ["silla de auto", "silla auto", "butaca auto"],
+      "groups": ["infantil", "retail"]
+    },
+    {
+      "id": "libro",
+      "name": "Libro",
+      "aliases": ["libros"],
+      "groups": ["libreria", "retail"]
+    },
+    {
+      "id": "lentes",
+      "name": "Lentes",
+      "aliases": ["anteojos", "gafas", "lentes de sol"],
+      "groups": ["opticas", "retail"]
+    },
+    {
+      "id": "reloj",
+      "name": "Reloj",
+      "aliases": ["relojes", "smartwatch", "smartwatches", "smart band", "smartband"],
+      "groups": ["relojeria", "retail", "tecnologia"]
+    },
+    {
+      "id": "alimento-perro",
+      "name": "Alimento para perro",
+      "aliases": ["alimento perro", "comida perro", "alimento para perros", "comida para perros"],
+      "groups": ["supermercados", "retail"]
+    },
+    {
+      "id": "alimento-gato",
+      "name": "Alimento para gato",
+      "aliases": ["alimento gato", "comida gato", "alimento para gatos", "comida para gatos"],
+      "groups": ["supermercados", "retail"]
+    },
+    {
+      "id": "proteina",
+      "name": "Proteína",
+      "aliases": ["proteinas", "whey", "protein"],
+      "groups": ["deporte", "supermercados", "farmacias"]
+    },
+    {
+      "id": "medicamento",
+      "name": "Medicamento",
+      "aliases": [
+        "medicamentos",
+        "farmaco",
+        "farmacos",
+        "remedio",
+        "remedios",
+        "pastilla",
+        "pastillas",
+        "farmacia",
+        "analgesico",
+        "analgesicos",
+        "antibiotico",
+        "antibioticos",
+        "antigripal",
+        "antihistaminico",
+        "jarabe",
+        "jarabes",
+        "capsula",
+        "capsulas",
+        "comprimido",
+        "comprimidos",
+        "tableta",
+        "tabletas",
+        "inyeccion",
+        "inyecciones",
+        "inyectable",
+        "inyectables",
+        "solucion oral",
+        "suspension oral",
+        "gotas oftalmicas",
+        "gotas nasales",
+        "unguento",
+        "pomada",
+        "ampolla",
+        "supositorio",
+        "amoxicilina",
+        "loratadina",
+        "cetirizina",
+        "omeprazol",
+        "pantoprazol",
+        "losartan",
+        "enalapril",
+        "atorvastatina",
+        "metformina",
+        "diclofenaco",
+        "naproxeno",
+        "salbutamol",
+        "aspirina",
+        "acido acetilsalicilico"
+      ],
+      "groups": ["farmacias", "supermercados", "retail"]
+    },
+    {
+      "id": "ozempic",
+      "name": "Ozempic",
+      "aliases": ["semaglutida", "wegovy", "rybelsus"],
+      "groups": ["farmacias", "supermercados", "retail"]
+    },
+    {
+      "id": "paracetamol",
+      "name": "Paracetamol",
+      "aliases": ["acetaminofeno"],
+      "groups": ["farmacias", "supermercados"]
+    },
+    {
+      "id": "ibuprofeno",
+      "name": "Ibuprofeno",
+      "aliases": [],
+      "groups": ["farmacias", "supermercados"]
+    },
+    {
+      "id": "vitaminas",
+      "name": "Vitaminas",
+      "aliases": ["vitamina"],
+      "groups": ["farmacias", "supermercados"]
+    },
+    {
+      "id": "maleta",
+      "name": "Maleta",
+      "aliases": ["maletas", "valija", "valijas"],
+      "groups": ["retail", "moda"]
+    }
+  ]
+}

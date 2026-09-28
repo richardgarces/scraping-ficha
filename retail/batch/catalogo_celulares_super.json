@@ -1,0 +1,126 @@
+{
+  "title": "Celulares y supermercado",
+  "comment": "Categorías de telefonía y despensa para buscar en paralelo (3 tiendas a la vez).",
+  "default_stores": [
+    "falabella",
+    "ripley",
+    "paris",
+    "pcfactory",
+    "lider",
+    "tottus"
+  ],
+  "products": [
+    {
+      "id": "cat-smartphones",
+      "query": "celular smartphone",
+      "category": "smartphones",
+      "falabella_category_id": "cat720161"
+    },
+    {
+      "id": "cat-celulares",
+      "query": "celulares",
+      "category": "smartphones",
+      "falabella_category_id": "cat2018"
+    },
+    {
+      "id": "cat-celulares-basicos",
+      "query": "celular basico",
+      "category": "smartphones",
+      "falabella_category_id": "cat1280018"
+    },
+    {
+      "id": "cat-iphone",
+      "query": "iphone",
+      "category": "smartphones"
+    },
+    {
+      "id": "cat-galaxy",
+      "query": "celular galaxy",
+      "category": "smartphones"
+    },
+    {
+      "id": "cat-leche",
+      "query": "leche",
+      "category": "supermercado",
+      "falabella_category_id": "CATG10225"
+    },
+    {
+      "id": "cat-arroz",
+      "query": "arroz",
+      "category": "supermercado",
+      "falabella_category_id": "CATG10290"
+    },
+    {
+      "id": "cat-huevos",
+      "query": "huevos",
+      "category": "supermercado",
+      "falabella_category_id": "CATG10223"
+    },
+    {
+      "id": "cat-yogurt",
+      "query": "yogurt",
+      "category": "supermercado",
+      "falabella_category_id": "CATG10222"
+    },
+    {
+      "id": "cat-pastas",
+      "query": "fideos",
+      "category": "supermercado",
+      "falabella_category_id": "CATG10306"
+    },
+    {
+      "id": "cat-aceite",
+      "query": "aceite",
+      "category": "supermercado",
+      "falabella_category_id": "cat14090030"
+    },
+    {
+      "id": "cat-cafe",
+      "query": "cafe",
+      "category": "supermercado",
+      "falabella_category_id": "CATG10240"
+    },
+    {
+      "id": "cat-te",
+      "query": "te",
+      "category": "supermercado",
+      "falabella_category_id": "CATG10241"
+    },
+    {
+      "id": "cat-cereales",
+      "query": "cereal",
+      "category": "supermercado",
+      "falabella_category_id": "CATG10245"
+    },
+    {
+      "id": "cat-agua",
+      "query": "agua mineral",
+      "category": "supermercado",
+      "falabella_category_id": "CATG10285"
+    },
+    {
+      "id": "cat-galletas",
+      "query": "galletas",
+      "category": "supermercado",
+      "falabella_category_id": "CATG10248"
+    },
+    {
+      "id": "cat-detergente",
+      "query": "detergente",
+      "category": "supermercado",
+      "falabella_category_id": "CATG10648"
+    },
+    {
+      "id": "cat-papel-higienico",
+      "query": "papel higienico",
+      "category": "supermercado",
+      "falabella_category_id": "CATG10621"
+    },
+    {
+      "id": "cat-lavaloza",
+      "query": "lavaloza",
+      "category": "supermercado",
+      "falabella_category_id": "CATG10625"
+    }
+  ]
+}

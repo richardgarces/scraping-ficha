@@ -1,0 +1,8 @@
+# Dependencias opcionales para normalización (Ollama), embeddings y Qdrant
+beautifulsoup4
+requests
+qdrant-client
+sentence-transformers
+torch
+
+# Nota: Ollama no es una librería pip; instala Ollama localmente desde https://ollama.com

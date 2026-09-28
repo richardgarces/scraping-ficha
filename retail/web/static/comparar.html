@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#258fdf">
+  <title>Comparar productos</title>
+  <script>(function(){var m=localStorage.getItem("retail-theme");if(m==="day"||m==="night"){document.documentElement.dataset.theme=m;return;}var h=new Date().getHours();document.documentElement.dataset.theme=(h>=7&&h<19)?"day":"night";})();</script>
+  <link rel="stylesheet" href="/static/styles.css?v=68">
+</head>
+<body>
+  <header class="top">
+    <div><p class="eyebrow">Retail Chile</p><h1>Comparar productos</h1></div>
+    <form class="desktop-quick-search" action="/catalogo" method="get" role="search">
+      <label class="desktop-search-field"><span class="sr-only">Buscar un producto</span><input name="q" type="search" placeholder="Busca un producto…"></label>
+      <label class="quick-search-toggle" title="Buscar solo en la base de datos"><input name="quick" type="checkbox" value="1" checked><span class="quick-search-long">Búsqueda rápida</span><span class="quick-search-short">Rápida</span></label>
+      <button type="submit" aria-label="Buscar">Buscar</button>
+    </form>
+    <nav class="nav">
+      <a href="/">Explorar</a><a href="/catalogo">Catálogo</a><a href="/hoy">Ofertas de hoy</a>
+      <a href="/reales">Ofertas reales</a><a href="/tiendas">Tiendas</a>
+      <details class="nav-menu" data-login>
+        <summary>Cuenta</summary>
+        <div class="nav-menu-list">
+          <a href="/entrar" data-login-mode="entrar">Entrar</a>
+          <a href="/entrar?modo=inscribir" data-login-mode="inscribir">Inscribirse</a>
+        </div>
+      </details>
+      <details class="nav-menu" data-auth hidden>
+        <summary data-user-label>Cuenta</summary>
+        <div class="nav-menu-list">
+          <a href="/siguiendo">Siguiendo</a>
+          <a href="/cron" data-admin hidden>Cron / lotes</a>
+          <a href="/analisis-producto" data-admin hidden>Análisis de producto</a>
+          <a href="/estadisticas" data-admin hidden>Estadísticas</a>
+          <a href="/usuarios" data-admin hidden>Usuarios</a>
+          <a href="/ofertas" data-admin hidden>Configurar</a>
+          <a href="#" data-logout>Salir</a>
+        </div>
+      </details>
+    </nav>
+    <div class="theme-toggle" role="group" aria-label="Apariencia">
+      <button type="button" class="secondary" data-theme-set="auto">Auto</button>
+      <button type="button" class="secondary" data-theme-set="day">Día</button>
+      <button type="button" class="secondary" data-theme-set="night">Noche</button>
+    </div>
+  </header>
+
+  <main class="compare-page">
+    <div class="compare-page-actions">
+      <a id="back-product" class="back-results" href="/">← Volver a la ficha</a>
+      <span class="muted">Puedes comparar hasta cuatro productos.</span>
+    </div>
+    <p id="flash" class="summary" hidden></p>
+
+    <section class="panel compare-search-panel">
+      <div>
+        <h2>Buscar productos</h2>
+        <p class="muted">Mostramos solamente productos con características técnicas disponibles para que la comparación sea útil. Puedes buscar por nombre, marca o modelo.</p>
+      </div>
+      <form id="compare-search-form" class="compare-search-form">
+        <input id="compare-search" type="search" placeholder="Nombre, marca o modelo" aria-label="Buscar producto para comparar" autocomplete="off">
+        <button class="btn" type="submit">Buscar</button>
+      </form>
+      <p id="compare-status" class="muted" role="status"></p>
+      <div id="compare-results" class="compare-results compare-page-results"></div>
+    </section>
+
+    <section class="panel compare-selection-panel">
+      <div class="compare-section-title"><h2>Seleccionados</h2><span id="selected-count" class="badge">0 de 4</span></div>
+      <div id="compare-selected" class="compare-selected"></div>
+      <div id="compare-table" class="compare-table-wrap"></div>
+    </section>
+  </main>
+  <script src="/static/prices.js?v=27"></script>
+  <script src="/static/comparar.js?v=5"></script>
+</body>
+</html>

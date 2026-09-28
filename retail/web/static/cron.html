@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#258fdf">
+  <title>Cron / lotes</title>
+  <script>(function(){var m=localStorage.getItem("retail-theme");if(m==="day"||m==="night"){document.documentElement.dataset.theme=m;return;}var h=new Date().getHours();document.documentElement.dataset.theme=(h>=7&&h<19)?"day":"night";})();</script>
+  <link rel="stylesheet" href="/static/styles.css?v=68">
+</head>
+<body>
+  <header class="top">
+    <div>
+      <p class="eyebrow">Retail Chile</p>
+      <h1>Cron / lotes</h1>
+    </div>
+    <form class="desktop-quick-search" action="/catalogo" method="get" role="search">
+      <label class="desktop-search-field"><span class="sr-only">Buscar un producto</span><input name="q" type="search" placeholder="Busca un producto…"></label>
+      <label class="quick-search-toggle" title="Buscar solo en la base de datos"><input name="quick" type="checkbox" value="1" checked><span class="quick-search-long">Búsqueda rápida</span><span class="quick-search-short">Rápida</span></label>
+      <button type="submit" aria-label="Buscar">Buscar</button>
+    </form>
+    <nav class="nav">
+      <a href="/">Explorar</a>
+      <a href="/catalogo">Catálogo</a>
+      <a href="/hoy">Ofertas de hoy</a>
+      <a href="/reales">Ofertas reales</a>
+      <a href="/tiendas">Tiendas</a>
+      <details class="nav-menu" data-login>
+        <summary>Cuenta</summary>
+        <div class="nav-menu-list">
+          <a href="/entrar" data-login-mode="entrar">Entrar</a>
+          <a href="/entrar?modo=inscribir" data-login-mode="inscribir">Inscribirse</a>
+        </div>
+      </details>
+      <details class="nav-menu" data-auth hidden>
+        <summary class="current" data-user-label>Cuenta</summary>
+        <div class="nav-menu-list">
+          <a href="/siguiendo">Siguiendo</a>
+          <a href="/cron" class="current" data-admin hidden>Cron / lotes</a>
+          <a href="/analisis-producto" data-admin hidden>Análisis de producto</a>
+          <a href="/estadisticas" data-admin hidden>Estadísticas</a>
+          <a href="/usuarios" data-admin hidden>Usuarios</a>
+          <a href="/ofertas" data-admin hidden>Configurar</a>
+          <a href="#" data-logout>Salir</a>
+        </div>
+      </details>
+    </nav>
+    <div class="theme-toggle" role="group" aria-label="Apariencia">
+      <button type="button" class="secondary" data-theme-set="auto" title="Según la hora y tu ubicación">Auto</button>
+      <button type="button" class="secondary" data-theme-set="day">Día</button>
+      <button type="button" class="secondary" data-theme-set="night">Noche</button>
+    </div>
+  </header>
+  <main class="settings">
+    <p id="flash" class="summary" hidden></p>
+    <section class="panel">
+      <div class="cron-head">
+        <div>
+          <h2>Scraping básico</h2>
+          <p class="muted">Recorre los productos ya guardados, uno por uno. Según la categoría de cada uno, busca en las tiendas de ese grupo: inserta los nuevos y actualiza el precio de los que ya existen.</p>
+        </div>
+      </div>
+      <form id="basic-scrape-form" class="cron-store-form">
+        <button type="submit" id="basic-scrape-run">Scraping básico</button>
+      </form>
+      <p id="basic-scrape-meta" class="muted cron-basic-counts"></p>
+      <div class="table-wrap" id="basic-scrape-wrap" hidden>
+        <table class="results cron-table">
+          <thead>
+            <tr>
+              <th>Trabajo</th>
+              <th>Estado</th>
+              <th>Progreso</th>
+              <th>Última corrida</th>
+            </tr>
+          </thead>
+          <tbody id="basic-scrape-body"></tbody>
+        </table>
+      </div>
+    </section>
+    <section class="panel">
+      <div class="cron-head">
+        <div>
+          <h2>Scraping de una tienda</h2>
+          <p class="muted">Elige una tienda y recorre las consultas de catálogo de su grupo, solo en esa tienda. Si hay un árbol de categorías guardado, también lo incluye.</p>
+        </div>
+      </div>
+      <form id="store-scrape-form" class="cron-store-form">
+        <label>Tienda
+          <select id="store-select" name="tienda" required>
+            <option value="">Elegir tienda…</option>
+          </select>
+        </label>
+        <button type="submit" id="store-run" disabled>Correr scraping</button>
+      </form>
+      <div class="table-wrap" id="store-jobs-wrap" hidden>
+        <table class="results cron-table">
+          <thead>
+            <tr>
+              <th>Tienda</th>
+              <th>Estado</th>
+              <th>Progreso</th>
+              <th>Última corrida</th>
+            </tr>
+          </thead>
+          <tbody id="store-jobs-body"></tbody>
+        </table>
+      </div>
+    </section>
+    <section class="panel">
+      <div class="cron-head">
+        <div>
+          <h2>Corridas por grupo</h2>
+          <p id="cron-meta" class="muted">Cargando…</p>
+        </div>
+        <div class="cron-controls">
+          <p id="cron-refresh" class="muted"></p>
+          <button id="cron-toggle" type="button" class="secondary" disabled>Pausar corridas</button>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table class="results cron-table">
+          <thead>
+            <tr>
+              <th>Grupo</th>
+              <th>Horario</th>
+              <th>Estado</th>
+              <th>Progreso</th>
+              <th>Última corrida</th>
+            </tr>
+          </thead>
+          <tbody id="cron-body">
+            <tr><td colspan="5" class="muted">Cargando…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+  <script src="/static/prices.js?v=27"></script>
+  <script src="/static/cron.js?v=7"></script>
+</body>
+</html>

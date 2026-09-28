@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#258fdf">
+  <title>Ofertas y alertas</title>
+  <script>(function(){var m=localStorage.getItem("retail-theme");if(m==="day"||m==="night"){document.documentElement.dataset.theme=m;return;}var h=new Date().getHours();document.documentElement.dataset.theme=(h>=7&&h<19)?"day":"night";})();</script>
+  <link rel="stylesheet" href="/static/styles.css?v=68">
+</head>
+<body>
+  <header class="top">
+    <div>
+      <p class="eyebrow">Retail Chile</p>
+      <h1>Ofertas y alertas</h1>
+    </div>
+    <form class="desktop-quick-search" action="/catalogo" method="get" role="search">
+      <label class="desktop-search-field"><span class="sr-only">Buscar un producto</span><input name="q" type="search" placeholder="Busca un producto…"></label>
+      <label class="quick-search-toggle" title="Buscar solo en la base de datos"><input name="quick" type="checkbox" value="1" checked><span class="quick-search-long">Búsqueda rápida</span><span class="quick-search-short">Rápida</span></label>
+      <button type="submit" aria-label="Buscar">Buscar</button>
+    </form>
+    <nav class="nav">
+      <a href="/">Explorar</a>
+      <a href="/catalogo">Catálogo</a>
+      <a href="/hoy">Ofertas de hoy</a>
+      <a href="/reales">Ofertas reales</a>
+      <a href="/tiendas">Tiendas</a>
+      <details class="nav-menu" data-login>
+        <summary>Cuenta</summary>
+        <div class="nav-menu-list">
+          <a href="/entrar" data-login-mode="entrar">Entrar</a>
+          <a href="/entrar?modo=inscribir" data-login-mode="inscribir">Inscribirse</a>
+        </div>
+      </details>
+      <details class="nav-menu" data-auth hidden>
+        <summary class="current" data-user-label>Cuenta</summary>
+        <div class="nav-menu-list">
+          <a href="/siguiendo">Siguiendo</a>
+          <a href="/cron" data-admin hidden>Cron / lotes</a>
+          <a href="/analisis-producto" data-admin hidden>Análisis de producto</a>
+          <a href="/estadisticas" data-admin hidden>Estadísticas</a>
+          <a href="/usuarios" data-admin hidden>Usuarios</a>
+          <a href="/ofertas" class="current" data-admin hidden>Configurar</a>
+          <a href="#" data-logout>Salir</a>
+        </div>
+      </details>
+    </nav>
+    <div class="theme-toggle" role="group" aria-label="Apariencia">
+      <button type="button" class="secondary" data-theme-set="auto" title="Según la hora y tu ubicación">Auto</button>
+      <button type="button" class="secondary" data-theme-set="day">Día</button>
+      <button type="button" class="secondary" data-theme-set="night">Noche</button>
+    </div>
+  </header>
+  <main class="settings">
+    <p id="flash" class="summary" hidden></p>
+
+    <div class="settings-grid">
+    <section class="panel">
+      <h2>Reglas de oferta</h2>
+      <form id="rules-form" class="form-grid">
+        <label class="check"><input type="checkbox" name="rule" value="price_drop_percent"> Bajar un % respecto de la última vez</label>
+        <label>Porcentaje mínimo <input type="number" id="price_drop_percent" min="0" max="90" step="0.5"></label>
+        <label class="check"><input type="checkbox" name="rule" value="price_drop_amount"> Bajar un monto en pesos</label>
+        <label>Monto mínimo CLP <input type="number" id="price_drop_amount" min="0" step="1000"></label>
+        <label class="check"><input type="checkbox" name="rule" value="cross_store_gap"> Más barato que otra tienda</label>
+        <label>Brecha mínima % <input type="number" id="cross_store_gap_percent" min="0" max="90" step="0.5"></label>
+        <label class="check"><input type="checkbox" name="rule" value="below_median"> Bajo su precio habitual</label>
+        <label>% bajo la mediana <input type="number" id="below_median_percent" min="0" max="90" step="0.5"></label>
+        <label class="check span"><input type="checkbox" id="ignore_fake_discounts"> Descartar descuentos falsos (bajas que solo deshacen un alza reciente)</label>
+        <label>Precio mínimo <input type="number" id="min_price" min="0" step="1000"></label>
+        <label>Precio máximo <input type="number" id="max_price" min="0" step="1000" placeholder="sin tope"></label>
+        <button type="submit">Guardar reglas</button>
+      </form>
+    </section>
+
+    <section class="panel">
+      <h2>Medios de alerta</h2>
+      <form id="channels-form" class="form-grid">
+        <fieldset class="sources">
+          <legend>Activar</legend>
+          <label><input type="checkbox" name="channel" value="log"> Log</label>
+          <label><input type="checkbox" name="channel" value="file"> Archivo JSONL</label>
+          <label><input type="checkbox" name="channel" value="telegram"> Telegram</label>
+          <label><input type="checkbox" name="channel" value="email"> Correo</label>
+        </fieldset>
+        <label>Token bot Telegram <input id="telegram_bot_token" type="password" autocomplete="off"></label>
+        <label>Chat ID Telegram <input id="telegram_chat_id" type="text" placeholder="@usuario o id numérico"></label>
+        <p class="muted span">Se usa el chat guardado aquí (o el de la cuenta, si tiene Telegram). Un @usuario de chat privado se resuelve al id numérico al enviar.</p>
+        <label>SMTP host <input id="smtp_host" type="text" placeholder="smtp.gmail.com"></label>
+        <label>SMTP puerto <input id="smtp_port" type="number" value="587"></label>
+        <label>SMTP usuario <input id="smtp_user" type="text"></label>
+        <label>SMTP clave <input id="smtp_password" type="password" autocomplete="off"></label>
+        <label>Remitente <input id="smtp_from" type="email"></label>
+        <label>Destinatario <input id="alert_email_to" type="email"></label>
+        <button type="submit">Guardar canales</button>
+      </form>
+    </section>
+    </div>
+
+    <section class="panel" id="pruebas-aviso">
+      <h2>Pruebas de aviso</h2>
+      <p class="muted">Un mensaje por clic. Telegram usa el chat guardado. El correo va al destinatario de abajo; puedes cambiarlo.</p>
+      <div class="toolbar">
+        <label>Destinatario de la prueba
+          <input id="test_email_to" type="email" value="richardgarces@gmail.com" autocomplete="email">
+        </label>
+        <button type="button" id="test-telegram" class="secondary">Enviar prueba por Telegram</button>
+        <button type="button" id="test-email" class="secondary">Enviar correo de prueba</button>
+      </div>
+      <p id="catalog-limit-note" class="muted"></p>
+    </section>
+
+    <section class="panel">
+      <h2>Programación (cron)</h2>
+      <form id="schedule-form" class="form-grid">
+        <label class="check"><input type="checkbox" id="cron_enabled"> Activar corrida diaria</label>
+        <label>Hora <input id="cron_hour" type="number" min="0" max="23"></label>
+        <label>Minuto <input id="cron_minute" type="number" min="0" max="59"></label>
+        <label>Origen
+          <select id="cron_source">
+            <option value="both">Tiendas y base</option>
+            <option value="scrape">Solo tiendas</option>
+            <option value="db">Solo base</option>
+          </select>
+        </label>
+        <label>Pausa entre productos (s) <input id="cron_pause" type="number" min="0" step="0.5"></label>
+        <p id="cron-line" class="muted span"></p>
+        <p class="muted span">En BMAX el contenedor no tiene crontab: guarda el horario aquí y el host lo instala con <code>prod-menu</code> opción 8 (también en cada deploy).</p>
+        <button type="submit">Guardar horario</button>
+      </form>
+    </section>
+
+    <section class="panel">
+      <h2>Catálogo a vigilar</h2>
+      <div class="toolbar">
+        <button type="button" id="add-product" class="secondary">Agregar producto</button>
+        <button type="button" id="save-catalog">Guardar catálogo</button>
+      </div>
+      <div class="catalog-store-bar">
+        <label>Categoría
+          <select id="catalog-store-group" aria-label="Categoría de tiendas">
+            <option value="">Todas</option>
+          </select>
+        </label>
+        <label class="check" id="catalog-store-all-label">
+          <input type="checkbox" id="catalog-store-group-all">
+          <span id="catalog-store-all-text">Marcar todas las categorías</span>
+        </label>
+      </div>
+      <div id="catalog-stores"></div>
+      <div class="table-wrap">
+      <table class="results catalog-table">
+        <thead><tr><th>Activo</th><th>ID</th><th>Búsqueda</th><th>Categoría</th><th>Marca</th><th></th></tr></thead>
+        <tbody id="catalog-body"></tbody>
+      </table>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Corrida manual</h2>
+      <div class="toolbar">
+        <button type="button" id="run-dry">Simular catálogo</button>
+        <button type="button" id="run-batch">Ejecutar batch ahora</button>
+      </div>
+      <p id="batch-status" class="muted"></p>
+    </section>
+
+    <section class="panel">
+      <h2>Alertas recientes</h2>
+      <ul id="alerts" class="alerts"></ul>
+    </section>
+  </main>
+  <script src="/static/prices.js?v=27"></script>
+  <script src="/static/settings.js?v=11"></script>
+</body>
+</html>

@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#258fdf">
+  <title>Catálogo</title>
+  <script>(function(){var m=localStorage.getItem("retail-theme");if(m==="day"||m==="night"){document.documentElement.dataset.theme=m;return;}var h=new Date().getHours();document.documentElement.dataset.theme=(h>=7&&h<19)?"day":"night";})();</script>
+  <link rel="stylesheet" href="/static/styles.css?v=68">
+</head>
+<body>
+  <header class="top">
+    <div>
+      <p class="eyebrow">Retail Chile</p>
+      <h1>Catálogo</h1>
+    </div>
+    <form class="desktop-quick-search" action="/catalogo" method="get" role="search">
+      <label class="desktop-search-field"><span class="sr-only">Buscar un producto</span><input name="q" type="search" placeholder="Busca un producto…"></label>
+      <label class="quick-search-toggle" title="Buscar solo en la base de datos"><input name="quick" type="checkbox" value="1" checked><span class="quick-search-long">Búsqueda rápida</span><span class="quick-search-short">Rápida</span></label>
+      <button type="submit" aria-label="Buscar">Buscar</button>
+    </form>
+    <nav class="nav">
+      <a href="/">Explorar</a>
+      <a href="/catalogo" class="current">Catálogo</a>
+      <a href="/hoy">Ofertas de hoy</a>
+      <a href="/reales">Ofertas reales</a>
+      <a href="/tiendas">Tiendas</a>
+      <details class="nav-menu" data-login>
+        <summary>Cuenta</summary>
+        <div class="nav-menu-list">
+          <a href="/entrar" data-login-mode="entrar">Entrar</a>
+          <a href="/entrar?modo=inscribir" data-login-mode="inscribir">Inscribirse</a>
+        </div>
+      </details>
+      <details class="nav-menu" data-auth hidden>
+        <summary data-user-label>Cuenta</summary>
+        <div class="nav-menu-list">
+          <a href="/siguiendo">Siguiendo</a>
+          <a href="/cron" data-admin hidden>Cron / lotes</a>
+          <a href="/analisis-producto" data-admin hidden>Análisis de producto</a>
+          <a href="/estadisticas" data-admin hidden>Estadísticas</a>
+          <a href="/usuarios" data-admin hidden>Usuarios</a>
+          <a href="/ofertas" data-admin hidden>Configurar</a>
+          <a href="#" data-logout>Salir</a>
+        </div>
+      </details>
+    </nav>
+    <div class="theme-toggle" role="group" aria-label="Apariencia">
+      <button type="button" class="secondary" data-theme-set="auto" title="Según la hora y tu ubicación">Auto</button>
+      <button type="button" class="secondary" data-theme-set="day">Día</button>
+      <button type="button" class="secondary" data-theme-set="night">Noche</button>
+    </div>
+  </header>
+
+  <section class="catalog-filter-strip" aria-label="Filtros del catálogo">
+    <details id="catalog-filters" class="collapsible-filters">
+      <summary>
+        <span class="filter-summary-title">Filtros</span>
+        <span id="catalog-filter-count" class="filter-count">Solo ofertas</span>
+        <span class="filter-toggle-label" aria-hidden="true"></span>
+      </summary>
+      <div class="toolbar catalog-filter-grid">
+        <label>Categoría <select id="category"></select></label>
+        <label>Tienda <select id="store"></select></label>
+        <label>Marca <select id="brand"></select></label>
+        <label>Precio desde <input id="min_price" type="number" min="0" step="10000" placeholder="$0"></label>
+        <label>Precio hasta <input id="max_price" type="number" min="0" step="10000" placeholder="Sin límite"></label>
+        <label>Ordenar por
+          <select id="sort">
+            <option value="price" selected>Precio menor</option>
+            <option value="updated">Actualizado</option>
+            <option value="price_desc">Precio mayor</option>
+            <option value="name">Nombre</option>
+          </select>
+        </label>
+        <label class="check compact-offer-filter"><input id="only_offers" type="checkbox" checked> Solo ofertas</label>
+      </div>
+    </details>
+  </section>
+
+  <main class="settings">
+    <p id="flash" class="summary" hidden></p>
+    <p id="summary" class="catalog-summary muted"></p>
+
+    <section id="grid" class="card-grid"></section>
+
+    <section class="panel pager">
+      <button type="button" id="prev" class="secondary">Anterior</button>
+      <span id="page-label" class="muted"></span>
+      <button type="button" id="next" class="secondary">Siguiente</button>
+    </section>
+  </main>
+  <script src="/static/prices.js?v=27"></script>
+  <script src="/static/catalogo.js?v=7"></script>
+</body>
+</html>

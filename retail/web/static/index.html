@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#258fdf">
+  <link rel="icon" href="/favicon.ico" sizes="any">
+  <link rel="icon" type="image/png" sizes="32x32" href="/static/brand/favicon-32.png">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+  <link rel="manifest" href="/static/brand/site.webmanifest">
+  <title>Comparador de precios</title>
+  <script>(function(){var m=localStorage.getItem("retail-theme");if(m==="day"||m==="night"){document.documentElement.dataset.theme=m;return;}var h=new Date().getHours();document.documentElement.dataset.theme=(h>=7&&h<19)?"day":"night";})();</script>
+  <link rel="stylesheet" href="/static/styles.css?v=69">
+</head>
+<body>
+  <header class="top">
+    <div>
+      <p class="eyebrow">Compara y ahorra</p>
+      <h1>Precios</h1>
+    </div>
+    <form class="desktop-quick-search" action="/catalogo" method="get" role="search">
+      <label class="desktop-search-field"><span class="sr-only">Buscar un producto</span><input name="q" type="search" placeholder="Busca un producto…"></label>
+      <label class="quick-search-toggle" title="Buscar solo en la base de datos"><input name="quick" type="checkbox" value="1" checked><span class="quick-search-long">Búsqueda rápida</span><span class="quick-search-short">Rápida</span></label>
+      <button type="submit" aria-label="Buscar">Buscar</button>
+    </form>
+    <nav class="nav">
+      <a href="/" class="current">Explorar</a>
+      <a href="/catalogo">Catálogo</a>
+      <a href="/hoy">Ofertas de hoy</a>
+      <a href="/reales">Ofertas reales</a>
+      <a href="/tiendas">Tiendas</a>
+      <details class="nav-menu" data-login>
+        <summary>Cuenta</summary>
+        <div class="nav-menu-list">
+          <a href="/entrar" data-login-mode="entrar">Entrar</a>
+          <a href="/entrar?modo=inscribir" data-login-mode="inscribir">Inscribirse</a>
+        </div>
+      </details>
+      <details class="nav-menu" data-auth hidden>
+        <summary data-user-label>Cuenta</summary>
+        <div class="nav-menu-list">
+          <a href="/siguiendo">Siguiendo</a>
+          <a href="/cron" data-admin hidden>Cron / lotes</a>
+          <a href="/analisis-producto" data-admin hidden>Análisis de producto</a>
+          <a href="/estadisticas" data-admin hidden>Estadísticas</a>
+          <a href="/usuarios" data-admin hidden>Usuarios</a>
+          <a href="/ofertas" data-admin hidden>Configurar</a>
+          <a href="#" data-logout>Salir</a>
+        </div>
+      </details>
+    </nav>
+    <div class="theme-toggle" role="group" aria-label="Apariencia">
+      <button type="button" class="secondary" data-theme-set="auto" title="Según la hora y tu ubicación">Auto</button>
+      <button type="button" class="secondary" data-theme-set="day">Día</button>
+      <button type="button" class="secondary" data-theme-set="night">Noche</button>
+    </div>
+  </header>
+
+  <main>
+    <form id="search-form" class="panel">
+      <div class="search-hero">
+        <label class="query-label">
+          Producto
+          <input id="query" name="q" type="search" placeholder="Ej. celular s25 512gb, notebook gamer, leche colun" required>
+        </label>
+        <button type="submit">Buscar</button>
+      </div>
+      <details id="explore-filters" class="collapsible-filters" data-admin hidden>
+        <summary>
+          <span class="filter-summary-title">Filtros de búsqueda</span>
+          <span id="explore-filter-count" class="filter-count">Sin filtros</span>
+          <span class="filter-toggle-label" aria-hidden="true"></span>
+        </summary>
+        <div class="explore-filter-options">
+      <div class="search-opts">
+        <fieldset class="sources">
+          <legend>Origen</legend>
+          <label><input type="radio" name="source" value="both" checked> Tiendas y base</label>
+          <label><input type="radio" name="source" value="scrape"> Solo tiendas</label>
+          <label><input type="radio" name="source" value="db"> Solo guardado</label>
+        </fieldset>
+        <label class="max-label">
+          Por tienda
+          <input id="max" type="number" min="1" max="20" value="20">
+        </label>
+        <label class="check" title="Quita productos cuyo precio queda muy lejos del resto de esta búsqueda">
+          <input id="price-band" type="checkbox">
+          Filtrar banda de precio
+        </label>
+        <label class="check" title="Ignora las búsquedas guardadas hoy y vuelve a consultar las tiendas">
+          <input id="fresh" type="checkbox">
+          Forzar tiendas
+        </label>
+      </div>
+      <details class="stores-box">
+        <summary>Elegir tiendas</summary>
+        <div class="store-actions">
+          <button type="button" id="all-stores">Todas</button>
+          <button type="button" id="no-stores">Ninguna</button>
+        </div>
+        <div id="store-groups" class="store-groups" role="group" aria-label="Grupos de tiendas"></div>
+        <div id="stores"></div>
+      </details>
+        </div>
+      </details>
+    </form>
+
+    <section id="catalog-categories" class="home-shortcuts" aria-labelledby="shortcut-title" aria-busy="true" hidden>
+      <div class="section-heading">
+        <div>
+          <p class="eyebrow">Explora rápido</p>
+        </div>
+        <a href="/catalogo">Ver todas</a>
+      </div>
+      <div id="category-rail" class="category-rail" role="list" aria-label="Categorías del catálogo"></div>
+    </section>
+
+    <section class="layout">
+      <div>
+        <p id="summary" class="summary" hidden></p>
+        <div data-admin hidden>
+          <details id="search-detail" class="search-detail" hidden>
+            <summary id="search-detail-label">Tiendas</summary>
+            <div class="search-detail-bar">
+              <button type="button" id="search-stop-live" class="secondary search-stop-live" hidden>Detener</button>
+            </div>
+            <div id="store-progress" class="progress"></div>
+          </details>
+        </div>
+        <details id="toolbar" class="collapsible-filters search-result-filters">
+          <summary>
+            <span class="filter-summary-title">Filtros</span>
+            <span id="search-filter-count" class="filter-count">Sin filtros</span>
+            <span class="filter-toggle-label" aria-hidden="true"></span>
+          </summary>
+          <div class="toolbar catalog-filter-grid search-filter-grid">
+          <label>Nombre, marca o código
+            <input id="table-filter" type="search" placeholder="nombre, marca, código…">
+          </label>
+          <details class="facet">
+            <summary>Tiendas</summary>
+            <div id="facet-stores" class="facet-list"></div>
+          </details>
+          <details class="facet">
+            <summary>Marcas</summary>
+            <div id="facet-brands" class="facet-list"></div>
+          </details>
+          <label>Precio desde <input id="min-price" type="number" min="0" step="10000" placeholder="0"></label>
+          <label>Precio hasta <input id="max-price" type="number" min="0" step="10000" placeholder="sin tope"></label>
+          <label>Descuento desde
+            <select id="min-discount">
+              <option value="0">cualquiera</option>
+              <option value="10">10%</option>
+              <option value="20">20%</option>
+              <option value="30">30%</option>
+              <option value="40">40%</option>
+              <option value="50">50%</option>
+              <option value="60">60%</option>
+            </select>
+          </label>
+          <div class="view-toggle" role="group" aria-label="Formato de resultados">
+            <button type="button" id="view-grid" class="secondary">Cuadrícula</button>
+            <button type="button" id="view-list" class="secondary">Lista</button>
+          </div>
+          <label>Por página
+            <select id="page-size">
+              <option value="10">10</option>
+              <option value="20" selected>20</option>
+              <option value="50">50</option>
+              <option value="100">100</option>
+              <option value="500">500</option>
+            </select>
+          </label>
+          <label>Ordenar por
+            <select id="sort-by">
+              <option value="price">Precio</option>
+              <option value="discount">Descuento</option>
+              <option value="saving">Bajo lo habitual</option>
+              <option value="name">Nombre</option>
+            </select>
+          </label>
+          <label class="check compact-filter-check"><input id="only-comparable" type="checkbox"> Solo mismo producto en varias tiendas</label>
+          <label class="check compact-filter-check"><input id="only-lowest" type="checkbox"> Solo menor precio</label>
+          <label class="check compact-filter-check"><input id="only-offers" type="checkbox"> Solo ofertas reales</label>
+          </div>
+        </details>
+        <div id="results"></div>
+        <nav id="pager" class="pager" hidden></nav>
+      </div>
+      <aside class="panel history-panel" data-admin hidden>
+        <h2>Búsquedas guardadas</h2>
+        <ul id="history"></ul>
+      </aside>
+    </section>
+  </main>
+  <div id="search-overlay" class="search-overlay" hidden>
+    <div class="search-loading-panel">
+      <span class="spinner lg" aria-hidden="true"></span>
+      <p id="search-loading-text" role="status" aria-live="polite">Buscando…</p>
+      <p id="search-loading-detail" class="search-loading-detail muted">Estamos preparando la búsqueda.</p>
+      <p id="search-loading-count" class="muted">Preparando…</p>
+      <div id="search-bar" class="search-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="Avance de la búsqueda">
+        <span id="search-bar-fill"></span>
+      </div>
+      <button type="button" id="search-stop" class="secondary search-stop">Detener</button>
+    </div>
+  </div>
+  <script src="/static/prices.js?v=27"></script>
+  <script src="/static/app.js?v=47"></script>
+</body>
+</html>
