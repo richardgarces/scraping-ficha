@@ -872,11 +872,21 @@ class ProductRepository:
     def activate_group_batch_run(self, run_id: str, group: str, data: dict[str, Any]) -> None:
         """Entrega una reserva al worker una sola vez, sin crear otra corrida."""
         from bson import ObjectId
-        from retail.batch.group_scope import GroupBatchBusy
+        from retail.batch.group_scope import GroupBatchBusy, GroupBatchStopped
 
+        item = self.batch_runs.find_one({"_id": ObjectId(run_id)})
+        if not item or item.get("grupo") != group or item.get("scope") != "grupo":
+            raise GroupBatchBusy(group)
+        if item.get("status") != "running":
+            raise GroupBatchBusy(group)
+        if item.get("stop_requested") or item.get("phase") == "stopping":
+            raise GroupBatchStopped()
+        if item.get("phase") != "starting":
+            # Ya activada (p. ej. reintento); solo completa los campos nuevos.
+            self.batch_runs.update_one({"_id": item["_id"], "status": "running"}, {"$set": data})
+            return
         result = self.batch_runs.update_one(
-            {"_id": ObjectId(run_id), "grupo": group, "scope": "grupo",
-             "status": "running", "phase": "starting"},
+            {"_id": item["_id"], "status": "running", "phase": "starting"},
             {"$set": data},
         )
         if not result.matched_count:
@@ -887,9 +897,17 @@ class ProductRepository:
         from bson import ObjectId
         from retail.batch.store_scope import StoreBatchBusy
 
+        item = self.batch_runs.find_one({"_id": ObjectId(run_id)})
+        if not item or item.get("tienda") != store_id or item.get("scope") != "tienda":
+            raise StoreBatchBusy(store_id)
+        if item.get("status") != "running":
+            raise StoreBatchBusy(store_id)
+        if item.get("phase") != "starting":
+            self.batch_runs.update_one({"_id": item["_id"], "status": "running"}, {"$set": data})
+            return
         result = self.batch_runs.update_one(
             {
-                "_id": ObjectId(run_id),
+                "_id": item["_id"],
                 "tienda": store_id,
                 "scope": "tienda",
                 "status": "running",
@@ -1648,26 +1666,90 @@ class ProductRepository:
         return rows
 
     def alert_exists(self, alert: Any) -> bool:
-        day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        """True si esa oferta ya se guardó antes (hoy o un día anterior)."""
+        identity = self._alert_identity_query(alert)
+        if not identity:
+            return False
+        return self.alerts.count_documents(identity, limit=1) > 0
+
+    @staticmethod
+    def _alert_identity_query(alert: Any) -> dict[str, Any]:
         compare_code = getattr(alert, "compare_code", None)
         extra = getattr(alert, "extra", None) or {}
         product_id = extra.get("product_id")
         if compare_code:
-            identity = {"compare_code": compare_code}
-        elif product_id:
-            identity = {"store": getattr(alert, "store", None), "extra.product_id": product_id}
-        else:
-            identity = {"store": getattr(alert, "store", None), "name": getattr(alert, "name", None)}
-        return (
-            self.alerts.count_documents(
-                {
-                    "day": day,
-                    **identity,
-                },
-                limit=1,
-            )
-            > 0
-        )
+            return {"compare_code": compare_code}
+        if product_id:
+            return {"store": getattr(alert, "store", None), "extra.product_id": product_id}
+        name = getattr(alert, "name", None)
+        if not name:
+            return {}
+        return {"store": getattr(alert, "store", None), "name": name}
+
+    @staticmethod
+    def _deal_identity_key(item: dict[str, Any]) -> str:
+        code = str(item.get("compare_code") or "").strip()
+        if code:
+            return f"c:{code}"
+        extra = item.get("extra") if isinstance(item.get("extra"), dict) else {}
+        product_id = str(extra.get("product_id") or item.get("product_id") or "").strip()
+        store = str(item.get("store") or "").strip().lower()
+        if store and product_id:
+            return f"p:{store}|{product_id}"
+        name = str(item.get("name") or "").strip().casefold()
+        return f"n:{store}|{name}"
+
+    def _deal_keys_seen_before(self, day: str, items: list[dict[str, Any]]) -> set[str]:
+        """Identidades que ya tuvieron oferta en un día anterior a `day`."""
+        codes: list[str] = []
+        pairs: list[tuple[str, str]] = []
+        names: list[tuple[str, str]] = []
+        for item in items:
+            code = str(item.get("compare_code") or "").strip()
+            if code:
+                codes.append(code)
+                continue
+            extra = item.get("extra") if isinstance(item.get("extra"), dict) else {}
+            product_id = str(extra.get("product_id") or item.get("product_id") or "").strip()
+            store = str(item.get("store") or "").strip()
+            if store and product_id:
+                pairs.append((store, product_id))
+                continue
+            name = str(item.get("name") or "").strip()
+            if store or name:
+                names.append((store, name))
+
+        prior: set[str] = set()
+        if codes:
+            for doc in self.alerts.find(
+                {"day": {"$lt": day}, "compare_code": {"$in": codes}},
+                {"compare_code": 1},
+            ):
+                found = str(doc.get("compare_code") or "").strip()
+                if found:
+                    prior.add(f"c:{found}")
+        for index in range(0, len(pairs), 150):
+            chunk = pairs[index : index + 150]
+            query = {
+                "day": {"$lt": day},
+                "$or": [{"store": store, "extra.product_id": product_id} for store, product_id in chunk],
+            }
+            for doc in self.alerts.find(query, {"store": 1, "extra.product_id": 1}):
+                store = str(doc.get("store") or "").strip().lower()
+                product_id = str((doc.get("extra") or {}).get("product_id") or "").strip()
+                if store and product_id:
+                    prior.add(f"p:{store}|{product_id}")
+        for index in range(0, len(names), 150):
+            chunk = names[index : index + 150]
+            query = {
+                "day": {"$lt": day},
+                "$or": [{"store": store, "name": name} for store, name in chunk],
+            }
+            for doc in self.alerts.find(query, {"store": 1, "name": 1}):
+                store = str(doc.get("store") or "").strip().lower()
+                name = str(doc.get("name") or "").strip().casefold()
+                prior.add(f"n:{store}|{name}")
+        return prior
 
     @staticmethod
     def public_run_alert(item: dict[str, Any]) -> dict[str, Any]:
@@ -1814,8 +1896,9 @@ class ProductRepository:
         page: int = 1,
         size: int = 80,
     ) -> dict[str, Any]:
-        """Alertas de un día, sin repetir el mismo producto."""
-        query: dict[str, Any] = {"day": day or datetime.now(timezone.utc).strftime("%Y-%m-%d")}
+        """Alertas nuevas de un día: sin repetir producto ni traer las de días previos."""
+        chosen = day or datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        query: dict[str, Any] = {"day": chosen}
         if category:
             query["category"] = category
         if store:
@@ -1834,11 +1917,13 @@ class ProductRepository:
         needle = (text or "").strip()
         if needle:
             query["name"] = {"$regex": re.escape(needle), "$options": "i"}
+        raw = list(self.alerts.find(query).limit(4000))
+        prior = self._deal_keys_seen_before(chosen, raw) if raw else set()
         rows: list[dict[str, Any]] = []
         seen: set[str] = set()
-        for item in self.alerts.find(query).limit(4000):
-            key = f"{item.get('store')}|{item.get('compare_code')}"
-            if key in seen:
+        for item in raw:
+            key = self._deal_identity_key(item)
+            if key in seen or key in prior:
                 continue
             seen.add(key)
             extra = item.get("extra") or {}

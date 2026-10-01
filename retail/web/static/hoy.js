@@ -47,12 +47,12 @@ function renderDeals(data) {
   if (total) {
     const shown = `Mostrando ${rows.length} de ${total.toLocaleString("es-CL")}`;
     $("summary").textContent = needle
-      ? `${shown} ofertas para “${needle}” · Ahorro ${money(data.total_saving)}`
-      : `${shown} ofertas · Ahorro total detectado ${money(data.total_saving)}`;
+      ? `${shown} ofertas nuevas para “${needle}” · Ahorro ${money(data.total_saving)}`
+      : `${shown} ofertas nuevas · Ahorro total detectado ${money(data.total_saving)}`;
   } else {
     $("summary").textContent = needle
-      ? `Ninguna oferta de este día coincide con “${needle}”.`
-      : "No hay ofertas guardadas para ese día. Corre el batch desde Configurar.";
+      ? `Ninguna oferta nueva de este día coincide con “${needle}”.`
+      : "No hay ofertas nuevas para ese día. Las que ya salieron antes no se repiten.";
   }
   $("deals").innerHTML = rows.length
     ? rows.map(dealCard).join("")

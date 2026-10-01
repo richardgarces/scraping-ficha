@@ -63,8 +63,76 @@ def run_batch(
     time_budget_minutes: float | None = None,
     batch_run_id: str | None = None,
 ) -> dict[str, Any]:
-    if batch_run_id and (not grupo or tienda or dry_run):
-        raise ValueError("La reserva requiere una corrida de grupo.")
+    if batch_run_id and dry_run:
+        raise ValueError("Una corrida reservada no admite dry-run.")
+    if batch_run_id and not grupo and not tienda:
+        raise ValueError("La reserva requiere un grupo o una tienda.")
+    if batch_run_id and grupo and tienda:
+        raise ValueError("Usa una tienda o un grupo, no ambos.")
+    if tienda and grupo:
+        raise ValueError("Usa una tienda o un grupo, no ambos.")
+
+    # Activa la reserva antes de cargar el catálogo: ese paso puede tardar
+    # minutos y, si no, el panel muestra «en curso» sin progreso real.
+    run_id = None
+    repo = None
+    early_repo = False
+    if batch_run_id and not dry_run:
+        from retail.search import connect_repo
+
+        repo = connect_repo()
+        early_repo = repo is not None
+        if persist and repo is None:
+            raise RuntimeError("MongoDB no está disponible; el batch no puede guardar productos.")
+        if repo is not None:
+            try:
+                if tienda:
+                    from retail.batch.store_scope import normalize_store
+
+                    store_key = normalize_store(tienda)
+                    repo.activate_store_batch_run(
+                        batch_run_id,
+                        store_key,
+                        {
+                            "phase": "index",
+                            "tienda": store_key,
+                            "scope": "tienda",
+                            "stores": [store_key],
+                            "started_at": datetime.now(timezone.utc).isoformat(),
+                        },
+                    )
+                elif grupo:
+                    from retail.store_categories import normalize_group
+
+                    group_key = normalize_group(grupo, repo=repo)
+                    repo.activate_group_batch_run(
+                        batch_run_id,
+                        group_key,
+                        {
+                            "phase": "index",
+                            "grupo": group_key,
+                            "scope": "grupo",
+                            "started_at": datetime.now(timezone.utc).isoformat(),
+                        },
+                    )
+            except GroupBatchStopped:
+                repo.finish_batch_run(batch_run_id, status="stopped", phase="stopped")
+                if early_repo:
+                    try:
+                        repo.close()
+                    except Exception:
+                        pass
+                return {
+                    "started_at": datetime.now(timezone.utc).isoformat(),
+                    "batch_run_id": batch_run_id,
+                    "stopped": True,
+                    "items": 0,
+                    "searches": [],
+                    "alerts": [],
+                    "alert_count": 0,
+                }
+            run_id = batch_run_id
+
     catalog = load_catalog(catalog_path or default_catalog_path())
     rules = load_rules(rules_path or default_rules_path())
     products = active_products(catalog)
@@ -78,8 +146,6 @@ def run_batch(
     group_keys: list[str] = []
     store_title = None
     store_categories_meta: dict[str, Any] | None = None
-    if tienda and grupo:
-        raise ValueError("Usa una tienda o un grupo, no ambos.")
     if tienda:
         from retail.batch.store_scope import (
             groups_for_store,
@@ -141,9 +207,10 @@ def run_batch(
         summary["searches"] = [{"id": item.get("id"), "query": item.get("query")} for item in products]
         return summary
 
-    from retail.search import connect_repo
+    if repo is None:
+        from retail.search import connect_repo
 
-    repo = connect_repo()
+        repo = connect_repo()
     if persist and repo is None:
         raise RuntimeError("MongoDB no está disponible; el batch no puede guardar productos.")
     adaptive_meta: dict[str, Any] = {"enabled": False, "reason": "Se usa el orden completo del catálogo."}
@@ -180,9 +247,8 @@ def run_batch(
         products = _rotate_products(products, str(cursor.get("next_id") or ""))
     summary["items"] = len(products)
     summary["adaptive_scraping"] = adaptive_meta
-    run_id = None
     if repo is not None:
-        if store_key:
+        if store_key and not batch_run_id:
             from retail.batch.store_scope import ensure_store_batch_available
 
             ensure_store_batch_available(repo, store_key)
@@ -214,7 +280,10 @@ def run_batch(
                 }
             )
         try:
-            if batch_run_id and store_key:
+            if batch_run_id and run_id:
+                # Ya activada al inicio; solo completa ítems y meta del catálogo.
+                repo.update_batch_run(run_id, **run_doc)
+            elif batch_run_id and store_key:
                 repo.activate_store_batch_run(batch_run_id, store_key, run_doc)
                 run_id = batch_run_id
             elif batch_run_id and group_key:
@@ -223,10 +292,13 @@ def run_batch(
             else:
                 run_id = repo.start_batch_run(run_doc)
         except Exception:
-            repo.close()
+            if early_repo and repo is not None:
+                try:
+                    repo.close()
+                except Exception:
+                    pass
             raise
         summary["batch_run_id"] = run_id
-
     # El host renueva el índice una vez al día. Rehacerlo para cada uno de los
     # grupos era trabajo duplicado y retenía el inicio de todos los lotes.
     refresh_index = not group_key or os.environ.get("BATCH_REFRESH_INDEX", "0").strip().lower() in {"1", "true", "yes"}
