@@ -183,7 +183,7 @@ def test_middleware_increments_user_requests_only(monkeypatch):
     assert not any(call["group"] == "admin" for call in calls)
 
 
-def test_stats_page_and_api_require_admin():
+def test_stats_page_and_api_require_admin(anonymous_repo):
     client = TestClient(app)
     denied = client.get("/api/admin/stats")
     assert denied.status_code == 401

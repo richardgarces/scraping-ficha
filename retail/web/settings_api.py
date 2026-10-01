@@ -21,7 +21,7 @@ from retail.registry import list_stores
 from retail.search import connect_repo
 from retail.batch.basic_scrape import BasicScrapeBusy
 from retail.batch.store_scope import StoreBatchBusy, normalize_store
-from retail.web.jobs import batch_status, start_basic_scrape, start_batch, start_store_batch
+from retail.web.jobs import batch_status, start_basic_scrape, start_batch, start_group_batch, start_store_batch
 
 router = APIRouter()
 
@@ -243,6 +243,22 @@ async def cron_control(request: Request) -> dict:
         "paused": bool(saved.get("paused")),
         "message": "Corridas pausadas." if saved.get("paused") else "Corridas reanudadas.",
     }
+
+
+@router.post("/api/admin/cron-batches/{group_id}/start", status_code=202)
+def start_cron_group(group_id: str, request: Request) -> dict:
+    current_user(request, admin=True)
+    from pymongo.errors import PyMongoError
+    from retail.batch.group_scope import GroupBatchBusy, GroupBatchPaused
+
+    try:
+        return start_group_batch(group_id)
+    except (GroupBatchBusy, GroupBatchPaused) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except (RuntimeError, PyMongoError) as exc:
+        raise HTTPException(status_code=503, detail="No se pudo iniciar la corrida. Inténtalo de nuevo.") from exc
 
 
 @router.get("/api/admin/cron-batches/{run_id}/alerts")

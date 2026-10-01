@@ -198,7 +198,8 @@ def test_search_status_always_says_buscando():
     script = (STATIC / "app.js").read_text(encoding="utf-8")
     assert "Consultando" not in page
     assert "Consultando" not in script
-    assert '"Buscando en las tiendas…"' in script
+    assert '"Buscando en productos"' in script
+    assert '"Buscando..."' in script
     assert '$("summary").textContent = "Buscando…";' in script
 
 

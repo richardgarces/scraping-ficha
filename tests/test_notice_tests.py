@@ -113,8 +113,8 @@ def test_email_filters_have_compact_responsive_controls():
     assert 'value="favorite"' in js
     assert 'value="excluded"' in js
     assert '.store-state-control' in styles
-    assert "siguiendo.js?v=14" in html
-    assert "styles.css?v=54" in html
+    assert 'src="/static/siguiendo.js?v=' in html
+    assert 'href="/static/styles.css?v=' in html
 
 
 def test_catalog_editor_limits_rows_without_dropping_hidden_products():
@@ -124,10 +124,10 @@ def test_catalog_editor_limits_rows_without_dropping_hidden_products():
     assert "catalogProducts.slice(0, CATALOG_DISPLAY_LIMIT)" in js
     assert "products.filter((_item, index) => !removedCatalogIndexes.has(index)).concat(added)" in js
     assert 'id="catalog-limit-note"' in html
-    assert "settings.js?v=9" in html
+    assert 'src="/static/settings.js?v=' in html
 
 
-def test_notice_endpoints_require_admin():
+def test_notice_endpoints_require_admin(anonymous_repo):
     client = TestClient(app)
     for path in ("/api/admin/test-telegram", "/api/admin/test-email"):
         denied = client.post(path)

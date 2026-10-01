@@ -7046,13 +7046,6 @@
       "enabled": true
     },
     {
-      "id": "labial-mate",
-      "query": "labial mate",
-      "category": "belleza",
-      "brand": null,
-      "enabled": true
-    },
-    {
       "id": "crema-hidratante",
       "query": "crema hidratante",
       "category": "belleza",
@@ -7064,13 +7057,6 @@
       "query": "shampoo",
       "category": "belleza",
       "brand": null,
-      "enabled": true
-    },
-    {
-      "id": "zapatillas-vans-old-skool",
-      "query": "zapatillas vans old skool",
-      "category": "calzado",
-      "brand": "Vans",
       "enabled": true
     },
     {

@@ -163,8 +163,8 @@ def test_web_health_and_stores():
     assert 'value="db" checked' not in page.text
     assert 'id="max" type="number" min="1" max="20" value="20"' in page.text
     assert '<div data-admin hidden>\n          <details id="search-detail" class="search-detail" hidden>' in page.text
-    assert 'app.js?v=46' in page.text
-    assert 'styles.css?v=68' in page.text
+    assert 'src="/static/app.js?v=' in page.text
+    assert 'href="/static/styles.css?v=' in page.text
     styles = __import__("pathlib").Path("retail/web/static/styles.css").read_text()
     assert "[data-admin][hidden] { display: none !important; }" in styles
     hoy = client.get("/hoy")

@@ -55,18 +55,23 @@ info "Empaquetando ${APP_SLUG}…"
 (
   cd "$ROOT_DIR"
   zip -r "$ZIP" . \
+    -x "./.git" \
     -x "./.git/*" \
     -x "./.build/*" \
     -x "./.venv/*" \
     -x "./.pytest_cache/*" \
     -x "./output/*" \
+    -x "./logs/*" \
+    -x "./storage/*" \
     -x "./node_modules/*" \
     -x "./**/node_modules/*" \
     -x "./.env" \
     -x "./.env.*" \
+    -x "./.mongo_creds" \
     -x "./backups/*" \
     -x "./ubuntu/*" \
     -x "./.push-defaults" \
+    -x "./.DS_Store" \
     -x "**/.DS_Store" \
     -x "**/__pycache__/*" \
     -x "**/*.pyc" \
@@ -94,9 +99,18 @@ unzip -qo "${REMOTE_ZIP}" -d "\$STAGE_DIR"
 # evita que el bind mount retail/batch de un contenedor activo quede apuntando
 # a un directorio eliminado y aparezca vacío hasta el siguiente deploy.
 rsync -a --delete \
-  --exclude '.env' --exclude 'backups/' --exclude 'storage/' \
+  --exclude '.git' --exclude '.venv/' --exclude '.build/' \
+  --exclude '.env' --exclude '.env.*' --exclude '.mongo_creds' \
+  --exclude '.push-defaults' --exclude 'backups/' --exclude 'storage/' \
   --exclude 'logs/' --exclude 'output/' \
+  --exclude '/retail/batch/programacion.json' \
+  --exclude '/retail/batch/reglas_ofertas.json' \
   "\$STAGE_DIR/" "\$REMOTE_DIR/"
+# Instalar los valores iniciales solo cuando aún no hay configuración remota.
+rsync -a --ignore-existing \
+  "\$STAGE_DIR/retail/batch/programacion.json" \
+  "\$STAGE_DIR/retail/batch/reglas_ofertas.json" \
+  "\$REMOTE_DIR/retail/batch/"
 if [[ -f "/tmp/${APP_SLUG}.env.preserve" ]]; then
   mv "/tmp/${APP_SLUG}.env.preserve" "\$REMOTE_DIR/.env"
   chmod 600 "\$REMOTE_DIR/.env"

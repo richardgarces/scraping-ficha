@@ -188,7 +188,7 @@ docker compose up -d
 retail web --host 127.0.0.1 --port 8080
 ```
 
-Abre `http://127.0.0.1:8080`. La tabla filtra por tienda, marca, rango de precio y descuento mínimo (con el conteo de cada opción), ordena por precio, descuento o cuánto está bajo lo habitual, y se puede limitar a “mismo código”, “menor precio” u “ofertas reales”. Cada fila muestra el precio con tarjeta, el de internet y el anterior, el descuento, la evaluación contra el historial y la nota de si es su mínimo histórico.
+Abre `http://127.0.0.1:8080`. Los resultados se filtran por nombre, marca o código, rango de precio y descuento mínimo. La opción “Productos con descuentos” muestra productos con precio válido y descuento positivo, excluyendo descuentos marcados como falsos. Se pueden ordenar por precio, descuento o cuánto están bajo lo habitual, y limitar a “mismo código”, “menor precio” u “ofertas reales”. Cada fila muestra el precio con tarjeta, el de internet y el anterior, el descuento, la evaluación contra el historial y la nota de si es su mínimo histórico.
 
 Los precios se muestran como los publica la tienda: el precio efectivo arriba, y debajo la escalera con el precio internet y el normal tachado. Cuando el más bajo solo se consigue con la tarjeta de la cadena queda rotulado (`con tarjeta CMR`, `Cencosud`, `Ripley`…), para no comparar un precio con tarjeta contra uno sin ella. El porcentaje es el que anuncia la tienda; `sane_discount` en `retail/models.py` lo descarta cuando es imposible, porque Lider mandaba el ahorro en pesos en ese campo y aparecían descuentos de -10819%.
 

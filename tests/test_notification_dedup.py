@@ -2,57 +2,14 @@
 
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
-import shutil
-import socket
-import subprocess
-import time
 from uuid import uuid4
 
 import pytest
-from pymongo import MongoClient
-from pymongo.errors import ConnectionFailure
 
 from retail.mongo import ProductRepository
 
 
 NOW = datetime(2026, 9, 27, 12, tzinfo=timezone.utc)
-
-
-@pytest.fixture(scope="module")
-def mongo_uri(tmp_path_factory):
-    mongod = shutil.which("mongod")
-    if not mongod:
-        pytest.skip("Estas pruebas requieren mongod para verificar reservas atómicas")
-    directory = tmp_path_factory.mktemp("notification-mongo")
-    with socket.socket() as sock:
-        sock.bind(("127.0.0.1", 0))
-        port = sock.getsockname()[1]
-    uri = f"mongodb://127.0.0.1:{port}"
-    process = subprocess.Popen([
-        mongod, "--dbpath", str(directory), "--port", str(port),
-        "--bind_ip", "127.0.0.1", "--nounixsocket", "--logpath", str(directory / "mongo.log"),
-    ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    client = MongoClient(uri, serverSelectionTimeoutMS=200)
-    try:
-        for _ in range(50):
-            if process.poll() is not None:
-                pytest.fail((directory / "mongo.log").read_text())
-            try:
-                client.admin.command("ping")
-                break
-            except ConnectionFailure:
-                time.sleep(0.1)
-        else:
-            pytest.fail("Mongo temporal no inició")
-        yield uri
-    finally:
-        client.close()
-        process.terminate()
-        try:
-            process.wait(timeout=10)
-        except subprocess.TimeoutExpired:
-            process.kill()
-            process.wait(timeout=5)
 
 
 @pytest.fixture

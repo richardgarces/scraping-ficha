@@ -137,14 +137,7 @@
           <label>Nombre, marca o código
             <input id="table-filter" type="search" placeholder="nombre, marca, código…">
           </label>
-          <details class="facet">
-            <summary>Tiendas</summary>
-            <div id="facet-stores" class="facet-list"></div>
-          </details>
-          <details class="facet">
-            <summary>Marcas</summary>
-            <div id="facet-brands" class="facet-list"></div>
-          </details>
+          <label class="check compact-filter-check"><input id="only-discounts" type="checkbox"> Productos con descuentos</label>
           <label>Precio desde <input id="min-price" type="number" min="0" step="10000" placeholder="0"></label>
           <label>Precio hasta <input id="max-price" type="number" min="0" step="10000" placeholder="sin tope"></label>
           <label>Descuento desde
@@ -206,6 +199,6 @@
     </div>
   </div>
   <script src="/static/prices.js?v=27"></script>
-  <script src="/static/app.js?v=47"></script>
+  <script src="/static/app.js?v=48"></script>
 </body>
 </html>

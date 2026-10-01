@@ -439,6 +439,7 @@ def buy_or_wait(
             if current <= low
             else f"Está a un {round((current - low) * 100 / low)}% de su mínimo histórico."
         )
+        return answer
     else:
         # Regla adicional: si el precio es el mínimo en los últimos 6 meses, comprar.
         six_months_ago = now - timedelta(days=30 * 6)

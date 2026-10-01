@@ -811,7 +811,53 @@ class ProductRepository:
             "saved_modified": 0,
             "created_at": _now(),
         }
+        if document.get("scope") == "grupo" and document.get("grupo"):
+            return self._start_group_batch_run(document)
         return str(self.batch_runs.insert_one(document).inserted_id)
+
+    def _start_group_batch_run(self, document: dict[str, Any]) -> str:
+        """Reserva el grupo antes de arrancar, compartida por web y cron del host."""
+        from uuid import uuid4
+
+        from pymongo.errors import DuplicateKeyError
+        from retail.batch.group_scope import GroupBatchBusy
+
+        group = document["grupo"]
+        lock_id = f"batch_start:{group}"
+        token = uuid4().hex
+        now = _now()
+        try:
+            self.app_settings.update_one(
+                {"_id": lock_id, "expires_at": {"$lte": now}},
+                {"$set": {"token": token, "expires_at": now + timedelta(minutes=1)}},
+                upsert=True,
+            )
+        except DuplicateKeyError:
+            raise GroupBatchBusy(group) from None
+        try:
+            running = self.batch_runs.find_one({
+                "grupo": group, "status": "running",
+                "tienda": {"$in": [None, ""]},
+                "scope": {"$nin": ["tienda", "basico"]},
+            })
+            if running:
+                raise GroupBatchBusy(group)
+            return str(self.batch_runs.insert_one(document).inserted_id)
+        finally:
+            self.app_settings.delete_one({"_id": lock_id, "token": token})
+
+    def activate_group_batch_run(self, run_id: str, group: str, data: dict[str, Any]) -> None:
+        """Entrega una reserva al worker una sola vez, sin crear otra corrida."""
+        from bson import ObjectId
+        from retail.batch.group_scope import GroupBatchBusy
+
+        result = self.batch_runs.update_one(
+            {"_id": ObjectId(run_id), "grupo": group, "scope": "grupo",
+             "status": "running", "phase": "starting"},
+            {"$set": data},
+        )
+        if not result.matched_count:
+            raise GroupBatchBusy(group)
 
     def update_batch_run(self, run_id: str, **fields: Any) -> None:
         """Actualiza progreso en vivo (fase, consulta actual, error) sin tocar contadores."""
@@ -1725,10 +1771,15 @@ class ProductRepository:
             "rules": sorted(rules),
         }
 
-    def iter_stored_products(self):
-        """Productos ya guardados, sin historial ni miniaturas (el barrido básico)."""
+    def iter_stored_products(self, *, page_size: int = 200):
+        """Productos ya guardados, sin historial ni miniaturas (el barrido básico).
+
+        Cada página se lee y el cursor se cierra antes de entregarla. El barrido
+        espera segundos por producto; un cursor abierto más de unos minutos
+        expira y Mongo responde CursorNotFound.
+        """
+        size = max(1, int(page_size))
         projection = {
-            "_id": 0,
             "store": 1,
             "product_id": 1,
             "sku_id": 1,
@@ -1746,9 +1797,24 @@ class ProductRepository:
             "grupo": 1,
             "groups": 1,
         }
-        cursor = self.collection.find({}, projection).batch_size(200)
-        for item in cursor:
-            yield item
+        last_id = None
+        while True:
+            query: dict[str, Any] = {} if last_id is None else {"_id": {"$gt": last_id}}
+            cursor = self.collection.find(query, projection).sort("_id", 1).limit(size)
+            try:
+                batch = list(cursor)
+            finally:
+                close = getattr(cursor, "close", None)
+                if close is not None:
+                    close()
+            if not batch:
+                return
+            last_id = batch[-1].get("_id")
+            for item in batch:
+                item.pop("_id", None)
+                yield item
+            if last_id is None:
+                return
 
     def find_running_basic_scrape(self) -> dict[str, Any] | None:
         return self.batch_runs.find_one(

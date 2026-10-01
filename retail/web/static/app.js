@@ -230,10 +230,6 @@ function fillHistory(items) {
     .join("");
 }
 
-function checkedFacet(id) {
-  return new Set([...document.querySelectorAll(`#${id} input:checked`)].map((item) => item.value));
-}
-
 function isRealOffer(row) {
   const stats = row.price_stats || {};
   if (row.precio_normal || row.fake_discount || stats.fake_discount) return false;
@@ -258,15 +254,21 @@ function isRealOffer(row) {
   return percentVsPrevious >= Math.abs(PERCENT_VS_MEDIAN_THRESHOLD);
 }
 
-function matchesFilters(row, { text, stores, brands, minPrice, maxPrice, minDiscount, comparable, lowest, offers }) {
+function hasProductDiscount(row) {
+  const price = Number(row.price);
+  return Number.isFinite(price) && price > 0
+    && !row.fake_discount && !(row.price_stats || {}).fake_discount
+    && discountOf(row) > 0;
+}
+
+function matchesFilters(row, { text, minPrice, maxPrice, minDiscount, comparable, lowest, offers, discounted }) {
   if ((comparable || resultFocus === "comparable") && !row.comparable) return false;
   if (lowest && !row.is_lowest) return false;
-  if (stores.size && !stores.has(row.store)) return false;
-  if (brands.size && !brands.has(row.brand || "sin marca")) return false;
   if (minPrice && (row.price ?? 0) < minPrice) return false;
   if (maxPrice && (row.price ?? Infinity) > maxPrice) return false;
   if (minDiscount && discountOf(row) < minDiscount) return false;
   if (offers && !isRealOffer(row)) return false;
+  if (discounted && !hasProductDiscount(row)) return false;
   if (!text) return true;
   const blob = [row.name, row.brand, row.store_title, row.store, row.sku_id, row.product_id, row.compare_code]
     .join(" ")
@@ -274,26 +276,25 @@ function matchesFilters(row, { text, stores, brands, minPrice, maxPrice, minDisc
   return blob.includes(text);
 }
 
-function activeFilters(skip = null) {
+function activeFilters() {
   return {
     text: $("table-filter").value.trim().toLowerCase(),
-    stores: skip === "stores" ? new Set() : checkedFacet("facet-stores"),
-    brands: skip === "brands" ? new Set() : checkedFacet("facet-brands"),
     minPrice: Number($("min-price").value) || 0,
     maxPrice: Number($("max-price").value) || 0,
     minDiscount: Number($("min-discount").value) || 0,
     comparable: $("only-comparable").checked,
     lowest: $("only-lowest").checked,
     offers: $("only-offers").checked,
+    discounted: $("only-discounts").checked,
   };
 }
 
 function updateResultFilterBadge() {
   const filters = activeFilters();
   const active = [
-    Boolean(filters.text), filters.stores.size > 0, filters.brands.size > 0,
+    Boolean(filters.text),
     filters.minPrice > 0, filters.maxPrice > 0, filters.minDiscount > 0,
-    filters.comparable, filters.lowest, filters.offers,
+    filters.comparable, filters.lowest, filters.offers, filters.discounted,
     $("sort-by").value !== "price",
   ].filter(Boolean).length;
   const badge = $("search-filter-count");
@@ -311,53 +312,13 @@ function resetResultFilters() {
   $("only-comparable").checked = false;
   $("only-lowest").checked = false;
   $("only-offers").checked = false;
-  for (const id of ["facet-stores", "facet-brands"]) {
-    const box = $(id);
-    if (!box) continue;
-    box.querySelectorAll('input[type="checkbox"]').forEach((item) => {
-      item.checked = false;
-    });
-  }
+  $("only-discounts").checked = false;
   currentPage = 1;
 }
 
 function visibleRows() {
   const filters = activeFilters();
   return currentRows.filter((row) => matchesFilters(row, filters));
-}
-
-function renderFacet(id, field, label) {
-  const counts = new Map();
-  const rows = resultFocus === "discarded" ? currentDiscarded : currentRows;
-  const filters = activeFilters(field === "store" ? "stores" : "brands");
-  if (resultFocus === "discarded") {
-    filters.comparable = false;
-    filters.lowest = false;
-    filters.offers = false;
-    filters.minDiscount = 0;
-  }
-  for (const row of rows) {
-    if (!matchesFilters(row, filters)) continue;
-    const value = field === "store" ? row.store : row.brand || "sin marca";
-    const title = field === "store" ? row.store_title || row.store : value;
-    if (!value) continue;
-    const item = counts.get(value) || { title, count: 0 };
-    item.count += 1;
-    counts.set(value, item);
-  }
-  const chosen = checkedFacet(id);
-  const entries = [...counts.entries()].sort((left, right) => right[1].count - left[1].count).slice(0, 25);
-  $(id).innerHTML = entries.length
-    ? entries
-        .map(
-          ([value, item]) => `
-          <label class="check">
-            <input type="checkbox" value="${attr(value)}" ${chosen.has(value) ? "checked" : ""}>
-            ${field === "store" ? storeLogo(value, item.title) : attr(item.title)} <span class="muted">(${item.count})</span>
-          </label>`
-        )
-        .join("")
-    : `<p class="muted">Sin ${label}.</p>`;
 }
 
 function sortGroups(groups) {
@@ -953,8 +914,6 @@ function renderTable() {
     return;
   }
   $("toolbar").hidden = false;
-  renderFacet("facet-stores", "store", "tiendas");
-  renderFacet("facet-brands", "brand", "marcas");
   updateResultFilterBadge();
   if (currentView() === "grid") {
     const paged = slicePage(sortRows(visibleRows()));
@@ -1095,13 +1054,11 @@ function discardedItem(row) {
 
 function visibleDiscarded() {
   const text = $("table-filter").value.trim().toLowerCase();
-  const stores = checkedFacet("facet-stores");
-  const brands = checkedFacet("facet-brands");
+  const discounted = $("only-discounts").checked;
   const minPrice = Number($("min-price").value) || 0;
   const maxPrice = Number($("max-price").value) || 0;
   return currentDiscarded.filter((row) => {
-    if (stores.size && !stores.has(row.store)) return false;
-    if (brands.size && !brands.has(row.brand || "sin marca")) return false;
+    if (discounted && !hasProductDiscount(row)) return false;
     if (minPrice && (row.price ?? 0) < minPrice) return false;
     if (maxPrice && (row.price ?? Infinity) > maxPrice) return false;
     if (!text) return true;
@@ -1115,8 +1072,6 @@ function visibleDiscarded() {
 function renderDiscarded() {
   const count = (lastResult && lastResult.discarded_count) || 0;
   $("toolbar").hidden = false;
-  renderFacet("facet-stores", "store", "tiendas");
-  renderFacet("facet-brands", "brand", "marcas");
   updateResultFilterBadge();
   if (!currentDiscarded.length) {
     const detail = count
@@ -1433,18 +1388,11 @@ $("history").addEventListener("click", (event) => {
   runSearch(button.dataset.query);
 });
 
-["table-filter", "only-comparable", "only-lowest", "only-offers", "min-price", "max-price", "min-discount", "sort-by"].forEach((id) => {
+["table-filter", "only-comparable", "only-lowest", "only-offers", "only-discounts", "min-price", "max-price", "min-discount", "sort-by"].forEach((id) => {
   $(id).addEventListener("input", () => {
     currentPage = 1;
     renderTable();
   });
-  $(id).addEventListener("change", () => {
-    currentPage = 1;
-    renderTable();
-  });
-});
-
-["facet-stores", "facet-brands"].forEach((id) => {
   $(id).addEventListener("change", () => {
     currentPage = 1;
     renderTable();

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import threading
+from datetime import datetime, timezone
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -24,6 +25,73 @@ def start_batch(**kwargs) -> dict[str, Any]:
 def batch_status() -> dict[str, Any]:
     with _LOCK:
         return dict(_STATE)
+
+
+def start_group_batch(grupo: str) -> dict[str, Any]:
+    """Registra el arranque en Mongo antes de responder y ejecuta solo ese grupo."""
+    from retail.batch.config import load_schedule
+    from retail.batch.group_scope import GroupBatchPaused
+    from retail.search import connect_repo
+    from retail.store_categories import list_store_categories, normalize_group, stores_for_group
+
+    repo = connect_repo()
+    if repo is None:
+        raise RuntimeError("MongoDB no está disponible; no se pudo iniciar la corrida.")
+    try:
+        group = normalize_group(grupo, repo=repo)
+        stores = stores_for_group(group, repo=repo)
+        if not stores:
+            raise ValueError(f"El grupo «{group}» no tiene tiendas registradas.")
+        schedule = load_schedule(repo)
+        if schedule.get("paused"):
+            raise GroupBatchPaused()
+        title = next(
+            (item.get("title") or group for item in list_store_categories(repo=repo) if item["id"] == group),
+            group,
+        )
+        kwargs = {
+            "source": schedule["source"],
+            "pause": schedule["pause"],
+            "time_budget_minutes": schedule["batch_budget_minutes"],
+            "persist": True,
+        }
+        run_id = repo.start_batch_run({
+            "grupo": group, "scope": "grupo", "stores": stores,
+            "source": kwargs["source"], "persist": True, "phase": "starting",
+            "started_at": datetime.now(timezone.utc).isoformat(),
+        })
+        try:
+            thread = threading.Thread(
+                target=_run_group, args=(group, run_id), kwargs=kwargs,
+                daemon=True, name=f"group-batch-{group}",
+            )
+            thread.start()
+        except Exception:
+            repo.finish_batch_run(run_id, status="failed", last_error="No se pudo iniciar el worker del grupo.")
+            raise RuntimeError("No se pudo iniciar la corrida. Inténtalo de nuevo.") from None
+    finally:
+        repo.close()
+    return {
+        "ok": True, "running": True, "grupo": group, "run_id": run_id,
+        "message": f"Corrida iniciada para {title}.",
+    }
+
+
+def _run_group(group: str, run_id: str, **kwargs) -> None:
+    try:
+        from retail.batch.runner import run_batch
+
+        run_batch(grupo=group, batch_run_id=run_id, **kwargs)
+    except Exception as exc:
+        logger.exception("La corrida de %s falló", group)
+        from retail.search import connect_repo
+
+        repo = connect_repo()
+        if repo is not None:
+            try:
+                repo.finish_batch_run(run_id, status="failed", last_error=str(exc))
+            finally:
+                repo.close()
 
 
 _STORE_LOCK = threading.Lock()

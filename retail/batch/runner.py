@@ -60,7 +60,10 @@ def run_batch(
     dry_run: bool = False,
     persist: bool = True,
     time_budget_minutes: float | None = None,
+    batch_run_id: str | None = None,
 ) -> dict[str, Any]:
+    if batch_run_id and (not grupo or tienda or dry_run):
+        raise ValueError("La reserva requiere una corrida de grupo.")
     catalog = load_catalog(catalog_path or default_catalog_path())
     rules = load_rules(rules_path or default_rules_path())
     products = active_products(catalog)
@@ -209,7 +212,15 @@ def run_batch(
                     "scope": "grupo",
                 }
             )
-        run_id = repo.start_batch_run(run_doc)
+        try:
+            if batch_run_id:
+                repo.activate_group_batch_run(batch_run_id, group_key, run_doc)
+                run_id = batch_run_id
+            else:
+                run_id = repo.start_batch_run(run_doc)
+        except Exception:
+            repo.close()
+            raise
         summary["batch_run_id"] = run_id
 
     # El host renueva el índice una vez al día. Rehacerlo para cada uno de los

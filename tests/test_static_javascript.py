@@ -5,13 +5,21 @@ import subprocess
 import pytest
 
 
-@pytest.mark.parametrize("script", ["app.js", "analisis-producto.js", "catalogo.js", "comparar.js", "producto.js", "prices.js"])
+@pytest.mark.parametrize("script", ["app.js", "analisis-producto.js", "catalogo.js", "comparar.js", "cron.js", "producto.js", "prices.js"])
 def test_product_page_javascript_has_valid_syntax(script: str) -> None:
     node = shutil.which("node")
     if node is None:
         pytest.skip("Node.js no está instalado")
     path = Path("retail/web/static") / script
     subprocess.run([node, "--check", str(path)], check=True, capture_output=True, text=True)
+
+
+def test_cron_manual_start_behaviour() -> None:
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js no está instalado")
+    result = subprocess.run([node, "--test", "tests/cron_start.test.js"], capture_output=True, text=True)
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def test_real_offer_filter_requires_a_measurable_saving() -> None:

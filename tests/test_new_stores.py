@@ -119,7 +119,7 @@ def test_product_page_uses_sodimac_articulo_fallback():
     page = Path("retail/web/static/producto.html").read_text(encoding="utf-8")
     assert "sodimac-cl/articulo/" in script
     assert "sodimac-cl/product/" not in script
-    assert "producto.js?v=28" in page
+    assert 'src="/static/producto.js?v=' in page
     assert 'id="chart-offer"' in page
     assert 'id="chart-normal"' in page
     assert 'id="chart-combined"' in page

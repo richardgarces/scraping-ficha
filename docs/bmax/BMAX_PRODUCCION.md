@@ -88,6 +88,12 @@ El borde es **Cloudflare Tunnel** (`http://precios.meincart.com` en Caddy, `auto
 
 Mongo/Qdrant/Redis de este compose son **propios** de precios (no los de plataforma). No abrir 27017/6333/6379 al WAN.
 
+## GitHub Actions
+
+Un push a `main` despliega solo. El workflow `.github/workflows/deploy-bmax.yml` corre en un runner self-hosted en BMAX (etiqueta `bmax`), porque `192.168.1.198` no es alcanzable desde los runners de GitHub.
+
+El job sincroniza el checkout a `~/precios` con `scripts/sync-to-precios.sh` (conserva `.env` y la programación remota) y ejecuta `EDGE=platform scripts/deploy-prod.sh`.
+
 ## Qué no hacer
 
 - No sustituir el `Caddyfile` de platform-caddy por el de esta app (borraría rent y el resto).

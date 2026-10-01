@@ -61,7 +61,7 @@ def test_safe_next_blocks_open_redirects():
     assert safe_next(None, "/ofertas") == "/ofertas"
 
 
-def test_ofertas_and_history_are_admin_only():
+def test_ofertas_and_history_are_admin_only(anonymous_repo):
     client = TestClient(app)
     page = client.get("/ofertas", follow_redirects=False)
     assert page.status_code == 303

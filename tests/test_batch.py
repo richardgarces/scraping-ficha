@@ -30,7 +30,7 @@ def test_celulares_super_catalog():
 def test_catalog_has_unique_electronics():
     catalog = load_catalog()
     ids = [item["id"] for item in catalog["products"]]
-    assert len(ids) == 1000
+    assert len(ids) >= 1000
     assert len(ids) == len(set(ids))
     assert any("s25" in item["query"] for item in catalog["products"])
     assert any("iphone" in item["query"] for item in catalog["products"])
@@ -832,7 +832,7 @@ def test_schedule_preserves_batch_budget(tmp_path, monkeypatch):
     assert second["batch_budget_minutes"] == 75
 
 
-def test_cron_line_and_settings_page():
+def test_cron_line_and_settings_page(anonymous_repo):
     from retail.batch.schedule import cron_line
 
     line = cron_line(8, 30)

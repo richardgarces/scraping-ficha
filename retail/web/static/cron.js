@@ -43,6 +43,42 @@ function statusBadge(status) {
   return `<span class="badge status-${key}">${STATUS_LABEL[key]}</span>`;
 }
 
+const startingGroups = new Set();
+
+function groupStatusCell(group, paused) {
+  const badge = statusBadge(group.status);
+  if (group.status !== "idle" || !group.store_count) return badge;
+  const starting = startingGroups.has(group.id);
+  const title = paused
+    ? "Reanuda las corridas antes de iniciar un grupo."
+    : `Iniciar ${group.title || group.id} ahora`;
+  return `<div class="cron-group-action">${badge}
+    <button type="button" class="secondary" data-start-group="${escapeHtml(group.id)}"
+      title="${escapeHtml(title)}" aria-label="${escapeHtml(title)}"${paused || starting ? " disabled" : ""}>
+      ${starting ? "Iniciando…" : "Iniciar ahora"}
+    </button></div>`;
+}
+
+async function startGroup(button) {
+  const group = button.dataset.startGroup;
+  if (!group || button.disabled || startingGroups.has(group)) return;
+  startingGroups.add(group);
+  button.disabled = true;
+  button.textContent = "Iniciando…";
+  try {
+    const result = await json(`/api/admin/cron-batches/${encodeURIComponent(group)}/start`, { method: "POST" });
+    flash(result.message || "Corrida iniciada.");
+    watchUntil = Date.now() + 60000;
+  } catch (error) {
+    flash(error.message, false);
+  } finally {
+    startingGroups.delete(group);
+    button.disabled = false;
+    button.textContent = "Iniciar ahora";
+  }
+  await refresh().catch((error) => flash(error.message, false));
+}
+
 function formatWhen(iso) {
   if (!iso) return "—";
   try {
@@ -450,7 +486,7 @@ function render(payload) {
         <div class="muted">${escapeHtml(group.id)} · ${group.store_count || 0} tiendas</div>
       </td>
       <td>${escapeHtml(group.schedule?.label || "—")}</td>
-      <td>${statusBadge(group.status)}</td>
+      <td>${groupStatusCell(group, sched.paused)}</td>
       <td>${progressCell(group)}</td>
       <td>${lastRunCell(group)}</td>
     </tr>`
@@ -554,6 +590,11 @@ $("store-scrape-form")?.addEventListener("submit", async (event) => {
 });
 
 document.addEventListener("click", (event) => {
+  const start = event.target.closest("button[data-start-group]");
+  if (start) {
+    startGroup(start).catch((error) => flash(error.message, false));
+    return;
+  }
   const close = event.target.closest("[data-close-alerts]");
   if (close) {
     closeAlerts();

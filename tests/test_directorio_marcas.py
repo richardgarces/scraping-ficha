@@ -75,6 +75,8 @@ def test_hites_uses_first_variant_image_when_item_id_is_shorter():
         '&quot;item_name&quot;:&quot;Zapatilla&quot;,&quot;price&quot;:49990}}"></div>'
     )
     rows = parse_hites_grid(html)
+    assert len(rows) == 1
+    assert rows[0]["url"] == "https://www.hites.com/zapatilla-953407.html"
     assert rows[0]["image"].endswith("953407008_1.jpg")
 
 

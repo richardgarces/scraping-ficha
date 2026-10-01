@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 from retail.web.app import app
 
 
-def test_store_scrape_api_requires_admin():
+def test_store_scrape_api_requires_admin(anonymous_repo):
     client = TestClient(app)
     denied = client.post("/api/admin/store-scrape", json={"tienda": "ahumada"})
     assert denied.status_code == 401

@@ -365,7 +365,7 @@ def test_store_job_progress_does_not_mark_the_group(monkeypatch):
     assert payload["any_running"] is True
 
 
-def test_cron_page_and_api_are_admin_only():
+def test_cron_page_and_api_are_admin_only(anonymous_repo):
     client = TestClient(app)
     page = client.get("/cron", follow_redirects=False)
     assert page.status_code == 303

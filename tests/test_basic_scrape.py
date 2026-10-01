@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 from retail.web.app import app
 
 
-def test_basic_scrape_api_requires_admin():
+def test_basic_scrape_api_requires_admin(anonymous_repo):
     client = TestClient(app)
     denied = client.post("/api/admin/basic-scrape", json={})
     assert denied.status_code == 401
@@ -44,7 +44,7 @@ def test_cron_page_has_basic_scrape_button():
     js = Path("retail/web/static/cron.js").read_text()
     assert "Scraping básico" in html
     assert 'id="basic-scrape-run"' in html
-    assert "cron.js?v=4" in html
+    assert 'src="/static/cron.js?v=' in html
     assert "/api/admin/basic-scrape" in js
 
 
@@ -359,3 +359,62 @@ def test_cron_status_keeps_basic_scrape_apart(monkeypatch):
     assert payload["basic_scrape"]["progress"]["new"] == 2
     assert payload["basic_scrape"]["progress"]["updated"] == 1
     assert payload["basic_scrape"]["progress"]["processed"] == 1
+
+
+def test_iter_stored_products_closes_each_page_before_yielding():
+    """Un cursor vivo entre productos expira y Mongo responde CursorNotFound."""
+    from retail.mongo import ProductRepository
+
+    class Cursor:
+        live = 0
+
+        def __init__(self, docs):
+            self.docs = list(docs)
+            self.limit_n = None
+
+        def sort(self, key, direction):
+            assert (key, direction) == ("_id", 1)
+            self.docs.sort(key=lambda item: item["_id"])
+            return self
+
+        def limit(self, count):
+            self.limit_n = count
+            return self
+
+        def __iter__(self):
+            Cursor.live += 1
+            try:
+                yield from self.docs[: self.limit_n]
+            finally:
+                pass
+
+        def close(self):
+            Cursor.live -= 1
+
+    class Collection:
+        def __init__(self, docs):
+            self.docs = docs
+            self.queries = []
+
+        def find(self, query, projection=None):
+            assert projection is not None
+            assert "_id" not in projection or projection.get("_id") != 0
+            self.queries.append(query)
+            last = (query.get("_id") or {}).get("$gt")
+            matched = [dict(doc) for doc in self.docs if last is None or doc["_id"] > last]
+            return Cursor(matched)
+
+    docs = [{"_id": index, "store": "falabella", "product_id": f"p{index}", "name": f"Producto {index}"} for index in range(1, 6)]
+    repo = ProductRepository.__new__(ProductRepository)
+    repo.collection = Collection(docs)
+    Cursor.live = 0
+
+    seen = []
+    for item in repo.iter_stored_products(page_size=2):
+        assert Cursor.live == 0
+        assert "_id" not in item
+        seen.append(item["product_id"])
+
+    assert seen == ["p1", "p2", "p3", "p4", "p5"]
+    assert repo.collection.queries == [{}, {"_id": {"$gt": 2}}, {"_id": {"$gt": 4}}, {"_id": {"$gt": 5}}]
+    assert Cursor.live == 0

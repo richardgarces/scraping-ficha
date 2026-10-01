@@ -10,7 +10,7 @@ from retail.web.app import app
 STATIC = Path("retail/web/static")
 
 
-def test_usuarios_page_and_api_require_admin():
+def test_usuarios_page_and_api_require_admin(anonymous_repo):
     client = TestClient(app)
     denied = client.get("/api/admin/users")
     assert denied.status_code == 401

@@ -208,6 +208,8 @@ SMTP_HOST   SMTP_PORT   SMTP_USER   SMTP_PASSWORD   SMTP_FROM   ALERT_EMAIL_TO
 
 En BMAX el host usa `scripts/ofertas-diarias-bmax.sh <grupo>` (prod-menu opción 8 / `install-host-cron.sh`).
 
+En `/cron`, un administrador puede pulsar **Iniciar ahora** junto a un grupo **En espera** para ejecutarlo con la fuente, pausa y duración guardadas. El progreso se actualiza cada tres segundos. Si las corridas están pausadas, primero debe pulsar **Reanudar corridas**. El inicio manual conserva el horario programado y bloquea arranques simultáneos del mismo grupo desde la web o el cron del host.
+
 | Campo | Qué hace |
 |---|---|
 | `enabled` | Si las líneas quedan instaladas en el crontab |

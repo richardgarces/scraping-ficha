@@ -418,9 +418,8 @@ def thumb_targets(rows: list[dict[str, Any]] | None, *, seen: set[tuple[str, str
         url = row.get("image_url")
         if not key[0] or not key[1] or not url or key in seen:
             continue
-        if row.get("has_thumb"):
-            seen.add(key)
-            continue
+        # has_thumb también incluye imágenes remotas aún no guardadas.
+        # missing_thumbnails consulta Mongo para omitir las ya descargadas.
         seen.add(key)
         targets.append((key, url))
         if len(targets) >= budget:

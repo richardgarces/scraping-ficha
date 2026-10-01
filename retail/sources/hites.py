@@ -93,7 +93,7 @@ def parse_hites_grid(html_text: str) -> list[dict[str, Any]]:
                 "pid": pid,
                 "name": str(item.get("item_name") or "").strip(),
                 "brand": item.get("item_brand") or None,
-                "url": hrefs.get(pid),
+                "url": hrefs.get(pid) or (hrefs.get(pid[:6]) if len(pid) == 9 and pid.isdigit() else None),
                 "image": image_for(pid),
                 "price": price,
                 "price_normal": normal,

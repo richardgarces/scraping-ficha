@@ -1,0 +1,23 @@
+name: Deploy BMAX
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: deploy-bmax
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Desplegar en BMAX
+    runs-on: [self-hosted, bmax]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Sincronizar y desplegar
+        run: bash scripts/ci-deploy-bmax.sh

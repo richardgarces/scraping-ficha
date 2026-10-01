@@ -388,6 +388,7 @@ def test_thumbs_stream_after_first_snapshot(monkeypatch):
 
     monkeypatch.setattr("retail.search.scrape_store", scrape)
     first_has_thumb = None
+    first_has_saved_thumb = None
     thumbs_event = None
     saw_done = False
     for event in iter_search_events(
@@ -401,11 +402,14 @@ def test_thumbs_stream_after_first_snapshot(monkeypatch):
         rows = (event.get("result") or {}).get("rows") or []
         if first_has_thumb is None and rows:
             first_has_thumb = bool(rows[0].get("has_thumb"))
+            first_has_saved_thumb = bool(repo.saved)
         if event.get("type") == "thumbs":
             thumbs_event = event
         if event.get("type") == "done":
             saw_done = True
-    assert first_has_thumb is False
+    # La URL original ya permite mostrar la imagen mientras se guarda la miniatura.
+    assert first_has_thumb is True
+    assert first_has_saved_thumb is False
     assert thumbs_event and thumbs_event["thumbs"]
     assert thumbs_event["thumbs"][0]["store"] == "falabella"
     assert saw_done
