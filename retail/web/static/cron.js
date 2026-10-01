@@ -69,18 +69,47 @@ function groupStatusCell(group, paused) {
       ${starting ? "Iniciando…" : "Iniciar ahora"}
     </button>`);
   }
+  if (["failed", "stopped"].includes(group.status) && group.store_count) {
+    const starting = startingGroups.has(group.id);
+    const processed = Number(group.last_run?.processed) || 0;
+    const canContinue = processed > 0;
+    if (canContinue) {
+      const continueTitle = paused
+        ? "Reanuda las corridas antes de continuar un grupo."
+        : `Continuar ${group.title || group.id} desde el producto ${processed}`;
+      actions.push(`<button type="button" class="secondary cron-continue" data-start-group="${escapeHtml(group.id)}" data-start-mode="continue"
+        title="${escapeHtml(continueTitle)}" aria-label="${escapeHtml(continueTitle)}"${paused || starting ? " disabled" : ""}>
+        ${starting ? "Iniciando…" : "Continuar"}
+      </button>`);
+    }
+    const restartTitle = paused
+      ? "Reanuda las corridas antes de reiniciar un grupo."
+      : `Reiniciar ${group.title || group.id} desde el comienzo`;
+    actions.push(`<button type="button" class="secondary cron-restart" data-start-group="${escapeHtml(group.id)}" data-start-mode="restart"
+      title="${escapeHtml(restartTitle)}" aria-label="${escapeHtml(restartTitle)}"${paused || starting ? " disabled" : ""}>
+      ${starting ? "Iniciando…" : "Reiniciar"}
+    </button>`);
+  }
   if (!actions.length) return badge;
   return `<div class="cron-group-action">${badge}${actions.join("")}</div>`;
 }
 
 async function startGroup(button) {
   const group = button.dataset.startGroup;
+  const mode = button.dataset.startMode || "";
   if (!group || button.disabled || startingGroups.has(group)) return;
   startingGroups.add(group);
   button.disabled = true;
-  button.textContent = "Iniciando…";
+  const busyLabel = mode === "continue" ? "Continuando…" : mode === "restart" ? "Reiniciando…" : "Iniciando…";
+  const idleLabel = mode === "continue" ? "Continuar" : mode === "restart" ? "Reiniciar" : "Iniciar ahora";
+  button.textContent = busyLabel;
   try {
-    const result = await json(`/api/admin/cron-batches/${encodeURIComponent(group)}/start`, { method: "POST" });
+    const options = { method: "POST" };
+    if (mode) {
+      options.headers = { "Content-Type": "application/json" };
+      options.body = JSON.stringify({ mode });
+    }
+    const result = await json(`/api/admin/cron-batches/${encodeURIComponent(group)}/start`, options);
     flash(result.message || "Corrida iniciada.");
     watchUntil = Date.now() + 60000;
   } catch (error) {
@@ -88,7 +117,7 @@ async function startGroup(button) {
   } finally {
     startingGroups.delete(group);
     button.disabled = false;
-    button.textContent = "Iniciar ahora";
+    button.textContent = idleLabel;
   }
   await refresh().catch((error) => flash(error.message, false));
 }
@@ -124,6 +153,16 @@ function formatWhen(iso) {
 function progressCell(group) {
   const progress = group.progress;
   if (!["running", "paused"].includes(group.status) || !progress) {
+    if (group.status === "failed" && group.last_run) {
+      const processed = group.last_run.processed || 0;
+      const items = group.last_run.items || 0;
+      const progress = items ? `${processed}/${items} productos` : "";
+      const error = group.last_run.last_error
+        ? `<span class="err-inline">${escapeHtml(group.last_run.last_error)}</span>`
+        : "";
+      if (progress && error) return `${progress}<div>${error}</div>`;
+      return error || progress || "—";
+    }
     if (group.status === "stopped" && group.last_run) {
       const processed = group.last_run.processed || 0;
       const items = group.last_run.items || 0;
@@ -135,9 +174,6 @@ function progressCell(group) {
       const rate = Number(group.last_run.queries_per_minute) || 0;
       const turn = group.last_run.budget_exhausted ? " · continuará mañana" : "";
       return t ? `${p}/${t} productos${rate ? ` · ${rate.toLocaleString("es-CL")} consultas/min` : ""}${turn}` : "—";
-    }
-    if (group.status === "failed" && group.last_run?.last_error) {
-      return `<span class="err-inline">${escapeHtml(group.last_run.last_error)}</span>`;
     }
     return "—";
   }

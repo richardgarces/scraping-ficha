@@ -904,6 +904,47 @@ class ProductRepository:
         )
         return bool(item and item.get("status") == "running" and item.get("stop_requested"))
 
+    def set_group_batch_cursor(self, group: str, next_id: str | None) -> None:
+        """Guarda desde qué producto retomar la próxima corrida del grupo."""
+        from retail.batch.group_scope import batch_cursor_key
+
+        key = batch_cursor_key(group)
+        product = str(next_id or "").strip()
+        if not product:
+            self.app_settings.delete_one({"_id": key})
+            return
+        self.save_app_setting(
+            key,
+            {
+                "next_id": product,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+                "budget_exhausted": False,
+            },
+        )
+
+    def clear_group_batch_cursor(self, group: str) -> None:
+        self.set_group_batch_cursor(group, None)
+
+    def latest_group_batch_run(self, group: str) -> dict[str, Any] | None:
+        return self.batch_runs.find_one(
+            {
+                "grupo": group,
+                "tienda": {"$in": [None, ""]},
+                "scope": {"$nin": ["tienda", "basico"]},
+            },
+            sort=[("started_at", -1)],
+        )
+
+    def remember_group_batch_resume(self, group: str | None, run: dict[str, Any] | None) -> None:
+        """Si la corrida quedó a medias, la próxima «Continuar» parte desde ahí."""
+        from retail.batch.group_scope import resume_product_id
+
+        if not group:
+            return
+        product = resume_product_id(run)
+        if product:
+            self.set_group_batch_cursor(group, product)
+
     def update_batch_run(self, run_id: str, **fields: Any) -> None:
         """Actualiza progreso en vivo (fase, consulta actual, error) sin tocar contadores."""
         from bson import ObjectId
@@ -984,6 +1025,9 @@ class ProductRepository:
         for doc in self.batch_runs.find({"status": "running", "phase": {"$ne": "paused"}}):
             if not batch_run_is_stale(doc, cutoff=cutoff):
                 continue
+            group = str(doc.get("grupo") or "").strip()
+            if group and not doc.get("tienda"):
+                self.remember_group_batch_resume(group, doc)
             result = self.batch_runs.update_one(
                 {"_id": doc["_id"], "status": "running"},
                 {

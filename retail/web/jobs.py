@@ -27,12 +27,22 @@ def batch_status() -> dict[str, Any]:
         return dict(_STATE)
 
 
-def start_group_batch(grupo: str) -> dict[str, Any]:
-    """Registra el arranque en Mongo antes de responder y ejecuta solo ese grupo."""
+def start_group_batch(grupo: str, *, mode: str | None = None) -> dict[str, Any]:
+    """Registra el arranque en Mongo antes de responder y ejecuta solo ese grupo.
+
+    mode:
+      - None: usa el cursor guardado (turno diario / continuar implícito)
+      - continue: coloca el cursor en el último producto de una corrida fallida o detenida
+      - restart: borra el cursor y parte desde el comienzo del catálogo
+    """
     from retail.batch.config import load_schedule
-    from retail.batch.group_scope import GroupBatchPaused
+    from retail.batch.group_scope import GroupBatchNothingToResume, GroupBatchPaused, resume_product_id
     from retail.search import connect_repo
     from retail.store_categories import list_store_categories, normalize_group, stores_for_group
+
+    action = (mode or "").strip().lower() or None
+    if action not in {None, "continue", "restart"}:
+        raise ValueError("Modo inválido. Usa continuar o reiniciar.")
 
     repo = connect_repo()
     if repo is None:
@@ -49,6 +59,14 @@ def start_group_batch(grupo: str) -> dict[str, Any]:
             (item.get("title") or group for item in list_store_categories(repo=repo) if item["id"] == group),
             group,
         )
+        if action == "restart" and hasattr(repo, "clear_group_batch_cursor"):
+            repo.clear_group_batch_cursor(group)
+        elif action == "continue":
+            previous = repo.latest_group_batch_run(group) if hasattr(repo, "latest_group_batch_run") else None
+            product = resume_product_id(previous)
+            if not product:
+                raise GroupBatchNothingToResume(group)
+            repo.set_group_batch_cursor(group, product)
         kwargs = {
             "source": schedule["source"],
             "pause": schedule["pause"],
@@ -59,6 +77,7 @@ def start_group_batch(grupo: str) -> dict[str, Any]:
             "grupo": group, "scope": "grupo", "stores": stores,
             "source": kwargs["source"], "persist": True, "phase": "starting",
             "started_at": datetime.now(timezone.utc).isoformat(),
+            "resume_mode": action or "schedule",
         })
         try:
             thread = threading.Thread(
@@ -71,9 +90,16 @@ def start_group_batch(grupo: str) -> dict[str, Any]:
             raise RuntimeError("No se pudo iniciar la corrida. Inténtalo de nuevo.") from None
     finally:
         repo.close()
+    if action == "continue":
+        message = f"Continuando {title} desde donde quedó."
+    elif action == "restart":
+        message = f"Reiniciando {title} desde el comienzo."
+    else:
+        message = f"Corrida iniciada para {title}."
     return {
         "ok": True, "running": True, "grupo": group, "run_id": run_id,
-        "message": f"Corrida iniciada para {title}.",
+        "mode": action or "schedule",
+        "message": message,
     }
 
 

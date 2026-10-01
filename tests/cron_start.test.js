@@ -30,10 +30,7 @@ test("solo los grupos en espera y con tiendas ofrecen iniciar", () => {
   assert.match(idle, /Iniciar ahora/);
   assert.match(idle, /data-start-group="retail"/);
   assert.doesNotMatch(idle, / disabled/);
-  for (const status of ["done", "failed", "stopped"]) {
-    assert.doesNotMatch(cron.groupStatusCell({ ...group, status }, false), /data-start-group/);
-    assert.doesNotMatch(cron.groupStatusCell({ ...group, status }, false), /data-stop-group/);
-  }
+  assert.doesNotMatch(cron.groupStatusCell({ ...group, status: "done" }, false), /data-start-group/);
   for (const status of ["running", "paused"]) {
     const cell = cron.groupStatusCell({ ...group, status, progress: { phase: "products" } }, false);
     assert.match(cell, /data-stop-group="retail"/);
@@ -48,23 +45,70 @@ test("solo los grupos en espera y con tiendas ofrecen iniciar", () => {
   assert.match(cron.groupStatusCell(group, true), /Reanuda las corridas/);
 });
 
+test("un grupo fallido ofrece continuar y reiniciar", () => {
+  const cron = loadCron();
+  const failed = cron.groupStatusCell({
+    ...group,
+    status: "failed",
+    last_run: { processed: 239, items: 22490, last_error: "Corrida interrumpida" },
+  }, false);
+  assert.match(failed, /data-start-mode="continue"/);
+  assert.match(failed, /Continuar/);
+  assert.match(failed, /data-start-mode="restart"/);
+  assert.match(failed, /Reiniciar/);
+  const empty = cron.groupStatusCell({
+    ...group,
+    status: "failed",
+    last_run: { processed: 0, items: 100 },
+  }, false);
+  assert.doesNotMatch(empty, /data-start-mode="continue"/);
+  assert.match(empty, /data-start-mode="restart"/);
+  const stopped = cron.groupStatusCell({
+    ...group,
+    status: "stopped",
+    last_run: { processed: 12, items: 40 },
+  }, false);
+  assert.match(stopped, /Continuar/);
+  assert.match(stopped, /Reiniciar/);
+});
+
 test("doble clic y redibujado no duplican la solicitud", async () => {
   let resolve;
   const pending = new Promise((done) => { resolve = done; });
   const calls = [];
-  const cron = loadCron((url, options) => { calls.push([url, options.method]); return pending; });
+  const cron = loadCron((url, options) => { calls.push([url, options.method, options.body]); return pending; });
   const firstButton = button();
   const first = cron.startGroup(firstButton);
   assert.equal(firstButton.disabled, true);
   assert.equal(firstButton.textContent, "Iniciando…");
   assert.match(cron.groupStatusCell(group, false), / disabled/);
   await cron.startGroup(button());
-  assert.deepEqual(calls, [["/api/admin/cron-batches/retail/start", "POST"]]);
+  assert.deepEqual(calls, [["/api/admin/cron-batches/retail/start", "POST", undefined]]);
   resolve({ status: 202, ok: true, json: async () => ({ message: "Corrida iniciada para Retail." }) });
   await first;
   assert.equal(cron.notices[0][0], "Corrida iniciada para Retail.");
   assert.equal(cron.refreshes, 1);
   assert.doesNotMatch(cron.groupStatusCell(group, false), /Iniciando…/);
+});
+
+test("continuar envía el modo en el cuerpo", async () => {
+  const calls = [];
+  const cron = loadCron(async (url, options) => {
+    calls.push([url, options.method, options.body]);
+    return { status: 202, ok: true, json: async () => ({ message: "Continuando Retail desde donde quedó." }) };
+  });
+  const control = {
+    dataset: { startGroup: "retail", startMode: "continue" },
+    disabled: false,
+    textContent: "Continuar",
+  };
+  await cron.startGroup(control);
+  assert.deepEqual(calls, [[
+    "/api/admin/cron-batches/retail/start",
+    "POST",
+    JSON.stringify({ mode: "continue" }),
+  ]]);
+  assert.equal(cron.notices[0][0], "Continuando Retail desde donde quedó.");
 });
 
 test("detener un grupo no pide pausar los demás", async () => {

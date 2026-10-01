@@ -246,16 +246,24 @@ async def cron_control(request: Request) -> dict:
 
 
 @router.post("/api/admin/cron-batches/{group_id}/start", status_code=202)
-def start_cron_group(group_id: str, request: Request) -> dict:
+async def start_cron_group(group_id: str, request: Request) -> dict:
     current_user(request, admin=True)
     from pymongo.errors import PyMongoError
-    from retail.batch.group_scope import GroupBatchBusy, GroupBatchPaused
+    from retail.batch.group_scope import GroupBatchBusy, GroupBatchNothingToResume, GroupBatchPaused
 
+    body: dict = {}
     try:
-        return start_group_batch(group_id)
+        body = await request.json()
+    except Exception:
+        body = {}
+    if not isinstance(body, dict):
+        body = {}
+    mode = body.get("mode")
+    try:
+        return start_group_batch(group_id, mode=mode)
     except (GroupBatchBusy, GroupBatchPaused) as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    except ValueError as exc:
+    except (GroupBatchNothingToResume, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except (RuntimeError, PyMongoError) as exc:
         raise HTTPException(status_code=503, detail="No se pudo iniciar la corrida. Inténtalo de nuevo.") from exc

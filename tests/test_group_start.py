@@ -108,11 +108,18 @@ def test_pause_checkpoint_stops_only_the_flagged_run(monkeypatch):
 @pytest.fixture
 def group_job(monkeypatch):
     schedule = {"source": "scrape", "pause": 0, "batch_budget_minutes": 45, "paused": False}
-    runs, finished, threads = [], [], []
+    runs, finished, threads, cursors = [], [], [], []
     repo = SimpleNamespace(
         close=lambda: None,
         start_batch_run=lambda doc: runs.append(doc) or "reserved-run",
         finish_batch_run=lambda run_id, **fields: finished.append((run_id, fields)),
+        clear_group_batch_cursor=lambda group: cursors.append(("clear", group)),
+        set_group_batch_cursor=lambda group, next_id: cursors.append(("set", group, next_id)),
+        latest_group_batch_run=lambda group: {
+            "status": "failed",
+            "processed": 2,
+            "searches": [{"id": "prod-a"}, {"id": "prod-resume"}],
+        },
     )
     monkeypatch.setattr("retail.search.connect_repo", lambda: repo)
     monkeypatch.setattr("retail.batch.config.load_schedule", lambda store: schedule)
@@ -129,7 +136,9 @@ def group_job(monkeypatch):
             assert len(runs) == 1
 
     monkeypatch.setattr(jobs.threading, "Thread", Thread)
-    return SimpleNamespace(schedule=schedule, runs=runs, finished=finished, threads=threads, repo=repo)
+    return SimpleNamespace(
+        schedule=schedule, runs=runs, finished=finished, threads=threads, cursors=cursors, repo=repo,
+    )
 
 
 def test_group_job_uses_saved_settings_and_reserves_before_start(group_job):
@@ -200,3 +209,54 @@ def test_group_worker_marks_early_failure(group_job, monkeypatch):
     monkeypatch.setattr("retail.batch.runner.run_batch", fail)
     jobs._run_group("retail", "reserved-run", source="scrape")
     assert group_job.finished == [("reserved-run", {"status": "failed", "last_error": "Catálogo inválido"})]
+
+
+def test_resume_product_id_prefers_current_then_last_search():
+    from retail.batch.group_scope import resume_product_id
+
+    assert resume_product_id({"current_id": "live", "searches": [{"id": "old"}]}) == "live"
+    assert resume_product_id({"searches": [{"id": "a"}, {"id": "b"}]}) == "b"
+    assert resume_product_id({"processed": 3, "searches": []}) is None
+    assert resume_product_id(None) is None
+
+
+def test_continue_places_cursor_on_last_progress(group_job):
+    result = jobs.start_group_batch("retail", mode="continue")
+    assert result["mode"] == "continue"
+    assert "Continuando" in result["message"]
+    assert group_job.cursors == [("set", "retail", "prod-resume")]
+    assert group_job.runs[0]["resume_mode"] == "continue"
+
+
+def test_restart_clears_cursor(group_job):
+    result = jobs.start_group_batch("retail", mode="restart")
+    assert result["mode"] == "restart"
+    assert "Reiniciando" in result["message"]
+    assert group_job.cursors == [("clear", "retail")]
+    assert group_job.runs[0]["resume_mode"] == "restart"
+
+
+def test_continue_without_progress_raises(group_job):
+    from retail.batch.group_scope import GroupBatchNothingToResume
+
+    group_job.repo.latest_group_batch_run = lambda group: {"status": "failed", "processed": 0, "searches": []}
+    with pytest.raises(GroupBatchNothingToResume):
+        jobs.start_group_batch("retail", mode="continue")
+    assert not group_job.runs
+
+
+def test_start_group_api_accepts_continue_mode(monkeypatch):
+    monkeypatch.setattr("retail.web.settings_api.current_user", lambda *a, **k: {"role": "admin"})
+    calls = []
+
+    def start(group, mode=None):
+        calls.append((group, mode))
+        return {"ok": True, "running": True, "grupo": group, "mode": mode, "message": "ok"}
+
+    monkeypatch.setattr("retail.web.settings_api.start_group_batch", start)
+    response = TestClient(app).post(
+        "/api/admin/cron-batches/retail/start",
+        json={"mode": "continue"},
+    )
+    assert response.status_code == 202
+    assert calls == [("retail", "continue")]

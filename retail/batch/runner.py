@@ -353,6 +353,8 @@ def run_batch(
                     current_id=item.get("id"),
                     current_index=index,
                 )
+                if group_key and hasattr(repo, "set_group_batch_cursor"):
+                    repo.set_group_batch_cursor(group_key, item.get("id"))
             if index not in prepared_searches:
                 jobs: list[tuple[int, dict[str, Any], str, list[str], str | None]] = [
                     (index, item, query, query_stores, origin_store)
