@@ -151,8 +151,16 @@ _STORE_RUNNING: set[str] = set()
 
 
 def start_store_batch(tienda: str, **kwargs) -> dict[str, Any]:
-    """Arranca el scrape de una tienda en segundo plano. No bloquea el request."""
-    from retail.batch.store_scope import StoreBatchBusy, normalize_store, store_batch_is_busy, store_title
+    """Registra la corrida en Mongo antes de responder y scrapea solo esa tienda."""
+    from datetime import datetime, timezone
+
+    from retail.batch.store_scope import (
+        StoreBatchBusy,
+        groups_for_store,
+        normalize_store,
+        store_batch_is_busy,
+        store_title,
+    )
     from retail.search import connect_repo
 
     store_id = normalize_store(tienda)
@@ -162,15 +170,29 @@ def start_store_batch(tienda: str, **kwargs) -> dict[str, Any]:
             raise StoreBatchBusy(store_id, title)
         repo = connect_repo()
         try:
+            if repo is None:
+                raise RuntimeError("MongoDB no está disponible; no se pudo iniciar el scraping.")
             if store_batch_is_busy(repo, store_id):
                 raise StoreBatchBusy(store_id, title)
+            groups = groups_for_store(store_id, repo=repo)
+            run_id = repo.start_batch_run({
+                "tienda": store_id,
+                "scope": "tienda",
+                "stores": [store_id],
+                "groups": list(groups),
+                "phase": "starting",
+                "catalog": title,
+                "started_at": datetime.now(timezone.utc).isoformat(),
+                "source": kwargs.get("source") or "scrape",
+                "persist": bool(kwargs.get("persist", True)),
+            })
         finally:
             if repo is not None:
                 repo.close()
         _STORE_RUNNING.add(store_id)
     thread = threading.Thread(
         target=_run_store,
-        args=(store_id,),
+        args=(store_id, run_id),
         kwargs=kwargs,
         daemon=True,
         name=f"store-batch-{store_id}",
@@ -186,6 +208,7 @@ def start_store_batch(tienda: str, **kwargs) -> dict[str, Any]:
         "running": True,
         "tienda": store_id,
         "title": title,
+        "run_id": run_id,
         "message": f"Scraping iniciado para {title}.",
     }
 
@@ -288,13 +311,21 @@ def _run_basic(**kwargs) -> None:
             _BASIC_RUNNING = False
 
 
-def _run_store(store_id: str, **kwargs) -> None:
+def _run_store(store_id: str, run_id: str, **kwargs) -> None:
     try:
         from retail.batch.runner import run_batch
 
-        run_batch(tienda=store_id, **kwargs)
-    except Exception:
+        run_batch(tienda=store_id, batch_run_id=run_id, **kwargs)
+    except Exception as exc:
         logger.exception("El scraping de %s falló", store_id)
+        from retail.search import connect_repo
+
+        repo = connect_repo()
+        if repo is not None:
+            try:
+                repo.finish_batch_run(run_id, status="failed", last_error=str(exc))
+            finally:
+                repo.close()
     finally:
         with _STORE_LOCK:
             _STORE_RUNNING.discard(store_id)

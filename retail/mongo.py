@@ -882,6 +882,24 @@ class ProductRepository:
         if not result.matched_count:
             raise GroupBatchBusy(group)
 
+    def activate_store_batch_run(self, run_id: str, store_id: str, data: dict[str, Any]) -> None:
+        """Entrega la reserva de una tienda al worker sin crear otra corrida."""
+        from bson import ObjectId
+        from retail.batch.store_scope import StoreBatchBusy
+
+        result = self.batch_runs.update_one(
+            {
+                "_id": ObjectId(run_id),
+                "tienda": store_id,
+                "scope": "tienda",
+                "status": "running",
+                "phase": "starting",
+            },
+            {"$set": data},
+        )
+        if not result.matched_count:
+            raise StoreBatchBusy(store_id)
+
     def request_group_stop(self, group: str) -> bool:
         """Pide parar la corrida de un grupo. No toca las de los demás."""
         result = self.batch_runs.update_one(

@@ -156,12 +156,12 @@ function progressCell(group) {
     if (group.status === "failed" && group.last_run) {
       const processed = group.last_run.processed || 0;
       const items = group.last_run.items || 0;
-      const progress = items ? `${processed}/${items} productos` : "";
+      const progressText = items ? `${processed}/${items} productos` : "";
       const error = group.last_run.last_error
         ? `<span class="err-inline">${escapeHtml(group.last_run.last_error)}</span>`
         : "";
-      if (progress && error) return `${progress}<div>${error}</div>`;
-      return error || progress || "—";
+      if (progressText && error) return `${progressText}<div>${error}</div>`;
+      return error || progressText || "—";
     }
     if (group.status === "stopped" && group.last_run) {
       const processed = group.last_run.processed || 0;
@@ -180,16 +180,18 @@ function progressCell(group) {
   const processed = progress.processed || 0;
   const items = progress.items || 0;
   const pct = progress.percent != null ? progress.percent : items ? Math.round((100 * processed) / items) : 0;
+  const phaseLabel = progress.phase_label || (items ? "En curso" : "Arrancando");
   const query = progress.current_query
-    ? `<div class="cron-query muted">${escapeHtml(progress.phase_label || "")}: ${escapeHtml(progress.current_query)}</div>`
-    : `<div class="cron-query muted">${escapeHtml(progress.phase_label || "En curso")}</div>`;
+    ? `<div class="cron-query muted">${escapeHtml(phaseLabel)}: ${escapeHtml(progress.current_query)}</div>`
+    : `<div class="cron-query muted">${escapeHtml(phaseLabel)}</div>`;
   const storeCount = progress.stores_total;
   const stores = storeCount
     ? `<span class="muted"> · ${storeCount} ${storeCount === 1 ? "tienda" : "tiendas"}</span>`
     : "";
+  const label = items ? `${processed}/${items} productos` : "Preparando catálogo…";
   return `
     <div class="cron-progress-wrap">
-      <div class="cron-progress-label">${processed}/${items || "?"} productos${stores}</div>
+      <div class="cron-progress-label">${label}${stores}</div>
       <div class="search-bar cron-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct}">
         <span style="width:${pct}%"></span>
       </div>
@@ -421,6 +423,7 @@ async function toggleAlerts(button) {
 }
 
 let lastStoreJobs = [];
+let lastCronPayload = null;
 let storeIdsKey = "";
 
 function fillStores(payload) {
@@ -443,28 +446,66 @@ function fillStores(payload) {
 function renderStoreJobs(payload) {
   lastStoreJobs = payload.store_jobs || [];
   const wrap = $("store-jobs-wrap");
-  if (!lastStoreJobs.length) {
+  const meta = $("store-scrape-meta");
+  const select = $("store-select");
+  const selected = select?.value || "";
+  const live = lastStoreJobs.filter((job) => ["running", "paused"].includes(job.status));
+  const visible = lastStoreJobs.filter((job) => {
+    if (["running", "paused", "failed", "stopped", "done"].includes(job.status)) return true;
+    return selected && job.id === selected;
+  });
+  if (meta) {
+    if (live.length) {
+      meta.textContent = live
+        .map((job) => {
+          const processed = job.progress?.processed ?? job.last_run?.processed ?? 0;
+          const items = job.progress?.items ?? job.last_run?.items ?? 0;
+          const query = job.progress?.current_query;
+          const base = items
+            ? `${job.title || job.id}: ${processed}/${items} productos`
+            : `${job.title || job.id}: arrancando…`;
+          return query ? `${base} · ${query}` : base;
+        })
+        .join(" · ");
+    } else if (selected) {
+      const job = lastStoreJobs.find((item) => item.id === selected);
+      meta.textContent = job?.last_run
+        ? `Última corrida de ${job.title || job.id}: ${formatWhen(job.last_run.finished_at || job.last_run.started_at)}`
+        : "";
+    } else {
+      meta.textContent = "";
+    }
+  }
+  if (!wrap) return;
+  if (!visible.length) {
     wrap.hidden = true;
     wrap.querySelector("tbody").innerHTML = "";
+    syncRunButton();
     return;
   }
   wrap.hidden = false;
-  wrap.querySelector("tbody").innerHTML = lastStoreJobs
+  wrap.querySelector("tbody").innerHTML = visible
     .map((job) => {
       const like = { status: job.status, progress: job.progress, last_run: job.last_run };
       const groups = (job.groups || []).join(", ");
+      const counts = countLine(job.progress || job.last_run);
+      const highlight = selected && job.id === selected ? " cron-store-selected" : "";
       return `
-    <tr data-status="${escapeHtml(job.status)}" data-tienda="${escapeHtml(job.id)}">
+    <tr class="${highlight.trim()}" data-status="${escapeHtml(job.status)}" data-tienda="${escapeHtml(job.id)}">
       <td>
         <strong>${escapeHtml(job.title || job.id)}</strong>
         <div class="muted">${escapeHtml(job.id)}${groups ? ` · ${escapeHtml(groups)}` : ""}</div>
       </td>
       <td>${statusBadge(job.status)}</td>
-      <td>${progressCell(like)}</td>
+      <td>
+        ${progressCell(like)}
+        ${counts ? `<div class="cron-basic-counts muted">${escapeHtml(counts)}</div>` : ""}
+      </td>
       <td>${lastRunCell(like)}</td>
     </tr>`;
     })
     .join("");
+  syncRunButton();
 }
 
 function countLine(run) {
@@ -567,6 +608,7 @@ function syncRunButton() {
 }
 
 function render(payload) {
+  lastCronPayload = payload;
   for (const group of payload.groups || []) {
     if (!["running", "paused"].includes(group.status)) stoppingGroups.delete(group.id);
   }
@@ -635,7 +677,10 @@ async function refresh() {
   }
 }
 
-$("store-select")?.addEventListener("change", syncRunButton);
+$("store-select")?.addEventListener("change", () => {
+  syncRunButton();
+  if (lastCronPayload) renderStoreJobs(lastCronPayload);
+});
 
 $("cron-toggle")?.addEventListener("click", async (event) => {
   const button = event.currentTarget;

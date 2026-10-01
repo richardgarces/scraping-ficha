@@ -214,7 +214,10 @@ def run_batch(
                 }
             )
         try:
-            if batch_run_id:
+            if batch_run_id and store_key:
+                repo.activate_store_batch_run(batch_run_id, store_key, run_doc)
+                run_id = batch_run_id
+            elif batch_run_id and group_key:
                 repo.activate_group_batch_run(batch_run_id, group_key, run_doc)
                 run_id = batch_run_id
             else:

@@ -134,25 +134,67 @@ def test_start_store_batch_rejects_second_start(monkeypatch):
     monkeypatch.setattr("retail.batch.store_scope.normalize_store", lambda store_id: "ahumada")
     monkeypatch.setattr("retail.batch.store_scope.store_title", lambda store_id: "Ahumada")
     monkeypatch.setattr("retail.batch.store_scope.store_batch_is_busy", lambda repo, store_id: False)
-    monkeypatch.setattr("retail.search.connect_repo", lambda: None)
+    monkeypatch.setattr("retail.batch.store_scope.groups_for_store", lambda store_id, **kwargs: ["farmacias"])
+
+    class _Repo:
+        def start_batch_run(self, data):
+            assert data["tienda"] == "ahumada"
+            assert data["scope"] == "tienda"
+            assert data["phase"] == "starting"
+            return "store-run-1"
+
+        def close(self):
+            return None
+
+    monkeypatch.setattr("retail.search.connect_repo", lambda: _Repo())
 
     class _Thread:
         def __init__(self, *args, **kwargs):
+            self.args = kwargs.get("args")
             self.name = kwargs.get("name")
 
         def start(self):
             return None
 
-    monkeypatch.setattr(jobs.threading, "Thread", _Thread)
+    threads = []
+    original = jobs.threading.Thread
+
+    def capture(*args, **kwargs):
+        thread = _Thread(*args, **kwargs)
+        threads.append(thread)
+        return thread
+
+    monkeypatch.setattr(jobs.threading, "Thread", capture)
     try:
         first = jobs.start_store_batch("ahumada")
         assert first["tienda"] == "ahumada"
         assert first["running"] is True
+        assert first["run_id"] == "store-run-1"
+        assert threads[0].args == ("ahumada", "store-run-1")
         try:
             jobs.start_store_batch("ahumada")
             raised = False
         except StoreBatchBusy:
             raised = True
+        assert raised
+    finally:
+        jobs._STORE_RUNNING.clear()
+        monkeypatch.setattr(jobs.threading, "Thread", original)
+
+
+def test_start_store_batch_requires_mongo(monkeypatch):
+    from retail.web import jobs
+
+    jobs._STORE_RUNNING.clear()
+    monkeypatch.setattr("retail.batch.store_scope.normalize_store", lambda store_id: "ahumada")
+    monkeypatch.setattr("retail.batch.store_scope.store_title", lambda store_id: "Ahumada")
+    monkeypatch.setattr("retail.search.connect_repo", lambda: None)
+    try:
+        raised = False
+        try:
+            jobs.start_store_batch("ahumada")
+        except RuntimeError as exc:
+            raised = "MongoDB" in str(exc)
         assert raised
     finally:
         jobs._STORE_RUNNING.clear()
