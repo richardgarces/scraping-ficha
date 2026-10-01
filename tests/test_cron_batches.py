@@ -210,6 +210,7 @@ def test_batch_run_progress_upsert(monkeypatch):
     repo.update_batch_run(run_id, phase="products", current_query="iphone 16", current_id="iphone-16")
     assert doc["current_query"] == "iphone 16"
     assert doc["phase"] == "products"
+    assert doc["activity_at"] >= doc["created_at"]
 
     repo.append_batch_search(
         run_id,
@@ -462,3 +463,91 @@ def test_cron_batch_alerts_returns_the_run_count(monkeypatch):
     assert payload["total"] == 256
     assert payload["items"][0]["store_title"] == "Falabella"
     assert payload["items"][0]["channel"] is None
+
+
+def test_long_run_with_recent_progress_is_not_stale():
+    from datetime import datetime, timedelta, timezone
+
+    from retail.mongo import batch_run_is_stale
+
+    now = datetime(2026, 10, 1, 22, 23, tzinfo=timezone.utc)
+    started = now - timedelta(hours=14)
+    cutoff = now - timedelta(hours=3)
+    live = {
+        "status": "running",
+        "phase": "search",
+        "created_at": started,
+        "activity_at": now - timedelta(minutes=1),
+    }
+    silent = {
+        "status": "running",
+        "phase": "search",
+        "created_at": started,
+        "activity_at": now - timedelta(hours=4),
+    }
+    paused = {"status": "running", "phase": "paused", "created_at": started}
+    legacy = {"status": "running", "phase": "search", "created_at": now - timedelta(hours=4)}
+
+    assert batch_run_is_stale(live, cutoff=cutoff) is False
+    assert batch_run_is_stale(silent, cutoff=cutoff) is True
+    assert batch_run_is_stale(paused, cutoff=cutoff) is False
+    assert batch_run_is_stale(legacy, cutoff=cutoff) is True
+
+
+def test_fail_stale_batch_runs_keeps_an_active_long_run():
+    from datetime import datetime, timedelta, timezone
+    from types import SimpleNamespace
+
+    from retail.mongo import ProductRepository, _now
+
+    now = _now()
+    docs = {
+        "live": {
+            "_id": "live",
+            "status": "running",
+            "phase": "search",
+            "created_at": now - timedelta(hours=6),
+            "activity_at": now - timedelta(minutes=2),
+        },
+        "dead": {
+            "_id": "dead",
+            "status": "running",
+            "phase": "search",
+            "created_at": now - timedelta(hours=1),
+            "activity_at": now - timedelta(hours=4),
+        },
+        "paused": {
+            "_id": "paused",
+            "status": "running",
+            "phase": "paused",
+            "created_at": now - timedelta(hours=8),
+            "activity_at": now - timedelta(hours=8),
+        },
+    }
+
+    class Runs:
+        def find(self, query):
+            phase = query.get("phase") or {}
+            excluded = set(phase.get("$nin") or [])
+            if phase.get("$ne"):
+                excluded.add(phase["$ne"])
+            return [
+                doc
+                for doc in docs.values()
+                if doc.get("status") == query.get("status") and doc.get("phase") not in excluded
+            ]
+
+        def update_one(self, filt, update):
+            doc = docs[filt["_id"]]
+            if doc.get("status") != filt.get("status"):
+                return SimpleNamespace(modified_count=0)
+            doc.update(update["$set"])
+            return SimpleNamespace(modified_count=1)
+
+    closed = ProductRepository.fail_stale_batch_runs(SimpleNamespace(batch_runs=Runs()), hours=3)
+    assert closed == 1
+    assert docs["live"]["status"] == "running"
+    assert docs["paused"]["status"] == "running"
+    assert docs["dead"]["status"] == "failed"
+    assert "sin actividad" in docs["dead"]["last_error"]
+    assert isinstance(docs["dead"]["finished_at"], datetime)

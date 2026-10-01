@@ -26,6 +26,28 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _as_utc(value: Any) -> datetime | None:
+    if not isinstance(value, datetime):
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def batch_run_is_stale(doc: dict[str, Any], *, cutoff: datetime) -> bool:
+    """Una corrida en curso envejece por su último progreso, no por la hora de inicio.
+
+    Retail puede tardar muchas horas y seguir guardando productos. Una pausa
+    no cuenta como abandono.
+    """
+    if doc.get("status") != "running" or doc.get("phase") == "paused":
+        return False
+    activity = _as_utc(doc.get("activity_at")) or _as_utc(doc.get("created_at"))
+    if activity is None:
+        return True
+    return activity < cutoff
+
+
 def _json_time(value: Any) -> str | None:
     if value is None:
         return None
@@ -810,6 +832,7 @@ class ProductRepository:
             "saved_upserted": 0,
             "saved_modified": 0,
             "created_at": _now(),
+            "activity_at": _now(),
         }
         if document.get("scope") == "grupo" and document.get("grupo"):
             return self._start_group_batch_run(document)
@@ -887,6 +910,7 @@ class ProductRepository:
 
         if not fields:
             return
+        fields = {**fields, "activity_at": _now()}
         self.batch_runs.update_one({"_id": ObjectId(run_id)}, {"$set": fields})
 
     def append_batch_search(self, run_id: str, row: dict[str, Any]) -> None:
@@ -901,8 +925,9 @@ class ProductRepository:
                 "saved_modified": int(saved.get("modified") or 0),
             },
         }
+        update["$set"] = {"activity_at": _now()}
         if row.get("error"):
-            update["$set"] = {"last_error": str(row["error"])}
+            update["$set"]["last_error"] = str(row["error"])
         self.batch_runs.update_one({"_id": ObjectId(run_id)}, update)
 
     def advance_batch_run(
@@ -928,8 +953,9 @@ class ProductRepository:
                 "failed": int(failed),
             }
         }
+        update["$set"] = {"activity_at": _now()}
         if error:
-            update["$set"] = {"last_error": str(error)[:500]}
+            update["$set"]["last_error"] = str(error)[:500]
         self.batch_runs.update_one({"_id": ObjectId(run_id)}, update)
 
     def finish_batch_run(self, run_id: str, **fields: Any) -> None:
@@ -945,24 +971,34 @@ class ProductRepository:
         self.batch_runs.update_one({"_id": ObjectId(run_id)}, {"$set": fields})
 
     def fail_stale_batch_runs(self, *, hours: float = 3) -> int:
-        """Cierra corridas huérfanas después de reinicios o despliegues."""
+        """Cierra corridas sin progreso después de un reinicio o un despliegue.
+
+        No usa la hora de inicio: una corrida de muchas horas que sigue
+        avanzando no es un abandono.
+        """
         from datetime import timedelta
 
-        cutoff = _now() - timedelta(hours=max(1.0, float(hours)))
-        result = self.batch_runs.update_many(
-            {"status": "running", "phase": {"$ne": "paused"}, "created_at": {"$lt": cutoff}},
-            {
-                "$set": {
-                    "status": "failed",
-                    "phase": "failed",
-                    "finished_at": _now(),
-                    "last_error": "Corrida interrumpida o sin actividad; se cerró automáticamente.",
-                    "current_query": None,
-                    "current_id": None,
-                }
-            },
-        )
-        return int(result.modified_count)
+        now = _now()
+        cutoff = now - timedelta(hours=max(1.0, float(hours)))
+        closed = 0
+        for doc in self.batch_runs.find({"status": "running", "phase": {"$ne": "paused"}}):
+            if not batch_run_is_stale(doc, cutoff=cutoff):
+                continue
+            result = self.batch_runs.update_one(
+                {"_id": doc["_id"], "status": "running"},
+                {
+                    "$set": {
+                        "status": "failed",
+                        "phase": "failed",
+                        "finished_at": now,
+                        "last_error": "Corrida interrumpida o sin actividad; se cerró automáticamente.",
+                        "current_query": None,
+                        "current_id": None,
+                    }
+                },
+            )
+            closed += int(getattr(result, "modified_count", 0) or 0)
+        return closed
 
     def find_by_query(self, query: str, limit: int = 200) -> list[dict[str, Any]]:
         text = query.strip()
