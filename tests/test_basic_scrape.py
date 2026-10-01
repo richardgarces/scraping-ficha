@@ -412,9 +412,67 @@ def test_iter_stored_products_closes_each_page_before_yielding():
     seen = []
     for item in repo.iter_stored_products(page_size=2):
         assert Cursor.live == 0
-        assert "_id" not in item
+        assert item["_id"] in {1, 2, 3, 4, 5}
         seen.append(item["product_id"])
 
     assert seen == ["p1", "p2", "p3", "p4", "p5"]
     assert repo.collection.queries == [{}, {"_id": {"$gt": 2}}, {"_id": {"$gt": 4}}, {"_id": {"$gt": 5}}]
     assert Cursor.live == 0
+
+
+def test_iter_stored_products_can_resume_after_id():
+    from retail.mongo import ProductRepository
+
+    class Cursor:
+        def __init__(self, docs):
+            self.docs = list(docs)
+            self.limit_n = None
+
+        def sort(self, key, direction):
+            self.docs.sort(key=lambda item: item["_id"])
+            return self
+
+        def limit(self, count):
+            self.limit_n = count
+            return self
+
+        def __iter__(self):
+            yield from self.docs[: self.limit_n]
+
+        def close(self):
+            return None
+
+    class Collection:
+        def __init__(self, docs):
+            self.docs = docs
+            self.queries = []
+
+        def find(self, query, projection=None):
+            self.queries.append(query)
+            last = (query.get("_id") or {}).get("$gt")
+            matched = [dict(doc) for doc in self.docs if last is None or doc["_id"] > last]
+            return Cursor(matched)
+
+    docs = [{"_id": index, "product_id": f"p{index}"} for index in range(1, 6)]
+    repo = ProductRepository.__new__(ProductRepository)
+    repo.collection = Collection(docs)
+    seen = [item["product_id"] for item in repo.iter_stored_products(page_size=10, after_id=2)]
+    assert seen == ["p3", "p4", "p5"]
+    assert repo.collection.queries == [{"_id": {"$gt": 2}}, {"_id": {"$gt": 5}}]
+
+
+def test_resolve_basic_resume_after_uses_run_or_offset():
+    from retail.batch.basic_scrape import BasicScrapeNothingToResume, resolve_basic_resume_after
+
+    repo = SimpleNamespace(
+        basic_scrape_cursor=lambda: None,
+        product_id_at_offset=lambda offset: f"id-{offset}",
+    )
+    assert resolve_basic_resume_after(repo, {"resume_after_id": "abc"}) == "abc"
+    assert resolve_basic_resume_after(repo, {"processed": 480}) == "id-479"
+    try:
+        resolve_basic_resume_after(repo, {"processed": 0})
+        raised = False
+    except BasicScrapeNothingToResume:
+        raised = True
+    assert raised

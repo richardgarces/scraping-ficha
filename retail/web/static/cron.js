@@ -483,9 +483,14 @@ function renderBasic(payload) {
   const wrap = $("basic-scrape-wrap");
   const meta = $("basic-scrape-meta");
   const running = job.status === "running";
+  const failed = ["failed", "stopped"].includes(job.status);
+  const canContinue = failed && (Number(job.last_run?.processed) || 0) > 0;
   if (button && button.dataset.busy !== "1") {
     button.disabled = running;
-    button.textContent = running ? "En curso" : "Scraping básico";
+    if (running) button.textContent = "En curso";
+    else if (canContinue) button.textContent = "Reiniciar";
+    else button.textContent = "Scraping básico";
+    button.dataset.startMode = canContinue ? "restart" : "";
   }
   if (meta) {
     meta.textContent = running
@@ -502,19 +507,54 @@ function renderBasic(payload) {
   wrap.hidden = false;
   const like = { status: job.status, progress: job.progress, last_run: job.last_run };
   const counts = countLine(job.progress || job.last_run);
+  const actions = [];
+  if (canContinue) {
+    actions.push(`<button type="button" class="secondary cron-continue" data-basic-mode="continue">Continuar</button>`);
+  }
+  if (failed) {
+    actions.push(`<button type="button" class="secondary cron-restart" data-basic-mode="restart">Reiniciar</button>`);
+  }
+  const statusCell = actions.length
+    ? `<div class="cron-group-action">${statusBadge(job.status)}${actions.join("")}</div>`
+    : statusBadge(job.status);
   wrap.querySelector("tbody").innerHTML = `
     <tr data-status="${escapeHtml(job.status)}">
       <td>
         <strong>${escapeHtml(job.title || "Scraping básico")}</strong>
         <div class="muted">${escapeHtml(job.id || "scraping_basico")}</div>
       </td>
-      <td>${statusBadge(job.status)}</td>
+      <td>${statusCell}</td>
       <td>
         ${progressCell(like)}
         ${counts ? `<div class="cron-basic-counts muted">${escapeHtml(counts)}</div>` : ""}
       </td>
       <td>${lastRunCell(like)}</td>
     </tr>`;
+}
+
+async function startBasicScrape(mode) {
+  const button = $("basic-scrape-run");
+  if (button) {
+    button.dataset.busy = "1";
+    button.disabled = true;
+    button.textContent = mode === "continue" ? "Continuando…" : mode === "restart" ? "Reiniciando…" : "Iniciando…";
+  }
+  try {
+    const body = {};
+    if (mode) body.mode = mode;
+    const result = await json("/api/admin/basic-scrape", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    flash(result.message || "Scraping básico iniciado.");
+    watchUntil = Date.now() + 60000;
+  } catch (error) {
+    flash(error.message, false);
+  } finally {
+    if (button) delete button.dataset.busy;
+  }
+  await refresh().catch((error) => flash(error.message, false));
 }
 
 function syncRunButton() {
@@ -620,23 +660,34 @@ $("cron-toggle")?.addEventListener("click", async (event) => {
 $("basic-scrape-form")?.addEventListener("submit", async (event) => {
   event.preventDefault();
   const button = $("basic-scrape-run");
-  button.dataset.busy = "1";
-  button.disabled = true;
-  button.textContent = "Iniciando…";
-  try {
-    const result = await json("/api/admin/basic-scrape", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({}),
-    });
-    flash(result.message || "Scraping básico iniciado.");
-    watchUntil = Date.now() + 60000;
-  } catch (error) {
-    flash(error.message, false);
-  } finally {
-    delete button.dataset.busy;
+  const mode = button?.dataset.startMode || "";
+  await startBasicScrape(mode || undefined);
+});
+
+document.addEventListener("click", (event) => {
+  const basic = event.target.closest("button[data-basic-mode]");
+  if (basic) {
+    startBasicScrape(basic.dataset.basicMode).catch((error) => flash(error.message, false));
+    return;
   }
-  refresh().catch((error) => flash(error.message, false));
+  const stop = event.target.closest("button[data-stop-group]");
+  if (stop) {
+    stopGroup(stop).catch((error) => flash(error.message, false));
+    return;
+  }
+  const start = event.target.closest("button[data-start-group]");
+  if (start) {
+    startGroup(start).catch((error) => flash(error.message, false));
+    return;
+  }
+  const close = event.target.closest("[data-close-alerts]");
+  if (close) {
+    closeAlerts();
+    return;
+  }
+  const button = event.target.closest("button.cron-alerts[data-run]");
+  if (!button) return;
+  toggleAlerts(button).catch((error) => flash(error.message, false));
 });
 
 $("store-scrape-form")?.addEventListener("submit", async (event) => {
@@ -662,27 +713,6 @@ $("store-scrape-form")?.addEventListener("submit", async (event) => {
     delete button.dataset.busy;
     syncRunButton();
   }
-});
-
-document.addEventListener("click", (event) => {
-  const stop = event.target.closest("button[data-stop-group]");
-  if (stop) {
-    stopGroup(stop).catch((error) => flash(error.message, false));
-    return;
-  }
-  const start = event.target.closest("button[data-start-group]");
-  if (start) {
-    startGroup(start).catch((error) => flash(error.message, false));
-    return;
-  }
-  const close = event.target.closest("[data-close-alerts]");
-  if (close) {
-    closeAlerts();
-    return;
-  }
-  const button = event.target.closest("button.cron-alerts[data-run]");
-  if (!button) return;
-  toggleAlerts(button).catch((error) => flash(error.message, false));
 });
 
 refresh().catch((error) => flash(error.message, false));

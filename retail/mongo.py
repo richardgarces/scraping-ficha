@@ -1028,6 +1028,10 @@ class ProductRepository:
             group = str(doc.get("grupo") or "").strip()
             if group and not doc.get("tienda"):
                 self.remember_group_batch_resume(group, doc)
+            elif doc.get("job") == "scraping_basico":
+                after = doc.get("resume_after_id")
+                if after:
+                    self.set_basic_scrape_cursor(after)
             result = self.batch_runs.update_one(
                 {"_id": doc["_id"], "status": "running"},
                 {
@@ -1873,12 +1877,14 @@ class ProductRepository:
             "rules": sorted(rules),
         }
 
-    def iter_stored_products(self, *, page_size: int = 200):
+    def iter_stored_products(self, *, page_size: int = 200, after_id: Any = None):
         """Productos ya guardados, sin historial ni miniaturas (el barrido básico).
 
         Cada página se lee y el cursor se cierra antes de entregarla. El barrido
         espera segundos por producto; un cursor abierto más de unos minutos
         expira y Mongo responde CursorNotFound.
+
+        `after_id` retoma después de ese `_id` (continuar una corrida fallida).
         """
         size = max(1, int(page_size))
         projection = {
@@ -1900,6 +1906,13 @@ class ProductRepository:
             "groups": 1,
         }
         last_id = None
+        if after_id is not None and str(after_id).strip():
+            try:
+                from bson import ObjectId
+
+                last_id = after_id if isinstance(after_id, ObjectId) else ObjectId(str(after_id))
+            except Exception:
+                last_id = after_id
         while True:
             query: dict[str, Any] = {} if last_id is None else {"_id": {"$gt": last_id}}
             cursor = self.collection.find(query, projection).sort("_id", 1).limit(size)
@@ -1913,10 +1926,44 @@ class ProductRepository:
                 return
             last_id = batch[-1].get("_id")
             for item in batch:
-                item.pop("_id", None)
                 yield item
             if last_id is None:
                 return
+
+    def product_id_at_offset(self, offset: int) -> Any | None:
+        """`_id` del producto en la posición dada (0 = primero). Para retomar sin cursor."""
+        skip = max(0, int(offset))
+        found = self.collection.find({}, {"_id": 1}).sort("_id", 1).skip(skip).limit(1)
+        for item in found:
+            return item.get("_id")
+        return None
+
+    def set_basic_scrape_cursor(self, after_id: Any | None) -> None:
+        key = "batch_cursor:scraping_basico"
+        if after_id is None or not str(after_id).strip():
+            self.app_settings.delete_one({"_id": key})
+            return
+        self.save_app_setting(
+            key,
+            {
+                "after_id": str(after_id),
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            },
+        )
+
+    def clear_basic_scrape_cursor(self) -> None:
+        self.set_basic_scrape_cursor(None)
+
+    def basic_scrape_cursor(self) -> str | None:
+        found = self.get_app_setting("batch_cursor:scraping_basico") or {}
+        value = str(found.get("after_id") or "").strip()
+        return value or None
+
+    def latest_basic_scrape_run(self) -> dict[str, Any] | None:
+        return self.batch_runs.find_one(
+            {"job": "scraping_basico"},
+            sort=[("started_at", -1)],
+        )
 
     def find_running_basic_scrape(self) -> dict[str, Any] | None:
         return self.batch_runs.find_one(

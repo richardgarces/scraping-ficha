@@ -164,13 +164,18 @@ async def post_store_scrape(request: Request) -> dict:
 async def post_basic_scrape(request: Request) -> dict:
     """Recorre productos ya guardados y scrapea cada categoría en sus tiendas."""
     current_user(request, admin=True)
+    from retail.batch.basic_scrape import BasicScrapeBusy, BasicScrapeNothingToResume
+
     body = await request.json() if request.headers.get("content-type", "").startswith("application/json") else {}
+    if not isinstance(body, dict):
+        body = {}
     schedule = load_schedule()
     source = str(body.get("source") or "scrape").strip().lower()
     if source not in {"scrape", "both"}:
         source = "scrape"
     pause = body.get("pause")
     limit = body.get("limit")
+    mode = body.get("mode")
     try:
         return start_basic_scrape(
             source=source,
@@ -179,9 +184,12 @@ async def post_basic_scrape(request: Request) -> dict:
             max_items=int(body.get("max") or body.get("max_items") or 6),
             limit=int(limit) if limit not in (None, "") else None,
             persist=not bool(body.get("dry_run")),
+            mode=mode,
         )
     except BasicScrapeBusy as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except BasicScrapeNothingToResume as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except ValueError as exc:

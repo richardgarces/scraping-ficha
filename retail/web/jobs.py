@@ -195,11 +195,23 @@ _BASIC_RUNNING = False
 
 
 def start_basic_scrape(**kwargs) -> dict[str, Any]:
-    """Arranca el barrido de productos ya guardados. No bloquea el request."""
-    from retail.batch.basic_scrape import BasicScrapeBusy, basic_scrape_is_busy
+    """Arranca el barrido de productos ya guardados. No bloquea el request.
+
+    kwargs puede incluir mode=continue|restart para retomar o partir de cero.
+    """
+    from retail.batch.basic_scrape import (
+        BasicScrapeBusy,
+        BasicScrapeNothingToResume,
+        basic_scrape_is_busy,
+        resolve_basic_resume_after,
+    )
     from retail.search import connect_repo
 
     global _BASIC_RUNNING
+    mode = str(kwargs.pop("mode", None) or "").strip().lower() or None
+    if mode not in {None, "continue", "restart"}:
+        raise ValueError("Modo inválido. Usa continuar o reiniciar.")
+
     with _BASIC_LOCK:
         if _BASIC_RUNNING:
             raise BasicScrapeBusy()
@@ -209,6 +221,26 @@ def start_basic_scrape(**kwargs) -> dict[str, Any]:
                 raise RuntimeError("MongoDB no está disponible; el scraping básico no puede guardar productos.")
             if basic_scrape_is_busy(repo):
                 raise BasicScrapeBusy()
+            after_id = None
+            prior = {}
+            if mode == "restart" and hasattr(repo, "clear_basic_scrape_cursor"):
+                repo.clear_basic_scrape_cursor()
+            elif mode == "continue":
+                previous = repo.latest_basic_scrape_run() if hasattr(repo, "latest_basic_scrape_run") else None
+                after_id = resolve_basic_resume_after(repo, previous)
+                if previous:
+                    prior = {
+                        "processed": int(previous.get("processed") or 0),
+                        "saved_upserted": int(previous.get("saved_upserted") or 0),
+                        "saved_modified": int(previous.get("saved_modified") or 0),
+                        "skipped": int(previous.get("skipped") or 0),
+                        "failed": int(previous.get("failed") or 0),
+                    }
+                if hasattr(repo, "set_basic_scrape_cursor"):
+                    repo.set_basic_scrape_cursor(after_id)
+            kwargs["after_id"] = after_id
+            kwargs["resume_mode"] = mode or "schedule"
+            kwargs["prior_progress"] = prior
         finally:
             if repo is not None:
                 repo.close()
@@ -225,11 +257,18 @@ def start_basic_scrape(**kwargs) -> dict[str, Any]:
         with _BASIC_LOCK:
             _BASIC_RUNNING = False
         raise
+    if mode == "continue":
+        message = "Continuando scraping básico desde donde quedó."
+    elif mode == "restart":
+        message = "Reiniciando scraping básico desde el comienzo."
+    else:
+        message = "Scraping básico iniciado."
     return {
         "ok": True,
         "running": True,
         "job": "scraping_basico",
-        "message": "Scraping básico iniciado.",
+        "mode": mode or "schedule",
+        "message": message,
     }
 
 

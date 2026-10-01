@@ -32,6 +32,29 @@ class BasicScrapeBusy(Exception):
         super().__init__("Ya hay un scraping básico en curso.")
 
 
+class BasicScrapeNothingToResume(ValueError):
+    def __init__(self) -> None:
+        super().__init__("No hay progreso guardado para continuar el scraping básico. Usa reiniciar.")
+
+
+def resolve_basic_resume_after(repo: Any, run: dict[str, Any] | None) -> Any:
+    """Punto de reanudación: cursor guardado, resume_after_id de la corrida, o offset."""
+    if hasattr(repo, "basic_scrape_cursor"):
+        saved = repo.basic_scrape_cursor()
+        if saved:
+            return saved
+    if run:
+        after = run.get("resume_after_id")
+        if after:
+            return after
+        processed = int(run.get("processed") or 0)
+        if processed > 0 and hasattr(repo, "product_id_at_offset"):
+            found = repo.product_id_at_offset(processed - 1)
+            if found is not None:
+                return found
+    raise BasicScrapeNothingToResume()
+
+
 def product_query(doc: dict[str, Any]) -> str:
     """Términos de búsqueda del documento, o el nombre si no hay consulta guardada."""
     for key in _QUERY_FIELDS:
@@ -176,6 +199,9 @@ def run_basic_scrape(
     limit: int | None = None,
     persist: bool = True,
     resolve_fn: Any | None = None,
+    after_id: Any | None = None,
+    resume_mode: str | None = None,
+    prior_progress: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Recorre productos guardados y scrapea el grupo de cada uno. No bloquea el request."""
     close = False
@@ -191,6 +217,8 @@ def run_basic_scrape(
 
     owns_list = products is not None
     stream = list(products or [])
+    prior = dict(prior_progress or {})
+    prior_processed = int(prior.get("processed") or 0)
     if not owns_list:
         total = int(repo.count() or 0)
         if limit is not None:
@@ -214,19 +242,32 @@ def run_basic_scrape(
         "job": JOB_KEY,
         "scope": SCOPE,
         "skipped": 0,
+        "resume_mode": resume_mode or "schedule",
+        "resume_after_id": str(after_id) if after_id is not None else None,
     }
     run_id = repo.start_batch_run(run_doc)
+    if prior_processed or prior.get("saved_upserted") or prior.get("saved_modified") or prior.get("skipped"):
+        repo.update_batch_run(
+            run_id,
+            processed=prior_processed,
+            saved_upserted=int(prior.get("saved_upserted") or 0),
+            saved_modified=int(prior.get("saved_modified") or 0),
+            skipped=int(prior.get("skipped") or 0),
+            failed=int(prior.get("failed") or 0),
+            resume_after_id=str(after_id) if after_id is not None else None,
+        )
     summary: dict[str, Any] = {
         "started_at": started_at,
         "batch_run_id": run_id,
         "job": JOB_KEY,
         "scope": SCOPE,
         "items": total,
-        "processed": 0,
-        "skipped": 0,
-        "failed": 0,
-        "saved_upserted": 0,
-        "saved_modified": 0,
+        "processed": prior_processed,
+        "skipped": int(prior.get("skipped") or 0),
+        "failed": int(prior.get("failed") or 0),
+        "saved_upserted": int(prior.get("saved_upserted") or 0),
+        "saved_modified": int(prior.get("saved_modified") or 0),
+        "resume_after_id": str(after_id) if after_id is not None else None,
     }
     seen: set[tuple[str, tuple[str, ...]]] = set()
     walked = 0
@@ -235,7 +276,7 @@ def run_basic_scrape(
         if owns_list:
             iterator = stream
         else:
-            iterator = repo.iter_stored_products()
+            iterator = repo.iter_stored_products(after_id=after_id)
         for doc in iterator:
             from retail.batch.config import wait_while_paused
 
@@ -243,14 +284,19 @@ def run_basic_scrape(
             if limit is not None and walked >= int(limit):
                 break
             walked += 1
+            mongo_id = doc.get("_id")
             label = _label(doc)
             query = product_query(doc)
             groups = groups_for_product(doc, resolve_fn=resolve_fn) if query else []
+            if mongo_id is not None and hasattr(repo, "set_basic_scrape_cursor"):
+                repo.set_basic_scrape_cursor(mongo_id)
             if not query or not groups:
                 logger.info("Scraping básico: sin categoría, se omite %s", label)
                 summary["skipped"] += 1
                 summary["processed"] += 1
                 repo.advance_batch_run(run_id, processed=1, skipped=1)
+                if mongo_id is not None:
+                    repo.update_batch_run(run_id, resume_after_id=str(mongo_id))
                 continue
             stores = stores_for_groups(groups, repo=repo)
             if not stores:
@@ -262,11 +308,15 @@ def run_basic_scrape(
                 summary["skipped"] += 1
                 summary["processed"] += 1
                 repo.advance_batch_run(run_id, processed=1, skipped=1)
+                if mongo_id is not None:
+                    repo.update_batch_run(run_id, resume_after_id=str(mongo_id))
                 continue
             key = (query.casefold(), tuple(groups))
             if key in seen:
                 summary["processed"] += 1
                 repo.advance_batch_run(run_id, processed=1)
+                if mongo_id is not None:
+                    repo.update_batch_run(run_id, resume_after_id=str(mongo_id))
                 continue
             seen.add(key)
             repo.update_batch_run(
@@ -276,6 +326,7 @@ def run_basic_scrape(
                 current_id=str(doc.get("product_id") or ""),
                 current_index=walked - 1,
                 stores_total=len(stores),
+                resume_after_id=str(mongo_id) if mongo_id is not None else None,
             )
             print(f"[básico {walked}/{total or '?'}] {query} · {', '.join(groups)} · {len(stores)} tiendas")
             try:
@@ -326,6 +377,8 @@ def run_basic_scrape(
             if pause and walked < total:
                 time.sleep(pause)
         summary["finished_at"] = datetime.now(timezone.utc).isoformat()
+        if hasattr(repo, "clear_basic_scrape_cursor"):
+            repo.clear_basic_scrape_cursor()
         repo.finish_batch_run(
             run_id,
             status="done",
