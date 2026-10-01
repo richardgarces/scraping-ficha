@@ -267,6 +267,9 @@ def test_derive_group_status_today():
     failed_legacy = {"status": "error", "started_at": "2026-09-15T09:00:00-03:00"}
     assert derive_group_status(failed_legacy, today=today) == "failed"
 
+    stopped_today = {"status": "stopped", "started_at": "2026-09-15T09:00:00-03:00"}
+    assert derive_group_status(stopped_today, today=today) == "stopped"
+
     done_yesterday = {"status": "done", "started_at": "2026-09-14T09:00:00-03:00"}
     assert derive_group_status(done_yesterday, today=today) == "idle"
 

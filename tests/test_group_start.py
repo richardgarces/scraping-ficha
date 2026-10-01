@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 import pytest
 
 from retail.auth import COOKIE, sign_session
-from retail.batch.group_scope import GroupBatchBusy, GroupBatchPaused
+from retail.batch.group_scope import GroupBatchBusy, GroupBatchIdle, GroupBatchPaused
 from retail.web import jobs
 from retail.web.app import app
 
@@ -53,6 +53,56 @@ def test_start_group_api_reports_failures(monkeypatch, error, status):
     response = TestClient(app).post("/api/admin/cron-batches/retail/start")
     assert response.status_code == status
     assert response.json()["detail"]
+
+
+def test_stop_group_api_targets_only_that_group(monkeypatch):
+    monkeypatch.setattr("retail.web.settings_api.current_user", lambda *a, **k: {"role": "admin"})
+    calls = []
+
+    def stop(group):
+        calls.append(group)
+        return {"ok": True, "grupo": group, "message": "Deteniendo Farmacias. Las demás corridas siguen."}
+
+    monkeypatch.setattr("retail.web.settings_api.stop_group_batch", stop)
+    response = TestClient(app).post("/api/admin/cron-batches/farmacias/stop")
+    assert response.status_code == 202
+    assert calls == ["farmacias"]
+    assert "Farmacias" in response.json()["message"]
+
+
+def test_stop_group_api_requires_admin(anonymous_repo, monkeypatch):
+    monkeypatch.setattr("retail.web.settings_api.stop_group_batch", lambda group: pytest.fail(group))
+    client = TestClient(app)
+    assert client.post("/api/admin/cron-batches/retail/stop").status_code == 401
+
+
+@pytest.mark.parametrize("error,status", [
+    (GroupBatchIdle("retail"), 409),
+    (ValueError("Grupo desconocido"), 400),
+    (RuntimeError("Mongo offline"), 503),
+])
+def test_stop_group_api_reports_failures(monkeypatch, error, status):
+    monkeypatch.setattr("retail.web.settings_api.current_user", lambda *a, **k: {"role": "admin"})
+
+    def stop(group):
+        raise error
+
+    monkeypatch.setattr("retail.web.settings_api.stop_group_batch", stop)
+    response = TestClient(app).post("/api/admin/cron-batches/retail/stop")
+    assert response.status_code == status
+    assert response.json()["detail"]
+
+
+def test_pause_checkpoint_stops_only_the_flagged_run(monkeypatch):
+    from retail.batch.config import wait_while_paused
+    from retail.batch.group_scope import GroupBatchStopped
+
+    monkeypatch.setattr("retail.batch.config.load_schedule", lambda repo: {"paused": True})
+    flagged = SimpleNamespace(group_stop_requested=lambda run_id: run_id == "retail-run")
+    with pytest.raises(GroupBatchStopped):
+        wait_while_paused(flagged, "retail-run", poll_seconds=0.01)
+    monkeypatch.setattr("retail.batch.config.load_schedule", lambda repo: {"paused": False})
+    wait_while_paused(flagged, "farmacias-run", poll_seconds=0.01)
 
 
 @pytest.fixture

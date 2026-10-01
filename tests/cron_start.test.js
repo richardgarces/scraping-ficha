@@ -30,9 +30,19 @@ test("solo los grupos en espera y con tiendas ofrecen iniciar", () => {
   assert.match(idle, /Iniciar ahora/);
   assert.match(idle, /data-start-group="retail"/);
   assert.doesNotMatch(idle, / disabled/);
-  for (const status of ["running", "paused", "done", "failed"]) {
+  for (const status of ["done", "failed", "stopped"]) {
     assert.doesNotMatch(cron.groupStatusCell({ ...group, status }, false), /data-start-group/);
+    assert.doesNotMatch(cron.groupStatusCell({ ...group, status }, false), /data-stop-group/);
   }
+  for (const status of ["running", "paused"]) {
+    const cell = cron.groupStatusCell({ ...group, status, progress: { phase: "products" } }, false);
+    assert.match(cell, /data-stop-group="retail"/);
+    assert.match(cell, /Detener/);
+    assert.doesNotMatch(cell, /data-start-group/);
+  }
+  const stopping = cron.groupStatusCell({ ...group, status: "running", progress: { phase: "stopping" } }, false);
+  assert.match(stopping, /Deteniendo/);
+  assert.match(stopping, / disabled/);
   assert.doesNotMatch(cron.groupStatusCell({ ...group, store_count: 0 }, false), /data-start-group/);
   assert.match(cron.groupStatusCell(group, true), / disabled/);
   assert.match(cron.groupStatusCell(group, true), /Reanuda las corridas/);
@@ -55,6 +65,19 @@ test("doble clic y redibujado no duplican la solicitud", async () => {
   assert.equal(cron.notices[0][0], "Corrida iniciada para Retail.");
   assert.equal(cron.refreshes, 1);
   assert.doesNotMatch(cron.groupStatusCell(group, false), /Iniciando…/);
+});
+
+test("detener un grupo no pide pausar los demás", async () => {
+  const calls = [];
+  const cron = loadCron(async (url, options) => {
+    calls.push([url, options.method]);
+    return { status: 202, ok: true, json: async () => ({ message: "Deteniendo Farmacias. Las demás corridas siguen." }) };
+  });
+  const button = { dataset: { stopGroup: "farmacias" }, disabled: false, textContent: "Detener" };
+  await cron.stopGroup(button);
+  assert.deepEqual(calls, [["/api/admin/cron-batches/farmacias/stop", "POST"]]);
+  assert.equal(cron.notices[0][0], "Deteniendo Farmacias. Las demás corridas siguen.");
+  assert.equal(cron.refreshes, 1);
 });
 
 test("un rechazo se muestra y permite reintentar tras actualizar", async () => {

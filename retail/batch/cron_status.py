@@ -23,6 +23,8 @@ PHASE_LABELS = {
     "watches": "Seguidos",
     "products": "Catálogo",
     "paused": "Pausado por el administrador",
+    "stopping": "Deteniendo",
+    "stopped": "Detenida",
     "digest": "Resumen",
     "done": "Listo",
     "budget_done": "Turno completado",
@@ -84,6 +86,8 @@ def derive_group_status(run: dict[str, Any] | None, *, today: str | None = None)
         return "idle"
     if status == "failed":
         return "failed"
+    if status == "stopped":
+        return "stopped"
     if status == "done":
         return "done"
     return "idle"

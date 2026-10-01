@@ -34,6 +34,8 @@ const STATUS_LABEL = {
   idle: "En espera",
   running: "En curso",
   paused: "Pausado",
+  stopping: "Deteniendo",
+  stopped: "Detenida",
   done: "Listo hoy",
   failed: "Falló hoy",
 };
@@ -44,19 +46,31 @@ function statusBadge(status) {
 }
 
 const startingGroups = new Set();
+const stoppingGroups = new Set();
 
 function groupStatusCell(group, paused) {
   const badge = statusBadge(group.status);
-  if (group.status !== "idle" || !group.store_count) return badge;
-  const starting = startingGroups.has(group.id);
-  const title = paused
-    ? "Reanuda las corridas antes de iniciar un grupo."
-    : `Iniciar ${group.title || group.id} ahora`;
-  return `<div class="cron-group-action">${badge}
-    <button type="button" class="secondary" data-start-group="${escapeHtml(group.id)}"
+  const actions = [];
+  if (["running", "paused"].includes(group.status)) {
+    const stopping = stoppingGroups.has(group.id) || group.progress?.phase === "stopping";
+    const title = `Detener ${group.title || group.id}. Las demás corridas siguen.`;
+    actions.push(`<button type="button" class="secondary cron-stop" data-stop-group="${escapeHtml(group.id)}"
+      title="${escapeHtml(title)}" aria-label="${escapeHtml(title)}"${stopping ? " disabled" : ""}>
+      ${stopping ? "Deteniendo…" : "Detener"}
+    </button>`);
+  }
+  if (group.status === "idle" && group.store_count) {
+    const starting = startingGroups.has(group.id);
+    const title = paused
+      ? "Reanuda las corridas antes de iniciar un grupo."
+      : `Iniciar ${group.title || group.id} ahora`;
+    actions.push(`<button type="button" class="secondary" data-start-group="${escapeHtml(group.id)}"
       title="${escapeHtml(title)}" aria-label="${escapeHtml(title)}"${paused || starting ? " disabled" : ""}>
       ${starting ? "Iniciando…" : "Iniciar ahora"}
-    </button></div>`;
+    </button>`);
+  }
+  if (!actions.length) return badge;
+  return `<div class="cron-group-action">${badge}${actions.join("")}</div>`;
 }
 
 async function startGroup(button) {
@@ -79,6 +93,23 @@ async function startGroup(button) {
   await refresh().catch((error) => flash(error.message, false));
 }
 
+async function stopGroup(button) {
+  const group = button.dataset.stopGroup;
+  if (!group || button.disabled || stoppingGroups.has(group)) return;
+  stoppingGroups.add(group);
+  button.disabled = true;
+  button.textContent = "Deteniendo…";
+  try {
+    const result = await json(`/api/admin/cron-batches/${encodeURIComponent(group)}/stop`, { method: "POST" });
+    flash(result.message || "Deteniendo la corrida.");
+    watchUntil = Date.now() + 60000;
+  } catch (error) {
+    flash(error.message, false);
+    stoppingGroups.delete(group);
+  }
+  await refresh().catch((error) => flash(error.message, false));
+}
+
 function formatWhen(iso) {
   if (!iso) return "—";
   try {
@@ -93,6 +124,11 @@ function formatWhen(iso) {
 function progressCell(group) {
   const progress = group.progress;
   if (!["running", "paused"].includes(group.status) || !progress) {
+    if (group.status === "stopped" && group.last_run) {
+      const processed = group.last_run.processed || 0;
+      const items = group.last_run.items || 0;
+      return items ? `Detenida en ${processed}/${items} productos` : "Detenida";
+    }
     if (group.status === "done" && group.last_run) {
       const p = group.last_run.processed || 0;
       const t = group.last_run.items || 0;
@@ -455,6 +491,9 @@ function syncRunButton() {
 }
 
 function render(payload) {
+  for (const group of payload.groups || []) {
+    if (!["running", "paused"].includes(group.status)) stoppingGroups.delete(group.id);
+  }
   const sched = payload.schedule || {};
   const enabled = sched.enabled ? "activa" : "desactivada";
   $("cron-meta").textContent =
@@ -590,6 +629,11 @@ $("store-scrape-form")?.addEventListener("submit", async (event) => {
 });
 
 document.addEventListener("click", (event) => {
+  const stop = event.target.closest("button[data-stop-group]");
+  if (stop) {
+    stopGroup(stop).catch((error) => flash(error.message, false));
+    return;
+  }
   const start = event.target.closest("button[data-start-group]");
   if (start) {
     startGroup(start).catch((error) => flash(error.message, false));

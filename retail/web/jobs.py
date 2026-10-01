@@ -77,6 +77,32 @@ def start_group_batch(grupo: str) -> dict[str, Any]:
     }
 
 
+def stop_group_batch(grupo: str) -> dict[str, Any]:
+    """Pide detener un grupo. La corrida lo nota entre productos; las otras siguen."""
+    from retail.batch.group_scope import GroupBatchIdle
+    from retail.search import connect_repo
+    from retail.store_categories import list_store_categories, normalize_group
+
+    repo = connect_repo()
+    if repo is None:
+        raise RuntimeError("MongoDB no está disponible; no se pudo detener la corrida.")
+    try:
+        group = normalize_group(grupo, repo=repo)
+        if not repo.request_group_stop(group):
+            raise GroupBatchIdle(group)
+        title = next(
+            (item.get("title") or group for item in list_store_categories(repo=repo) if item["id"] == group),
+            group,
+        )
+    finally:
+        repo.close()
+    return {
+        "ok": True,
+        "grupo": group,
+        "message": f"Deteniendo {title}. Las demás corridas siguen.",
+    }
+
+
 def _run_group(group: str, run_id: str, **kwargs) -> None:
     try:
         from retail.batch.runner import run_batch

@@ -14,6 +14,7 @@ from retail.batch.alerts import (
     dispatch_alerts,
     dispatch_user_alerts,
 )
+from retail.batch.group_scope import GroupBatchStopped
 from retail.batch.catalog import (
     active_products,
     catalog_origin_store,
@@ -532,6 +533,19 @@ def run_batch(
                 duration_seconds=summary["duration_seconds"],
                 queries_per_minute=summary["queries_per_minute"],
                 product_workers=product_workers,
+            )
+        return summary
+    except GroupBatchStopped:
+        if product_executor is not None:
+            product_executor.shutdown(wait=False, cancel_futures=True)
+        summary["stopped"] = True
+        summary["finished_at"] = datetime.now(timezone.utc).isoformat()
+        if repo is not None and run_id:
+            repo.finish_batch_run(
+                run_id,
+                status="stopped",
+                phase="stopped",
+                finished_at=summary["finished_at"],
             )
         return summary
     except Exception as exc:

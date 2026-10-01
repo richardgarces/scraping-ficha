@@ -217,8 +217,12 @@ def wait_while_paused(repo: Any, run_id: str | None = None, poll_seconds: float 
     """Pausa cooperativa para los lotes activos, controlada desde administración."""
     import time
 
+    from retail.batch.group_scope import raise_if_group_stopped
+
+    raise_if_group_stopped(repo, run_id)
     waiting = False
     while load_schedule(repo).get("paused"):
+        raise_if_group_stopped(repo, run_id)
         if run_id and not waiting and hasattr(repo, "update_batch_run"):
             repo.update_batch_run(run_id, phase="paused")
         waiting = True

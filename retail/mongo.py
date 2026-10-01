@@ -859,6 +859,28 @@ class ProductRepository:
         if not result.matched_count:
             raise GroupBatchBusy(group)
 
+    def request_group_stop(self, group: str) -> bool:
+        """Pide parar la corrida de un grupo. No toca las de los demás."""
+        result = self.batch_runs.update_one(
+            {
+                "grupo": group,
+                "status": "running",
+                "tienda": {"$in": [None, ""]},
+                "scope": {"$nin": ["tienda", "basico"]},
+            },
+            {"$set": {"stop_requested": True, "phase": "stopping"}},
+        )
+        return bool(result.matched_count)
+
+    def group_stop_requested(self, run_id: str) -> bool:
+        from bson import ObjectId
+
+        item = self.batch_runs.find_one(
+            {"_id": ObjectId(run_id)},
+            {"stop_requested": 1, "status": 1},
+        )
+        return bool(item and item.get("status") == "running" and item.get("stop_requested"))
+
     def update_batch_run(self, run_id: str, **fields: Any) -> None:
         """Actualiza progreso en vivo (fase, consulta actual, error) sin tocar contadores."""
         from bson import ObjectId
