@@ -612,6 +612,9 @@ function setSearching(on, { live = false } = {}) {
       ? `<span class="spinner" aria-hidden="true"></span>Buscando…`
       : "Buscar";
   }
+  if (typeof setQuickSearchBusy === "function") {
+    setQuickSearchBusy(on || live, live ? "Actualizando…" : "Buscando…");
+  }
   const overlay = $("search-overlay");
   if (overlay) overlay.hidden = !on;
   document.querySelectorAll("body > :not(#search-overlay)").forEach((el) => {

@@ -78,6 +78,8 @@ function updateFilterSummary() {
 }
 
 async function load() {
+  if (typeof setQuickSearchBusy === "function") setQuickSearchBusy(true);
+  try {
   const response = await fetch(`/api/catalog?${params()}`);
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
@@ -99,6 +101,9 @@ async function load() {
   $("prev").disabled = data.page <= 1;
   $("next").disabled = data.page >= totalPages;
   updateFilterSummary();
+  } finally {
+    if (typeof setQuickSearchBusy === "function") setQuickSearchBusy(false);
+  }
 }
 
 function reload() {

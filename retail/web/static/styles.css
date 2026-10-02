@@ -90,6 +90,24 @@ html[data-theme="day"] {
   cursor: pointer;
 }
 .quick-search-short { display: none; }
+.desktop-quick-search button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-width: 108px;
+}
+.desktop-quick-search button .spinner {
+  width: 15px;
+  height: 15px;
+  border-color: rgba(255, 255, 255, 0.35);
+  border-top-color: #fff;
+}
+.desktop-quick-search.is-busy input[type="search"] { opacity: 0.82; }
+.desktop-quick-search.is-busy .quick-search-toggle {
+  opacity: 0.7;
+  pointer-events: none;
+}
 body {
   margin: 0;
   font-family: "Segoe UI", "Avenir Next", system-ui, sans-serif;

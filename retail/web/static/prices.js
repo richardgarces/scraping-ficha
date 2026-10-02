@@ -46,6 +46,31 @@ function readProductTrail() {
   }
 }
 
+/** Spinner en el botón Buscar del header durante búsquedas rápidas. */
+function setQuickSearchBusy(on, label = "Buscando…") {
+  document.querySelectorAll(".desktop-quick-search").forEach((form) => {
+    form.classList.toggle("is-busy", Boolean(on));
+    form.setAttribute("aria-busy", on ? "true" : "false");
+    const button = form.querySelector('button[type="submit"]');
+    if (!button) return;
+    if (on) {
+      if (!button.dataset.idleLabel) {
+        button.dataset.idleLabel = (button.textContent || "Buscar").replace(/\s+/g, " ").trim() || "Buscar";
+      }
+      button.disabled = true;
+      button.setAttribute("aria-label", label);
+      button.innerHTML = `<span class="spinner" aria-hidden="true"></span><span>${label}</span>`;
+      return;
+    }
+    button.disabled = false;
+    const idle = button.dataset.idleLabel || "Buscar";
+    button.removeAttribute("aria-busy");
+    button.setAttribute("aria-label", idle);
+    button.textContent = idle;
+    delete button.dataset.idleLabel;
+  });
+}
+
 /** Texto legible de disponibilidad aunque la tienda entregue un objeto anidado. */
 function availabilityLabel(value, stock = null) {
   const quantity = stockQuantity(stock);

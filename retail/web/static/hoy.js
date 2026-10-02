@@ -143,6 +143,8 @@ function params() {
 }
 
 async function load(keepFilters = false) {
+  if (typeof setQuickSearchBusy === "function") setQuickSearchBusy(true);
+  try {
   const response = await fetch(`/api/deals?${params()}`);
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
@@ -160,6 +162,9 @@ async function load(keepFilters = false) {
   renderDeals(data);
   renderRuns(data.runs);
   updateFilterBadge("today-filters", "today-filter-count");
+  } finally {
+    if (typeof setQuickSearchBusy === "function") setQuickSearchBusy(false);
+  }
 }
 
 function reload() {

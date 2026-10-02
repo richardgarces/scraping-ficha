@@ -165,6 +165,8 @@ function params() {
 }
 
 async function load() {
+  if (typeof setQuickSearchBusy === "function") setQuickSearchBusy(true);
+  try {
   const response = await fetch(`/api/reales?${params()}`);
   const data = await response.json().catch(() => ({}));
   if (response.status === 401) {
@@ -180,6 +182,9 @@ async function load() {
   fillSelect("category", data.categories || [], $("category").value, "todas");
   render(data);
   updateFilterBadge("real-filters", "real-filter-count");
+  } finally {
+    if (typeof setQuickSearchBusy === "function") setQuickSearchBusy(false);
+  }
 }
 
 function reload() {
