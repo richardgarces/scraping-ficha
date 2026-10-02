@@ -871,6 +871,39 @@ def _cluster_evidence(items: list[Product], code: str) -> tuple[float, str]:
     return round(confidence, 3), (methods[0] if methods else "unknown")
 
 
+def cluster_offer_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Agrupa avisos por identidad de nombre/atributos, no por SKU de tienda.
+
+    Conserva los dicts originales (historial, thumb, etc.) y anota la evidencia
+    del cluster. Pensado para ofertas reales, donde el ``compare_code`` guardado
+    suele ser un código interno distinto en cada comercio.
+    """
+    if not rows:
+        return []
+    products = [Product.from_dict(row) for row in rows]
+    payload: list[dict[str, Any]] = []
+    for indices in _cluster(products):
+        items = [products[index] for index in indices]
+        originals = [dict(rows[index]) for index in indices]
+        code = _cluster_code(items)
+        confidence, method = _cluster_evidence(items, code)
+        for row in originals:
+            row["compare_code"] = code
+            row["entity_id"] = code
+            row["entity_confidence"] = confidence
+            row["entity_match_method"] = method
+        payload.append(
+            {
+                "compare_code": code,
+                "entity_confidence": confidence,
+                "entity_match_method": method,
+                "store_count": len({str(row.get("store") or "") for row in originals}),
+                "offers": originals,
+            }
+        )
+    return payload
+
+
 def compare_products(products: list[Product]) -> list[dict[str, Any]]:
     groups: dict[str, list[Product]] = {}
     for indices in _cluster(products):

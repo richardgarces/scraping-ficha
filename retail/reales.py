@@ -11,9 +11,11 @@ from retail.compare import (
     FAMILY_ORDER,
     STORE_FAMILY,
     collapse_variants,
+    identity_match_confidence,
     pack_of,
     same_product_identity,
 )
+from retail.models import Product
 from retail.pricing import series
 
 # El ejemplo del shampoo: 10.000 → 6.000 es 40%. Pedimos al menos 10% para
@@ -89,6 +91,7 @@ def verified_discount_percent(item: dict[str, Any]) -> float:
 
 
 def entity_confidence_of(item: dict[str, Any]) -> float:
+    """Confianza guardada o heurística por prefijo; preferir ``group_entity_confidence``."""
     try:
         if item.get("entity_confidence") is not None:
             return max(0.0, min(1.0, float(item["entity_confidence"])))
@@ -100,6 +103,28 @@ def entity_confidence_of(item: dict[str, Any]) -> float:
     if code.startswith("id:"):
         return 0.9
     return 0.65
+
+
+def group_entity_confidence(items: list[dict[str, Any]]) -> float:
+    """Confianza entre pares por nombre/identidad, no por SKU de cada tienda.
+
+    El historial de la misma tienda no pasa por aquí: solo se usa al armar la
+    brecha o el mismo precio entre comercios.
+    """
+    if not items:
+        return 0.0
+    if len(items) == 1:
+        return entity_confidence_of(items[0])
+    products = [Product.from_dict(item) for item in items]
+    best_per_item: list[float] = []
+    for index, item in enumerate(products):
+        scores = [
+            identity_match_confidence(item, other)[0]
+            for pos, other in enumerate(products)
+            if pos != index
+        ]
+        best_per_item.append(max(scores, default=0.0))
+    return round(min(best_per_item), 3) if best_per_item else 0.0
 
 
 def previous_full_price_day(
@@ -192,7 +217,7 @@ def pick_real_offer(
     historial: bool = True,
     iguales: bool = False,
 ) -> dict[str, Any] | None:
-    """El mejor aviso del grupo (mismo compare_code) que cumple los tipos pedidos."""
+    """El mejor aviso del grupo de pares (mismo producto por nombre) pedido."""
     if not comparacion and not historial and not iguales:
         return None
     shown = [
@@ -205,8 +230,8 @@ def pick_real_offer(
     for item in shown:
         by_pack[(pack_of(item), condition_group(item.get("condition")))].append(item)
     for group in by_pack.values():
-        # Un compare_code antiguo puede haber sido demasiado amplio. Se vuelve
-        # a separar por identidad antes de usar el precio de otra tienda.
+        # Pares entre tiendas por identidad de nombre/atributos. Los códigos
+        # internos (product_id/sku) no definen el grupo: cambian por comercio.
         identity_groups: list[list[dict[str, Any]]] = []
         for item in group:
             target = next(
@@ -254,7 +279,9 @@ def _score_pack_group(
             item["_comparison_price"] = (_int(item.get("price")) or 0) + (_int(item.get("shipping_cost")) or 0)
     if len({item.get("store") for item in by_store}) < 2:
         return None
-    entity_confidence = min((entity_confidence_of(item) for item in priced), default=0.0)
+    # Confianza por similitud de nombre/identidad entre tiendas, no por el
+    # compare_code/SKU guardado (que suele ser distinto en cada comercio).
+    entity_confidence = group_entity_confidence(priced)
     if entity_confidence < MIN_ENTITY_CONFIDENCE:
         return None
 

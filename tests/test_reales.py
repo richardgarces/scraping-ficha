@@ -84,7 +84,7 @@ def test_shampoo_comparacion_vs_otra_tienda_a_precio_normal():
     assert deal["market_best"] is True
     assert deal["best_price_store"] == "falabella"
     assert deal["strongest_published_store"] == "falabella"
-    assert deal["entity_confidence"] == 1.0
+    assert deal["entity_confidence"] >= 0.80
     assert deal["offer_score"] > 50
 
 
@@ -106,11 +106,55 @@ def test_real_offer_separates_biggest_discount_from_lowest_price():
     assert rows["ripley"]["strongest_published"] is True
 
 
-def test_cross_store_offer_requires_reliable_entity_match():
+def test_cross_store_matches_by_name_despite_different_store_codes():
+    """Los SKU/EAN internos cambian por tienda: el par se arma por el nombre."""
+    deal = pick_real_offer(
+        [
+            _offer(
+                store="falabella",
+                product_id="111",
+                compare_code="ean:0000000000111",
+                price=6000,
+                price_normal=10000,
+            ),
+            _offer(
+                store="ripley",
+                product_id="999",
+                compare_code="ean:0000000000999",
+                price=10000,
+                price_normal=10000,
+            ),
+        ],
+        comparacion=True,
+        historial=False,
+    )
+    assert deal is not None
+    assert deal["store"] == "falabella"
+    assert deal["rival_store"] == "ripley"
+    assert deal["entity_confidence"] >= 0.80
+
+
+def test_cross_store_rejects_unrelated_product_names():
     assert pick_real_offer(
         [
-            _offer(store="paris", product_id="a", price=6000, price_normal=10000, compare_code="name:shampoo"),
-            _offer(store="ripley", product_id="b", price=10000, price_normal=10000, compare_code="name:shampoo"),
+            _offer(
+                store="paris",
+                product_id="a",
+                name="Producto genérico A",
+                brand="",
+                compare_code="name:x",
+                price=6000,
+                price_normal=10000,
+            ),
+            _offer(
+                store="ripley",
+                product_id="b",
+                name="Otro artículo distinto B",
+                brand="",
+                compare_code="name:x",
+                price=10000,
+                price_normal=10000,
+            ),
         ],
         comparacion=True,
         historial=False,

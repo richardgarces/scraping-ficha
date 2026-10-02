@@ -1411,8 +1411,9 @@ class ProductRepository:
         size: int = 40,
     ) -> dict[str, Any]:
         """Productos con descuento real frente a otra tienda y/o a su propio pasado."""
+        from retail.compare import cluster_offer_rows
         from retail.predictive_alerts import predictive_validation_status
-        from retail.reales import is_agotado, is_super_offer, pick_real_offer
+        from retail.reales import MIN_ENTITY_CONFIDENCE, is_agotado, is_super_offer, pick_real_offer
 
         timesfm_status = predictive_validation_status(self)
         empty = {
@@ -1472,28 +1473,22 @@ class ProductRepository:
         # aunque el usuario esté consultando principalmente la comparación entre tiendas.
         projection["price_history"] = {"$slice": ["$price_history", -40]}
 
+        # No agrupar por compare_code/SKU: cada tienda usa códigos propios.
+        # Se cargan avisos con precio y se agrupan por nombre/identidad.
         pipeline = [
-            {
-                "$match": {
-                    "price": {"$gt": 0},
-                    "compare_code": {"$nin": [None, ""]},
-                }
-            },
+            {"$match": {"price": {"$gt": 0}, "name": {"$nin": [None, ""]}}},
             {"$project": projection},
-            {
-                "$group": {
-                    "_id": "$compare_code",
-                    "offers": {"$push": "$$ROOT"},
-                    "stores": {"$addToSet": "$store"},
-                }
-            },
-            {"$match": {"$expr": {"$gte": [{"$size": "$stores"}, 2]}}},
         ]
+        docs = list(self.collection.aggregate(pipeline, allowDiskUse=True))
         found: list[dict[str, Any]] = []
         needle = (text or "").strip().lower()
         wanted_store = (store or "").strip().lower()
         wanted_category = (category or "").strip().lower()
-        for group in self.collection.aggregate(pipeline, allowDiskUse=True):
+        for group in cluster_offer_rows(docs):
+            if int(group.get("store_count") or 0) < 2:
+                continue
+            if float(group.get("entity_confidence") or 0) < MIN_ENTITY_CONFIDENCE:
+                continue
             card = pick_real_offer(
                 group.get("offers") or [],
                 comparacion=comparacion,
