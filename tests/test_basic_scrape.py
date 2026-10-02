@@ -45,6 +45,10 @@ def test_cron_page_has_basic_scrape_button():
     assert "Scraping básico" in html
     assert 'id="basic-scrape-run"' in html
     assert 'src="/static/cron.js?v=' in html
+    assert "Acciones" in html
+    assert "groupActionsCell" in js
+    assert "Iniciar ahora" in js
+    assert "/api/admin/cron-batches/" in js
     assert "/api/admin/basic-scrape" in js
 
 

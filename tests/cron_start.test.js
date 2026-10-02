@@ -26,28 +26,37 @@ const button = () => ({ dataset: { startGroup: "retail" }, disabled: false, text
 
 test("solo los grupos en espera y con tiendas ofrecen iniciar", () => {
   const cron = loadCron();
-  const idle = cron.groupStatusCell(group, false);
+  assert.match(cron.groupStatusCell(group), /En espera/);
+  const idle = cron.groupActionsCell(group, false);
   assert.match(idle, /Iniciar ahora/);
   assert.match(idle, /data-start-group="retail"/);
   assert.doesNotMatch(idle, / disabled/);
-  assert.doesNotMatch(cron.groupStatusCell({ ...group, status: "done" }, false), /data-start-group/);
+  assert.doesNotMatch(cron.groupActionsCell({ ...group, status: "done" }, false), /data-start-group/);
   for (const status of ["running", "paused"]) {
-    const cell = cron.groupStatusCell({ ...group, status, progress: { phase: "products" } }, false);
+    const cell = cron.groupActionsCell({ ...group, status, progress: { phase: "products" } }, false);
     assert.match(cell, /data-stop-group="retail"/);
     assert.match(cell, /Detener/);
     assert.doesNotMatch(cell, /data-start-group/);
   }
-  const stopping = cron.groupStatusCell({ ...group, status: "running", progress: { phase: "stopping" } }, false);
+  const stopping = cron.groupActionsCell({ ...group, status: "running", progress: { phase: "stopping" } }, false);
   assert.match(stopping, /Deteniendo/);
   assert.match(stopping, / disabled/);
-  assert.doesNotMatch(cron.groupStatusCell({ ...group, store_count: 0 }, false), /data-start-group/);
-  assert.match(cron.groupStatusCell(group, true), / disabled/);
-  assert.match(cron.groupStatusCell(group, true), /Reanuda las corridas/);
+  assert.doesNotMatch(cron.groupActionsCell({ ...group, store_count: 0 }, false), /data-start-group/);
+  assert.match(cron.groupActionsCell(group, true), / disabled/);
+  assert.match(cron.groupActionsCell(group, true), /Reanuda las corridas/);
+});
+
+test("estados desconocidos se tratan como en espera para iniciar", () => {
+  const cron = loadCron();
+  assert.match(cron.groupStatusCell({ ...group, status: "scheduled" }), /En espera/);
+  const actions = cron.groupActionsCell({ ...group, status: "scheduled" }, false);
+  assert.match(actions, /Iniciar ahora/);
+  assert.match(cron.groupActionsCell({ ...group, store_count: "6" }, false), /Iniciar ahora/);
 });
 
 test("un grupo fallido ofrece continuar y reiniciar", () => {
   const cron = loadCron();
-  const failed = cron.groupStatusCell({
+  const failed = cron.groupActionsCell({
     ...group,
     status: "failed",
     last_run: { processed: 239, items: 22490, last_error: "Corrida interrumpida" },
@@ -56,14 +65,14 @@ test("un grupo fallido ofrece continuar y reiniciar", () => {
   assert.match(failed, /Continuar/);
   assert.match(failed, /data-start-mode="restart"/);
   assert.match(failed, /Reiniciar/);
-  const empty = cron.groupStatusCell({
+  const empty = cron.groupActionsCell({
     ...group,
     status: "failed",
     last_run: { processed: 0, items: 100 },
   }, false);
   assert.doesNotMatch(empty, /data-start-mode="continue"/);
   assert.match(empty, /data-start-mode="restart"/);
-  const stopped = cron.groupStatusCell({
+  const stopped = cron.groupActionsCell({
     ...group,
     status: "stopped",
     last_run: { processed: 12, items: 40 },
@@ -81,14 +90,14 @@ test("doble clic y redibujado no duplican la solicitud", async () => {
   const first = cron.startGroup(firstButton);
   assert.equal(firstButton.disabled, true);
   assert.equal(firstButton.textContent, "Iniciando…");
-  assert.match(cron.groupStatusCell(group, false), / disabled/);
+  assert.match(cron.groupActionsCell(group, false), / disabled/);
   await cron.startGroup(button());
   assert.deepEqual(calls, [["/api/admin/cron-batches/retail/start", "POST", undefined]]);
   resolve({ status: 202, ok: true, json: async () => ({ message: "Corrida iniciada para Retail." }) });
   await first;
   assert.equal(cron.notices[0][0], "Corrida iniciada para Retail.");
   assert.equal(cron.refreshes, 1);
-  assert.doesNotMatch(cron.groupStatusCell(group, false), /Iniciando…/);
+  assert.doesNotMatch(cron.groupActionsCell(group, false), /Iniciando…/);
 });
 
 test("continuar envía el modo en el cuerpo", async () => {

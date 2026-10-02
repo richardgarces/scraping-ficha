@@ -1920,7 +1920,7 @@ html[data-theme="day"] .panel { backdrop-filter: none; }
 .status-paused { background: color-mix(in srgb, var(--warn) 18%, var(--panel-2)); color: var(--warn); }
 .cron-table td { vertical-align: top; overflow: visible; }
 .cron-table .cron-group-action { min-width: min(100%, 11rem); }
-.cron-group-action { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
+.cron-group-action { display: flex; flex-direction: row; flex-wrap: wrap; align-items: center; gap: 8px; }
 .cron-group-action button { min-height: 44px; white-space: nowrap; }
 .cron-group-action button.cron-stop { color: var(--danger); }
 .cron-group-action button.cron-continue { color: var(--ok, #1a7f37); }
