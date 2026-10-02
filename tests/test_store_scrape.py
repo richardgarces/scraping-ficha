@@ -126,6 +126,29 @@ def test_run_batch_tienda_dry_run_does_not_expand_to_the_group(monkeypatch):
     assert summary["searches"] == [{"id": "para", "query": "paracetamol"}]
 
 
+def test_find_running_store_batch_sorts_without_pymongo_constant():
+    """Regression: DESCENDING no está en el scope del método."""
+    from retail.mongo import ProductRepository
+
+    class _Runs:
+        def __init__(self):
+            self.query = None
+            self.sort = None
+
+        def find_one(self, query, sort=None):
+            self.query = query
+            self.sort = sort
+            return {"_id": "run-1", "tienda": "acer", "status": "running", "started_at": "2026-10-01"}
+
+    repo = ProductRepository.__new__(ProductRepository)
+    runs = _Runs()
+    repo.batch_runs = runs
+    found = repo.find_running_store_batch("acer")
+    assert found["tienda"] == "acer"
+    assert runs.query == {"tienda": "acer", "status": "running"}
+    assert runs.sort == [("started_at", -1)]
+
+
 def test_start_store_batch_rejects_second_start(monkeypatch):
     from retail.batch.store_scope import StoreBatchBusy
     from retail.web import jobs

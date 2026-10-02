@@ -2089,7 +2089,7 @@ class ProductRepository:
             return None
         return self.batch_runs.find_one(
             {"tienda": key, "status": "running"},
-            sort=[("started_at", DESCENDING)],
+            sort=[("started_at", -1)],
         )
 
     def category_search_items(self, store: str) -> list[dict[str, Any]]:

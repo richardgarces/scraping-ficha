@@ -443,6 +443,56 @@ function fillStores(payload) {
   if (current && stores.some((store) => store.id === current)) select.value = current;
 }
 
+function renderStoreLive(jobs) {
+  const panel = $("store-scrape-live");
+  if (!panel) return;
+  const select = $("store-select");
+  const selected = select?.value || "";
+  const live = (jobs || []).filter((job) => ["running", "paused"].includes(job.status));
+  const job = (selected && live.find((item) => item.id === selected)) || live[0] || null;
+  if (!job) {
+    panel.hidden = true;
+    return;
+  }
+  const progress = job.progress || {};
+  const processed = progress.processed ?? job.last_run?.processed ?? 0;
+  const items = progress.items ?? job.last_run?.items ?? 0;
+  const pct = progress.percent != null
+    ? progress.percent
+    : items
+      ? Math.round((100 * processed) / items)
+      : 0;
+  const phaseLabel = progress.phase_label || (items ? "En curso" : "Arrancando");
+  panel.hidden = false;
+  const title = $("store-live-title");
+  const status = $("store-live-status");
+  const label = $("store-live-label");
+  const bar = $("store-live-bar");
+  const query = $("store-live-query");
+  const counts = $("store-live-counts");
+  if (title) title.textContent = job.title || job.id;
+  if (status) {
+    status.textContent = job.status === "paused" ? "Pausado" : "En curso";
+    status.className = job.status === "paused" ? "badge off" : "badge";
+  }
+  if (label) {
+    label.textContent = items
+      ? `${processed.toLocaleString("es-CL")} / ${items.toLocaleString("es-CL")} consultas · ${pct}%`
+      : `${phaseLabel}…`;
+  }
+  if (bar) {
+    bar.style.width = `${Math.max(0, Math.min(100, pct))}%`;
+    const wrap = bar.parentElement;
+    if (wrap) wrap.setAttribute("aria-valuenow", String(pct));
+  }
+  if (query) {
+    query.textContent = progress.current_query
+      ? `${phaseLabel}: ${progress.current_query}`
+      : phaseLabel;
+  }
+  if (counts) counts.textContent = countLine(progress) || "";
+}
+
 function renderStoreJobs(payload) {
   lastStoreJobs = payload.store_jobs || [];
   const wrap = $("store-jobs-wrap");
@@ -454,6 +504,7 @@ function renderStoreJobs(payload) {
     if (["running", "paused", "failed", "stopped", "done"].includes(job.status)) return true;
     return selected && job.id === selected;
   });
+  renderStoreLive(lastStoreJobs);
   if (meta) {
     if (live.length) {
       meta.textContent = live
