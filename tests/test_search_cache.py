@@ -260,6 +260,166 @@ def test_public_store_search_uses_daily_cache_and_admin_can_force_refresh():
     assert quick["recover_underfilled_db"] is False
 
 
+def test_full_search_skips_scrape_when_same_query_was_cached_today(monkeypatch):
+    """Sin búsqueda rápida: si Redis ya tiene scrape de hoy, no vuelve a tiendas."""
+    from retail.search import iter_search_events
+
+    redis = MemoryRedis()
+    cache = SearchCache(redis)
+    cache.store_stores("clavo", {"falabella": [_phone("falabella", "C1")]}, max_items=8)
+    scrape_calls: list[str] = []
+
+    class _Repo:
+        def ping(self):
+            return True
+
+        def close(self):
+            return None
+
+        def find_by_query(self, query):
+            assert query == "clavo"
+            return [
+                Product(
+                    product_id="db1",
+                    sku_id="db1",
+                    name="Clavo 2 pulgadas",
+                    store="ripley",
+                    price=990,
+                ).to_dict(flatten_specs=False)
+            ]
+
+        def histories(self, keys):
+            return {}
+
+        def thumb_flags(self, keys):
+            return set()
+
+    monkeypatch.setattr("retail.search_cache.connect_redis", lambda: redis)
+    monkeypatch.setattr("retail.search.connect_repo", lambda: _Repo())
+    monkeypatch.setattr("retail.search.connect_qdrant", lambda: None)
+    monkeypatch.setattr("retail.index.products.connect_redis", lambda: None)
+    monkeypatch.setattr("retail.search.claim_unique_sweep", lambda *args, **kwargs: False)
+    monkeypatch.setattr("retail.search.launch_other_store_sweep", lambda *args, **kwargs: None)
+    monkeypatch.setattr("retail.search.store_search_result", lambda *args, **kwargs: None)
+    monkeypatch.setattr("retail.search.store_store_products", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        "retail.search.scrape_store",
+        lambda store_id, *args, **kwargs: scrape_calls.append(store_id) or ([], None),
+    )
+
+    events = list(
+        iter_search_events(
+            "clavo",
+            source="both",
+            stores=["falabella", "ripley", "paris"],
+            max_items=8,
+            persist=False,
+            delay=0,
+            timeout=1,
+            background_side_effects=False,
+            wait_for_all=True,
+        )
+    )
+    assert scrape_calls == []
+    done = next(event for event in events if event["type"] == "done")
+    assert done["result"]["cache"]["hit"] in {"exact", "partial", "similar"}
+    progress = {item["id"]: item["state"] for item in done["result"]["progress"]}
+    assert progress == {"falabella": "skip", "ripley": "skip", "paris": "skip"}
+    assert any(row["store"] == "ripley" for row in done["result"]["rows"])
+
+
+def test_full_search_scrapes_when_today_store_cache_missing(monkeypatch):
+    from retail.search import iter_search_events
+
+    scrape_calls: list[str] = []
+    monkeypatch.setattr("retail.search.lookup_search_result", lambda *args, **kwargs: None)
+    monkeypatch.setattr("retail.search.lookup_store_products", lambda *args, **kwargs: {})
+    monkeypatch.setattr("retail.search.connect_repo", lambda: None)
+    monkeypatch.setattr("retail.search.connect_qdrant", lambda: None)
+    monkeypatch.setattr("retail.index.products.connect_redis", lambda: None)
+    monkeypatch.setattr("retail.search.claim_unique_sweep", lambda *args, **kwargs: False)
+    monkeypatch.setattr("retail.search.launch_other_store_sweep", lambda *args, **kwargs: None)
+    monkeypatch.setattr("retail.search.store_search_result", lambda *args, **kwargs: None)
+    monkeypatch.setattr("retail.search.store_store_products", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        "retail.search.scrape_store",
+        lambda store_id, *args, **kwargs: scrape_calls.append(store_id) or ([_phone(store_id, store_id)], None),
+    )
+
+    list(
+        iter_search_events(
+            "clavo",
+            source="both",
+            stores=["falabella", "ripley"],
+            max_items=5,
+            persist=False,
+            delay=0,
+            timeout=1,
+            background_side_effects=False,
+            wait_for_all=True,
+        )
+    )
+    assert scrape_calls == ["falabella", "ripley"]
+
+
+def test_quick_db_path_unchanged_with_today_store_cache(monkeypatch):
+    """Búsqueda rápida sigue en DB y no scrapea aunque haya caché de tiendas."""
+    from retail.search import search_products
+
+    redis = MemoryRedis()
+    SearchCache(redis).store_stores("clavo", {"paris": [_phone("paris", "P1")]}, max_items=8)
+    scrape_calls: list[str] = []
+
+    class _Repo:
+        def ping(self):
+            return True
+
+        def close(self):
+            return None
+
+        def find_by_query(self, query):
+            return [
+                Product(
+                    product_id="db-quick",
+                    sku_id="db-quick",
+                    name="Clavo rápido",
+                    store="falabella",
+                    price=500,
+                ).to_dict(flatten_specs=False)
+            ]
+
+        def histories(self, keys):
+            return {}
+
+        def thumb_flags(self, keys):
+            return set()
+
+    monkeypatch.setattr("retail.search_cache.connect_redis", lambda: redis)
+    monkeypatch.setattr("retail.search.connect_repo", lambda: _Repo())
+    monkeypatch.setattr("retail.search.connect_qdrant", lambda: None)
+    monkeypatch.setattr("retail.index.products.connect_redis", lambda: None)
+    monkeypatch.setattr("retail.search.claim_unique_sweep", lambda *args, **kwargs: False)
+    monkeypatch.setattr("retail.search.store_search_result", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        "retail.search.scrape_store",
+        lambda store_id, *args, **kwargs: scrape_calls.append(store_id) or ([], None),
+    )
+
+    result = search_products(
+        "clavo",
+        source="db",
+        stores=["falabella", "paris"],
+        max_items=8,
+        persist=False,
+        background_side_effects=False,
+        wait_for_all=True,
+        recover_underfilled_db=False,
+    )
+    assert scrape_calls == []
+    assert result["offer_count"] >= 1
+    assert "recovery" not in result
+
+
 def test_search_stream_returns_cached_result(monkeypatch):
     from retail.search import iter_search_events
 

@@ -387,11 +387,16 @@ def resolve_search_query(query: str) -> str:
         return query
 
 
-def describe_cache(found: dict[str, dict[str, Any]], chosen: list[str]) -> dict[str, Any] | None:
+def describe_cache(
+    found: dict[str, dict[str, Any]],
+    chosen: list[str],
+    *,
+    resume_missing: bool = True,
+) -> dict[str, Any] | None:
     if not found:
         return None
     kind = "partial"
-    if len(found) == len(chosen):
+    if not resume_missing or len(found) == len(chosen):
         kind = "exact" if all(item.get("hit") == "exact" for item in found.values()) else "similar"
     similar = next((item for item in found.values() if item.get("hit") == "similar"), None)
     return {
@@ -402,12 +407,18 @@ def describe_cache(found: dict[str, dict[str, Any]], chosen: list[str]) -> dict[
     }
 
 
-def cache_warnings(found: dict[str, dict[str, Any]], chosen: list[str], titles: dict[str, str]) -> list[str]:
+def cache_warnings(
+    found: dict[str, dict[str, Any]],
+    chosen: list[str],
+    titles: dict[str, str],
+    *,
+    resume_missing: bool = True,
+) -> list[str]:
     if not found:
         return []
     cached_names = [titles.get(store_id, store_id) for store_id in found]
     missing_names = [titles.get(store_id, store_id) for store_id in chosen if store_id not in found]
-    if not missing_names:
+    if not missing_names or not resume_missing:
         similar = next((item for item in found.values() if item.get("hit") == "similar"), None)
         if similar:
             return [f"Sin ir a las tiendas: hoy ya se buscó «{similar['query']}»."]

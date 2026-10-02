@@ -1006,20 +1006,32 @@ def _run_search_events(
     stored: list[Product] = []
     recovery_info: dict[str, Any] | None = None
     cached_stores: dict[str, dict[str, Any]] = {}
+    # Si hoy ya hubo scrape en Redis para esta consulta, no reintentar tiendas
+    # faltantes: los datos del día bastan y se sirven desde caché + base.
+    reuse_today_stores = False
     if source in {"scrape", "both"} and not fresh:
         cached_stores = lookup_store_products(text, chosen, max_items=max_items, qdrant=qdrant)
-        for message in cache_warnings(cached_stores, chosen, titles):
+        reuse_today_stores = bool(cached_stores)
+        if reuse_today_stores and qdrant is None:
+            qdrant = connect_qdrant()
+        for message in cache_warnings(
+            cached_stores, chosen, titles, resume_missing=False
+        ):
             logger.info("%s", message)
     pending_stores = (
-        [store_id for store_id in chosen if store_id not in cached_stores]
-        if source in {"scrape", "both"}
-        else []
+        []
+        if reuse_today_stores
+        else (
+            [store_id for store_id in chosen if store_id not in cached_stores]
+            if source in {"scrape", "both"}
+            else []
+        )
     )
     progress = []
     for store_id in chosen:
         if source not in {"scrape", "both"}:
             state = "skip"
-        elif store_id in cached_stores:
+        elif store_id in cached_stores or reuse_today_stores:
             state = "skip"
         else:
             state = "pending"
@@ -1035,7 +1047,9 @@ def _run_search_events(
     yield {"type": "start", "query": text, "progress": progress, "product_index": product_index}
 
     db_snapshot: dict[str, Any] | None = None
-    if source in {"db", "both"}:
+    # Con scrape reutilizado del día también leemos Mongo/Qdrant: la ficha ya
+    # quedó actualizada y el usuario pidió no volver a las tiendas.
+    if source in {"db", "both"} or reuse_today_stores:
         mongo_products: list[Product] = []
         if repo is None:
             warnings.append("MongoDB no está disponible; la búsqueda en base de datos se omitió.")
@@ -1163,7 +1177,7 @@ def _run_search_events(
         )
         result["saved"] = None
         result["warnings"] = []
-        cache = describe_cache(cached_stores, chosen)
+        cache = describe_cache(cached_stores, chosen, resume_missing=not reuse_today_stores)
         if cache:
             result["cache"] = cache
         if recovery_info is not None:
