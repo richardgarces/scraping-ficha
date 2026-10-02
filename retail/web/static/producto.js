@@ -527,6 +527,17 @@ function chartWidthForDays(count, baseWidth) {
   return Math.max(baseWidth, 56 + Math.max(count - 1, 0) * 72);
 }
 
+/** Padding horizontal del plot. Extra a la derecha para que «30 sep» no se corte al borde. */
+function chartSidePads(basePad) {
+  return { left: basePad, right: basePad + 24 };
+}
+
+function chartAxisAnchor(index, count) {
+  if (index === 0) return "start";
+  if (index === count - 1) return "end";
+  return "middle";
+}
+
 function showLatestChartDay(container) {
   requestAnimationFrame(() => {
     container.scrollLeft = container.scrollWidth;
@@ -547,6 +558,7 @@ function renderPriceChart(containerId, noteId, sourceHistory, label, sharedDomai
   const width = chartWidthForDays(history.length, 720);
   const height = 200;
   const pad = 28;
+  const { left: padLeft, right: padRight } = chartSidePads(pad);
   const dateY = height + 16;
   const viewHeight = height + 28;
   const min = Math.min(...prices);
@@ -554,7 +566,7 @@ function renderPriceChart(containerId, noteId, sourceHistory, label, sharedDomai
   const scaleMin = sharedDomain?.min ?? min;
   const scaleMax = sharedDomain?.max ?? max;
   const mean = average(prices);
-  const toX = (index) => pad + (index / (prices.length - 1)) * (width - pad * 2);
+  const toX = (index) => padLeft + (index / (prices.length - 1)) * (width - padLeft - padRight);
   const toY = (price) => (scaleMax === scaleMin ? height / 2 : height - pad - ((price - scaleMin) / (scaleMax - scaleMin)) * (height - pad * 2));
   const points = prices
     .map((price, index) => `${toX(index).toFixed(1)},${toY(price).toFixed(1)}`)
@@ -566,7 +578,7 @@ function renderPriceChart(containerId, noteId, sourceHistory, label, sharedDomai
   const spanYears = history[0].day.slice(0, 4) !== history[history.length - 1].day.slice(0, 4);
   const dates = chartTickIndexes(history.length)
     .map((index) => {
-      const anchor = index === 0 ? "start" : index === history.length - 1 ? "end" : "middle";
+      const anchor = chartAxisAnchor(index, history.length);
       return `<text x="${toX(index).toFixed(1)}" y="${dateY}" class="axis" text-anchor="${anchor}">${chartDateLabel(history[index].day, spanYears)}</text>`;
     })
     .join("");
@@ -575,13 +587,13 @@ function renderPriceChart(containerId, noteId, sourceHistory, label, sharedDomai
   const container = $(containerId);
   container.innerHTML = `
     <svg class="chart" style="--chart-min-width: ${width}px" viewBox="0 0 ${width} ${viewHeight}" role="img" aria-label="${attr(label)}, día a día, ${from} a ${to}">
-      <line class="guide avg" x1="${pad}" x2="${width - pad}" y1="${toY(mean).toFixed(1)}" y2="${toY(mean).toFixed(1)}"/>
-      <line class="guide low" x1="${pad}" x2="${width - pad}" y1="${toY(min).toFixed(1)}" y2="${toY(min).toFixed(1)}"/>
+      <line class="guide avg" x1="${padLeft}" x2="${width - padRight}" y1="${toY(mean).toFixed(1)}" y2="${toY(mean).toFixed(1)}"/>
+      <line class="guide low" x1="${padLeft}" x2="${width - padRight}" y1="${toY(min).toFixed(1)}" y2="${toY(min).toFixed(1)}"/>
       <polyline fill="none" stroke="currentColor" stroke-width="2" points="${points}"/>
       ${dots}
-      <text x="${pad}" y="16" class="axis">escala ${money(scaleMax)}</text>
-      <text x="${pad}" y="${height - 6}" class="axis">escala ${money(scaleMin)}</text>
-      <text x="${width - pad}" y="${(toY(mean) - 6).toFixed(1)}" class="axis" text-anchor="end">promedio ${money(mean)}</text>
+      <text x="${padLeft}" y="16" class="axis">escala ${money(scaleMax)}</text>
+      <text x="${padLeft}" y="${height - 6}" class="axis">escala ${money(scaleMin)}</text>
+      <text x="${width - padRight}" y="${(toY(mean) - 6).toFixed(1)}" class="axis" text-anchor="end">promedio ${money(mean)}</text>
       ${dates}
     </svg>`;
   showLatestChartDay(container);
@@ -704,13 +716,14 @@ function renderCombinedPriceChart() {
   const width = chartWidthForDays(days.length, 1120);
   const height = 260;
   const pad = 36;
+  const { left: padLeft, right: padRight } = chartSidePads(pad);
   const dateY = height + 18;
   const viewHeight = height + 32;
   const min = Math.min(...allPrices);
   const max = Math.max(...allPrices);
   const toX = (day) => {
     const index = days.indexOf(day);
-    return pad + (index / Math.max(days.length - 1, 1)) * (width - pad * 2);
+    return padLeft + (index / Math.max(days.length - 1, 1)) * (width - padLeft - padRight);
   };
   const toY = (price) => max === min
     ? height / 2
@@ -734,19 +747,19 @@ function renderCombinedPriceChart() {
   const discountDays = aligned.filter((point) => point.offer != null && point.normal != null && point.offer < point.normal).length;
   const spanYears = days[0].slice(0, 4) !== days[days.length - 1].slice(0, 4);
   const dates = chartTickIndexes(days.length).map((index) => {
-    const anchor = index === 0 ? "start" : index === days.length - 1 ? "end" : "middle";
+    const anchor = chartAxisAnchor(index, days.length);
     return `<text x="${toX(days[index]).toFixed(1)}" y="${dateY}" class="axis" text-anchor="${anchor}">${chartDateLabel(days[index], spanYears)}</text>`;
   }).join("");
   const container = $("chart-combined");
   container.innerHTML = `
     <svg class="chart combined-chart" style="--chart-min-width: ${width}px" viewBox="0 0 ${width} ${viewHeight}" role="img" aria-label="Precio de oferta y precio normal, día a día">
-      <line class="guide avg" x1="${pad}" x2="${width - pad}" y1="${toY(max).toFixed(1)}" y2="${toY(max).toFixed(1)}"/>
-      <line class="guide avg" x1="${pad}" x2="${width - pad}" y1="${toY(min).toFixed(1)}" y2="${toY(min).toFixed(1)}"/>
+      <line class="guide avg" x1="${padLeft}" x2="${width - padRight}" y1="${toY(max).toFixed(1)}" y2="${toY(max).toFixed(1)}"/>
+      <line class="guide avg" x1="${padLeft}" x2="${width - padRight}" y1="${toY(min).toFixed(1)}" y2="${toY(min).toFixed(1)}"/>
       ${discountBandMarkup(aligned, toX, toY)}
       ${offerLineMarkup(aligned, toX, toY)}
       ${normalLine()}
-      <text x="${pad}" y="18" class="axis">máximo ${money(max)}</text>
-      <text x="${pad}" y="${height - 7}" class="axis">mínimo ${money(min)}</text>
+      <text x="${padLeft}" y="18" class="axis">máximo ${money(max)}</text>
+      <text x="${padLeft}" y="${height - 7}" class="axis">mínimo ${money(min)}</text>
       ${dates}
     </svg>`;
   showLatestChartDay(container);

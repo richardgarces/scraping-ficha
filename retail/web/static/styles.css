@@ -1218,9 +1218,10 @@ button.secondary:hover { border-color: color-mix(in srgb, var(--accent) 40%, var
 .price-history-card h3 { margin: 0; }
 .price-history-card > p { margin: 5px 0 10px; font-size: 13px; }
 .price-history-card:nth-child(2) .chart { color: var(--warn); }
-.price-chart-scroll { max-width: 100%; overflow-x: auto; overscroll-behavior-inline: contain; scrollbar-gutter: stable; }
+.price-chart-scroll { max-width: 100%; overflow-x: auto; overscroll-behavior-inline: contain; scrollbar-gutter: stable; padding-right: 2px; }
 .price-chart-scroll:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 8px; }
-.price-chart-scroll .chart { width: 100%; min-width: var(--chart-min-width, 100%); }
+/* max-width:none evita que .chart { max-width:100% } encoja el SVG y deje sin margen la última fecha. */
+.price-chart-scroll .chart { width: var(--chart-min-width, 100%); max-width: none; min-width: var(--chart-min-width, 100%); }
 .price-chart-legend { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; margin: 8px 0 4px; color: var(--muted); font-size: 13px; font-weight: 700; }
 .price-chart-legend span { display: inline-flex; align-items: center; gap: 7px; }
 .price-chart-legend i { width: 22px; height: 4px; border-radius: 999px; background: var(--accent); }

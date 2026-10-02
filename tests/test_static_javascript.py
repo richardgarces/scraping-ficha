@@ -71,12 +71,32 @@ def test_product_price_charts_show_every_calendar_day():
     styles = Path("retail/web/static/styles.css").read_text(encoding="utf-8")
     assert "return Array.from({ length: count }" in script
     assert "chartWidthForDays" in script
+    assert "chartSidePads" in script
+    assert "basePad + 24" in script
+    assert "chartAxisAnchor" in script
     assert "showLatestChartDay" in script
     assert 'class="chart-point"' in script
     assert "día a día" in script
     assert page.count('class="price-chart-scroll"') == 3
     assert ".price-chart-scroll .chart" in styles
+    assert "max-width: none" in styles
     assert "overflow-x: auto" in styles
+    assert 'producto.js?v=34' in page
+    assert 'styles.css?v=73' in page
+
+
+def test_product_price_chart_keeps_last_date_label_inside_viewbox():
+    """La última fecha del eje X (p. ej. «30 sep») no debe quedar pegada al borde."""
+    script = Path("retail/web/static/producto.js").read_text(encoding="utf-8")
+    styles = Path("retail/web/static/styles.css").read_text(encoding="utf-8")
+    start = script.index("function chartSidePads")
+    end = script.index("function chartAxisAnchor", start)
+    helper = script[start:end]
+    assert "right: basePad + 24" in helper
+    assert "padLeft + (index / (prices.length - 1)) * (width - padLeft - padRight)" in script
+    assert "padLeft + (index / Math.max(days.length - 1, 1)) * (width - padLeft - padRight)" in script
+    assert "width - padRight" in script
+    assert ".price-chart-scroll .chart { width: var(--chart-min-width, 100%); max-width: none;" in styles
 
 
 def test_product_comparison_modal_uses_hidden_state_and_theme_colors() -> None:
