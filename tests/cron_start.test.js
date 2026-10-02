@@ -199,6 +199,48 @@ test("continuar y detener scraping de tienda llaman a las APIs correctas", async
   assert.deepEqual(calls[1], ["/api/admin/store-scrape/doite/stop", "POST", undefined]);
 });
 
+test("la tienda seleccionada sin corrida previa aparece en la tabla", () => {
+  const tbody = { innerHTML: "" };
+  const wrap = { hidden: true, querySelector: (sel) => (sel === "tbody" ? tbody : null) };
+  const select = { value: "falabella" };
+  const nodes = {
+    "store-jobs-wrap": wrap,
+    "store-scrape-meta": { textContent: "" },
+    "store-select": select,
+  };
+  const cron = loadCron();
+  cron.$ = (id) => nodes[id] || null;
+  const payload = {
+    store_jobs: [
+      { id: "decathlon", title: "decathlon", status: "done", last_run: { processed: 1, items: 1 } },
+    ],
+    stores: [
+      { id: "falabella", title: "Falabella Chile", group: "retail", group_title: "Retail" },
+      { id: "decathlon", title: "decathlon", group: "deporte", group_title: "Deporte" },
+    ],
+  };
+  cron.renderStoreJobs(payload);
+  assert.equal(wrap.hidden, false);
+  assert.match(tbody.innerHTML, /data-tienda="falabella"/);
+  assert.match(tbody.innerHTML, /Falabella Chile/);
+  assert.match(tbody.innerHTML, /data-start-store="falabella"/);
+  assert.match(tbody.innerHTML, /Correr scraping/);
+  assert.match(tbody.innerHTML, /cron-store-selected/);
+});
+
+test("syncRunButton habilita Correr scraping para tienda idle sin job en Mongo", () => {
+  const select = { value: "falabella" };
+  const button = { dataset: {}, disabled: true, textContent: "Correr scraping" };
+  const cron = loadCron();
+  cron.$ = (id) => ({ "store-select": select, "store-run": button, "store-scrape-actions": { innerHTML: "" } }[id] || null);
+  cron.lastStoreJobs = [];
+  cron.syncRunButton();
+  assert.equal(button.disabled, false);
+  assert.equal(button.textContent, "Correr scraping");
+  assert.equal(button.dataset.startStore, "falabella");
+  assert.equal(button.dataset.startMode, "");
+});
+
 test("el formulario de tienda pasa a Continuar, Reiniciar o Detener según el estado", () => {
   const select = { value: "doite" };
   const button = { dataset: {}, disabled: true, textContent: "Correr scraping" };

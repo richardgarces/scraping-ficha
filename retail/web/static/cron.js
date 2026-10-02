@@ -618,14 +618,35 @@ function renderStoreLive(jobs) {
   }
 }
 
+function storeJobsForDisplay(payload) {
+  const jobs = [...(payload.store_jobs || [])];
+  const select = $("store-select");
+  const selected = select?.value || "";
+  if (!selected || jobs.some((job) => job.id === selected)) return jobs;
+  const stores = payload.stores || lastCronPayload?.stores || [];
+  const store = stores.find((item) => item.id === selected);
+  if (!store) return jobs;
+  return jobs.concat([
+    {
+      id: store.id,
+      title: store.title,
+      groups: store.group ? [store.group] : [],
+      status: "idle",
+      progress: null,
+      last_run: null,
+    },
+  ]);
+}
+
 function renderStoreJobs(payload) {
   lastStoreJobs = payload.store_jobs || [];
+  const displayJobs = storeJobsForDisplay(payload);
   const wrap = $("store-jobs-wrap");
   const meta = $("store-scrape-meta");
   const select = $("store-select");
   const selected = select?.value || "";
   const live = lastStoreJobs.filter((job) => ["running", "paused"].includes(job.status));
-  const visible = lastStoreJobs.filter((job) => {
+  const visible = displayJobs.filter((job) => {
     if (["running", "paused", "failed", "stopped", "done"].includes(job.status)) return true;
     return selected && job.id === selected;
   });
@@ -644,7 +665,7 @@ function renderStoreJobs(payload) {
         })
         .join(" · ");
     } else if (selected) {
-      const job = lastStoreJobs.find((item) => item.id === selected);
+      const job = displayJobs.find((item) => item.id === selected);
       meta.textContent = job?.last_run
         ? `Última corrida de ${job.title || job.id}: ${formatWhen(job.last_run.finished_at || job.last_run.started_at)}`
         : "";
