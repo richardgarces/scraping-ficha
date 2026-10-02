@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#258fdf">
   <title>Ficha de producto</title>
   <script>(function(){var m=localStorage.getItem("retail-theme");if(m==="day"||m==="night"){document.documentElement.dataset.theme=m;return;}var h=new Date().getHours();document.documentElement.dataset.theme=(h>=7&&h<19)?"day":"night";})();</script>
-  <link rel="stylesheet" href="/static/styles.css?v=77">
+  <link rel="stylesheet" href="/static/styles.css?v=79">
 </head>
 <body>
   <header class="top">
@@ -109,16 +109,23 @@
         </section>
       </div>
       <aside class="product-side-column">
-        <section class="panel" id="others-panel" hidden>
-          <h2>Precios en otras tiendas</h2>
-          <p class="muted product-panel-intro">Compara el mismo producto antes de comprar.</p>
-          <div class="table-wrap">
-            <table class="results">
-              <thead><tr><th>Tienda</th><th>Precio</th><th>Habitual</th><th></th></tr></thead>
-              <tbody id="others"></tbody>
-            </table>
+        <details class="panel others-panel" id="others-panel" open hidden>
+          <summary class="others-title">
+            <span class="others-title-main">
+              <h2>Precios en otras tiendas</h2>
+            </span>
+            <span class="others-toggle-label" aria-hidden="true"></span>
+          </summary>
+          <div class="others-body">
+            <p class="muted product-panel-intro">Compara el mismo producto antes de comprar.</p>
+            <div class="table-wrap">
+              <table class="results">
+                <thead><tr><th>Tienda</th><th>Precio</th><th>Habitual</th><th></th></tr></thead>
+                <tbody id="others"></tbody>
+              </table>
+            </div>
           </div>
-        </section>
+        </details>
         <details class="panel forecast-panel" id="forecast-panel" data-admin hidden>
           <summary class="forecast-title">
             <span class="forecast-title-main">
@@ -190,6 +197,6 @@
     </section>
   </main>
   <script src="/static/prices.js?v=30"></script>
-  <script src="/static/producto.js?v=34"></script>
+  <script src="/static/producto.js?v=35"></script>
 </body>
 </html>

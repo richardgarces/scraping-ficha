@@ -1264,7 +1264,8 @@ button.secondary:hover { border-color: color-mix(in srgb, var(--accent) 40%, var
   .chart-mode { width: 100%; }
   .chart-mode .secondary { flex: 1 1 50%; }
 }
-.forecast-panel > summary.forecast-title {
+.forecast-panel > summary.forecast-title,
+.others-panel > summary.others-title {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1274,19 +1275,27 @@ button.secondary:hover { border-color: color-mix(in srgb, var(--accent) 40%, var
   user-select: none;
 }
 .forecast-panel > summary.forecast-title::-webkit-details-marker,
-.forecast-panel > summary.forecast-title::marker { display: none; content: ""; }
-.forecast-title-main { display: flex; align-items: center; gap: 12px; min-width: 0; }
-.forecast-title h2 { margin: 0; }
-.forecast-toggle-label {
+.forecast-panel > summary.forecast-title::marker,
+.others-panel > summary.others-title::-webkit-details-marker,
+.others-panel > summary.others-title::marker { display: none; content: ""; }
+.forecast-title-main,
+.others-title-main { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.forecast-title h2,
+.others-title h2 { margin: 0; }
+.forecast-toggle-label,
+.others-toggle-label {
   margin-left: auto;
   flex: 0 0 auto;
   color: var(--muted);
   font-size: 12px;
   font-weight: 700;
 }
-.forecast-toggle-label::before { content: "Mostrar"; }
-.forecast-panel[open] > summary .forecast-toggle-label::before { content: "Ocultar"; }
-.forecast-panel[open] > summary.forecast-title {
+.forecast-toggle-label::before,
+.others-toggle-label::before { content: "Mostrar"; }
+.forecast-panel[open] > summary .forecast-toggle-label::before,
+.others-panel[open] > summary .others-toggle-label::before { content: "Ocultar"; }
+.forecast-panel[open] > summary.forecast-title,
+.others-panel[open] > summary.others-title {
   margin-bottom: 14px;
   padding-bottom: 12px;
   border-bottom: 1px solid var(--line);
@@ -2896,8 +2905,8 @@ html[data-theme="day"] .deal:nth-child(4n) .deal-img { background: #fff6dd; }
     align-items: start;
   }
   .product-desktop-layout > * { min-width: 0; max-width: 100%; }
-  .product-desktop-layout:not(:has(.product-side-column > section:not([hidden]))) { grid-template-columns: 1fr; }
-  .product-desktop-layout:not(:has(.product-side-column > section:not([hidden]))) .product-side-column { display: none; }
+  .product-desktop-layout:not(:has(.product-side-column > .panel:not([hidden]))) { grid-template-columns: 1fr; }
+  .product-desktop-layout:not(:has(.product-side-column > .panel:not([hidden]))) .product-side-column { display: none; }
   .product-main-column,
   .product-side-column { display: grid; gap: 18px; min-width: 0; }
   .product-main-column { overflow: hidden; }
@@ -2933,7 +2942,7 @@ html[data-theme="day"] .deal:nth-child(4n) .deal-img { background: #fff6dd; }
 
   #chart-panel { padding: 18px; }
   #chart-panel > h2,
-  #others-panel > h2 { margin: 0; font-size: 22px; }
+  #others-panel h2 { margin: 0; font-size: 22px; }
   #chart-panel .price-history-card {
     background: color-mix(in srgb, #dff7f1 72%, var(--panel));
     border-color: color-mix(in srgb, #42bca0 30%, var(--line));
