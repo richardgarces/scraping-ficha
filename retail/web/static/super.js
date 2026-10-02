@@ -121,10 +121,18 @@ function render(data) {
   const rows = data.items || [];
   const total = data.total || 0;
   const floor = data.min_super || 50;
-  const timesfm = data.timesfm_signal_status || {};
-  $("timesfm-summary").textContent = timesfm.enabled
-    ? `TimesFM complementa el análisis actual en ${timesfm.visible_signals || 0} ofertas de esta página; no cambia la clasificación.`
-    : `TimesFM aún no se muestra en ofertas: ${timesfm.reason || "falta validar su precisión"} El análisis actual sigue funcionando sin cambios.`;
+  const timesfmSummary = $("timesfm-summary");
+  if (timesfmSummary) {
+    const admin = Boolean(window.retailUser && window.retailUser.role === "admin");
+    if (admin) {
+      const timesfm = data.timesfm_signal_status || {};
+      timesfmSummary.textContent = timesfm.enabled
+        ? `TimesFM complementa el análisis actual en ${timesfm.visible_signals || 0} ofertas de esta página; no cambia la clasificación.`
+        : `TimesFM aún no se muestra en ofertas: ${timesfm.reason || "falta validar su precisión"} El análisis actual sigue funcionando sin cambios.`;
+    } else {
+      timesfmSummary.textContent = "";
+    }
+  }
   totalPages = Math.max(1, Math.ceil(total / (data.size || 40)));
   if (total) {
     $("summary").textContent =
@@ -156,6 +164,7 @@ function params() {
 async function load() {
   if (typeof setQuickSearchBusy === "function") setQuickSearchBusy(true);
   try {
+  if (typeof ensureUser === "function") await ensureUser();
   const response = await fetch(`/api/super?${params()}`);
   const data = await response.json().catch(() => ({}));
   if (response.status === 401) {

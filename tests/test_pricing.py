@@ -257,7 +257,7 @@ def test_new_pages_and_apis_are_wired():
     assert "% vs otra tienda" in reales
     assert 'id="min-gap"' in reales
     assert "Super ofertas: descuento superior al 50%" in reales
-    assert "reales.js?v=13" in reales
+    assert "reales.js?v=16" in reales
 
 
 def test_deal_sort_orders_price_name_and_gap():
