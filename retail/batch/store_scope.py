@@ -27,6 +27,24 @@ class StoreBatchBusy(Exception):
         super().__init__(f"Ya hay un scraping de {self.title} en curso.")
 
 
+class StoreBatchIdle(RuntimeError):
+    def __init__(self, store_id: str, title: str | None = None) -> None:
+        self.store_id = store_id
+        self.title = title or store_id
+        super().__init__(f"No hay un scraping de {self.title} en curso.")
+
+
+class StoreBatchNothingToResume(ValueError):
+    def __init__(self, store_id: str, title: str | None = None) -> None:
+        self.store_id = store_id
+        self.title = title or store_id
+        super().__init__(f"No hay progreso guardado para continuar {self.title}. Usa reiniciar.")
+
+
+def store_cursor_key(store_id: str) -> str:
+    return f"batch_cursor:tienda:{normalize_store(store_id)}"
+
+
 def normalize_store(store_id: str | None) -> str:
     key = (store_id or "").strip().lower()
     if not key:

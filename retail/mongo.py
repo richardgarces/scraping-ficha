@@ -895,6 +895,7 @@ class ProductRepository:
     def activate_store_batch_run(self, run_id: str, store_id: str, data: dict[str, Any]) -> None:
         """Entrega la reserva de una tienda al worker sin crear otra corrida."""
         from bson import ObjectId
+        from retail.batch.group_scope import GroupBatchStopped
         from retail.batch.store_scope import StoreBatchBusy
 
         item = self.batch_runs.find_one({"_id": ObjectId(run_id)})
@@ -902,6 +903,8 @@ class ProductRepository:
             raise StoreBatchBusy(store_id)
         if item.get("status") != "running":
             raise StoreBatchBusy(store_id)
+        if item.get("stop_requested") or item.get("phase") == "stopping":
+            raise GroupBatchStopped()
         if item.get("phase") != "starting":
             self.batch_runs.update_one({"_id": item["_id"], "status": "running"}, {"$set": data})
             return
@@ -917,6 +920,21 @@ class ProductRepository:
         )
         if not result.matched_count:
             raise StoreBatchBusy(store_id)
+
+    def request_store_stop(self, store_id: str) -> bool:
+        """Pide parar la corrida de una tienda. No toca las de grupos u otras tiendas."""
+        key = (store_id or "").strip().lower()
+        if not key:
+            return False
+        result = self.batch_runs.update_one(
+            {
+                "tienda": key,
+                "scope": "tienda",
+                "status": "running",
+            },
+            {"$set": {"stop_requested": True, "phase": "stopping"}},
+        )
+        return bool(result.matched_count)
 
     def request_group_stop(self, group: str) -> bool:
         """Pide parar la corrida de un grupo. No toca las de los demás."""
@@ -961,6 +979,26 @@ class ProductRepository:
     def clear_group_batch_cursor(self, group: str) -> None:
         self.set_group_batch_cursor(group, None)
 
+    def set_store_batch_cursor(self, store_id: str, next_id: str | None) -> None:
+        """Guarda desde qué consulta retomar el scraping de una tienda."""
+        from retail.batch.store_scope import store_cursor_key
+
+        key = store_cursor_key(store_id)
+        product = str(next_id or "").strip()
+        if not product:
+            self.app_settings.delete_one({"_id": key})
+            return
+        self.save_app_setting(
+            key,
+            {
+                "next_id": product,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            },
+        )
+
+    def clear_store_batch_cursor(self, store_id: str) -> None:
+        self.set_store_batch_cursor(store_id, None)
+
     def latest_group_batch_run(self, group: str) -> dict[str, Any] | None:
         return self.batch_runs.find_one(
             {
@@ -968,6 +1006,15 @@ class ProductRepository:
                 "tienda": {"$in": [None, ""]},
                 "scope": {"$nin": ["tienda", "basico"]},
             },
+            sort=[("started_at", -1)],
+        )
+
+    def latest_store_batch_run(self, store_id: str) -> dict[str, Any] | None:
+        key = (store_id or "").strip().lower()
+        if not key:
+            return None
+        return self.batch_runs.find_one(
+            {"tienda": key, "scope": "tienda"},
             sort=[("started_at", -1)],
         )
 
@@ -980,6 +1027,16 @@ class ProductRepository:
         product = resume_product_id(run)
         if product:
             self.set_group_batch_cursor(group, product)
+
+    def remember_store_batch_resume(self, store_id: str | None, run: dict[str, Any] | None) -> None:
+        """Si el scraping de tienda quedó a medias, la próxima «Continuar» parte desde ahí."""
+        from retail.batch.group_scope import resume_product_id
+
+        if not store_id:
+            return
+        product = resume_product_id(run)
+        if product:
+            self.set_store_batch_cursor(store_id, product)
 
     def update_batch_run(self, run_id: str, **fields: Any) -> None:
         """Actualiza progreso en vivo (fase, consulta actual, error) sin tocar contadores."""
@@ -1062,7 +1119,10 @@ class ProductRepository:
             if not batch_run_is_stale(doc, cutoff=cutoff):
                 continue
             group = str(doc.get("grupo") or "").strip()
-            if group and not doc.get("tienda"):
+            store = str(doc.get("tienda") or "").strip()
+            if store and (doc.get("scope") == "tienda" or not group):
+                self.remember_store_batch_resume(store, doc)
+            elif group and not store:
                 self.remember_group_batch_resume(group, doc)
             elif doc.get("job") == "scraping_basico":
                 after = doc.get("resume_after_id")

@@ -223,6 +223,127 @@ def test_start_store_batch_requires_mongo(monkeypatch):
         jobs._STORE_RUNNING.clear()
 
 
+def test_start_store_batch_continue_and_restart(monkeypatch):
+    from retail.batch.store_scope import StoreBatchNothingToResume
+    from retail.web import jobs
+
+    jobs._STORE_RUNNING.clear()
+    cursors: list[tuple] = []
+    runs: list[dict] = []
+    monkeypatch.setattr("retail.batch.store_scope.normalize_store", lambda store_id: "ahumada")
+    monkeypatch.setattr("retail.batch.store_scope.store_title", lambda store_id: "Ahumada")
+    monkeypatch.setattr("retail.batch.store_scope.store_batch_is_busy", lambda repo, store_id: False)
+    monkeypatch.setattr("retail.batch.store_scope.groups_for_store", lambda store_id, **kwargs: ["farmacias"])
+
+    class _Repo:
+        def latest_store_batch_run(self, store_id):
+            return {"status": "stopped", "processed": 12, "searches": [{"id": "para"}], "current_id": None}
+
+        def set_store_batch_cursor(self, store_id, next_id):
+            cursors.append(("set", store_id, next_id))
+
+        def clear_store_batch_cursor(self, store_id):
+            cursors.append(("clear", store_id))
+
+        def start_batch_run(self, data):
+            runs.append(data)
+            return "store-run-2"
+
+        def close(self):
+            return None
+
+    monkeypatch.setattr("retail.search.connect_repo", lambda: _Repo())
+
+    class _Thread:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def start(self):
+            return None
+
+    monkeypatch.setattr(jobs.threading, "Thread", _Thread)
+    try:
+        continued = jobs.start_store_batch("ahumada", mode="continue")
+        assert continued["mode"] == "continue"
+        assert ("set", "ahumada", "para") in cursors
+        assert runs[0]["resume_mode"] == "continue"
+        jobs._STORE_RUNNING.clear()
+
+        restarted = jobs.start_store_batch("ahumada", mode="restart")
+        assert restarted["mode"] == "restart"
+        assert ("clear", "ahumada") in cursors
+        assert runs[1]["resume_mode"] == "restart"
+        jobs._STORE_RUNNING.clear()
+
+        empty = type("R", (), {
+            "latest_store_batch_run": lambda self, store_id: {"processed": 0, "searches": []},
+            "get_app_setting": lambda self, key: {},
+            "close": lambda self: None,
+        })()
+        monkeypatch.setattr("retail.search.connect_repo", lambda: empty)
+        try:
+            jobs.start_store_batch("ahumada", mode="continue")
+            raised = False
+        except StoreBatchNothingToResume:
+            raised = True
+        assert raised
+    finally:
+        jobs._STORE_RUNNING.clear()
+
+
+def test_stop_store_batch_flags_running_run(monkeypatch):
+    from retail.batch.store_scope import StoreBatchIdle
+    from retail.web import jobs
+
+    flagged = []
+
+    class _Repo:
+        def request_store_stop(self, store_id):
+            flagged.append(store_id)
+            return store_id == "ahumada"
+
+        def close(self):
+            return None
+
+    monkeypatch.setattr("retail.batch.store_scope.normalize_store", lambda store_id: store_id)
+    monkeypatch.setattr("retail.batch.store_scope.store_title", lambda store_id: store_id.title())
+    monkeypatch.setattr("retail.search.connect_repo", lambda: _Repo())
+    result = jobs.stop_store_batch("ahumada")
+    assert result["tienda"] == "ahumada"
+    assert flagged == ["ahumada"]
+    try:
+        jobs.stop_store_batch("falabella")
+        raised = False
+    except StoreBatchIdle:
+        raised = True
+    assert raised
+
+
+def test_store_stop_api_requires_admin(anonymous_repo, monkeypatch):
+    import pytest
+
+    monkeypatch.setattr("retail.web.settings_api.stop_store_batch", lambda store: pytest.fail(store))
+    client = TestClient(app)
+    assert client.post("/api/admin/store-scrape/ahumada/stop").status_code == 401
+
+
+def test_store_stop_api_targets_store(monkeypatch):
+    from retail.web import settings_api
+
+    seen = []
+
+    def stop(store):
+        seen.append(store)
+        return {"ok": True, "tienda": store, "message": f"Deteniendo {store}."}
+
+    monkeypatch.setattr(settings_api, "current_user", lambda *a, **k: {"role": "admin"})
+    monkeypatch.setattr(settings_api, "stop_store_batch", stop)
+    response = TestClient(app).post("/api/admin/store-scrape/doite/stop")
+    assert response.status_code == 202
+    assert seen == ["doite"]
+    assert "Deteniendo" in response.json()["message"]
+
+
 def test_cli_tienda_is_exclusive_with_grupo(monkeypatch):
     from retail.cli import unified_main
 

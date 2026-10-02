@@ -124,6 +124,58 @@ test("detener un grupo no pide pausar los demás", async () => {
   assert.equal(cron.refreshes, 1);
 });
 
+test("scraping de tienda ofrece detener, continuar y reiniciar según estado", () => {
+  const cron = loadCron();
+  const job = { id: "doite", title: "Doite", status: "running", progress: { phase: "products" }, last_run: { processed: 246 } };
+  const running = cron.storeStatusCell(job);
+  assert.match(running, /data-stop-store="doite"/);
+  assert.match(running, /Detener/);
+  assert.doesNotMatch(running, /data-start-store/);
+
+  const stopped = cron.storeStatusCell({
+    ...job,
+    status: "stopped",
+    last_run: { processed: 246 },
+  });
+  assert.match(stopped, /data-start-mode="continue"/);
+  assert.match(stopped, /Continuar/);
+  assert.match(stopped, /data-start-mode="restart"/);
+  assert.match(stopped, /Reiniciar/);
+
+  const done = cron.storeStatusCell({ ...job, status: "done", last_run: { processed: 2296 } });
+  assert.doesNotMatch(done, /data-start-mode="continue"/);
+  assert.match(done, /data-start-mode="restart"/);
+  assert.match(done, /Reiniciar/);
+});
+
+test("continuar y detener scraping de tienda llaman a las APIs correctas", async () => {
+  const calls = [];
+  const cron = loadCron(async (url, options) => {
+    calls.push([url, options?.method, options?.body]);
+    return {
+      status: 202,
+      ok: true,
+      json: async () => ({ message: url.includes("stop") ? "Deteniendo scraping de Doite." : "Continuando scraping de Doite desde donde quedó." }),
+    };
+  });
+  await cron.startStore({
+    dataset: { startStore: "doite", startMode: "continue" },
+    disabled: false,
+    textContent: "Continuar",
+  });
+  assert.deepEqual(calls[0], [
+    "/api/admin/store-scrape",
+    "POST",
+    JSON.stringify({ tienda: "doite", mode: "continue" }),
+  ]);
+  await cron.stopStore({
+    dataset: { stopStore: "doite" },
+    disabled: false,
+    textContent: "Detener",
+  });
+  assert.deepEqual(calls[1], ["/api/admin/store-scrape/doite/stop", "POST", undefined]);
+});
+
 test("un rechazo se muestra y permite reintentar tras actualizar", async () => {
   let attempts = 0;
   const cron = loadCron(async () => {

@@ -150,18 +150,31 @@ _STORE_LOCK = threading.Lock()
 _STORE_RUNNING: set[str] = set()
 
 
-def start_store_batch(tienda: str, **kwargs) -> dict[str, Any]:
-    """Registra la corrida en Mongo antes de responder y scrapea solo esa tienda."""
+def start_store_batch(tienda: str, *, mode: str | None = None, **kwargs) -> dict[str, Any]:
+    """Registra la corrida en Mongo antes de responder y scrapea solo esa tienda.
+
+    mode:
+      - None: usa el cursor guardado si existe
+      - continue: coloca el cursor en la última consulta de una corrida fallida o detenida
+      - restart: borra el cursor y parte desde el comienzo del catálogo
+    """
     from datetime import datetime, timezone
 
+    from retail.batch.group_scope import resume_product_id
     from retail.batch.store_scope import (
         StoreBatchBusy,
+        StoreBatchNothingToResume,
         groups_for_store,
         normalize_store,
         store_batch_is_busy,
+        store_cursor_key,
         store_title,
     )
     from retail.search import connect_repo
+
+    action = (mode or "").strip().lower() or None
+    if action not in {None, "continue", "restart"}:
+        raise ValueError("Modo inválido. Usa continuar o reiniciar.")
 
     store_id = normalize_store(tienda)
     title = store_title(store_id)
@@ -174,6 +187,17 @@ def start_store_batch(tienda: str, **kwargs) -> dict[str, Any]:
                 raise RuntimeError("MongoDB no está disponible; no se pudo iniciar el scraping.")
             if store_batch_is_busy(repo, store_id):
                 raise StoreBatchBusy(store_id, title)
+            if action == "restart" and hasattr(repo, "clear_store_batch_cursor"):
+                repo.clear_store_batch_cursor(store_id)
+            elif action == "continue":
+                previous = repo.latest_store_batch_run(store_id) if hasattr(repo, "latest_store_batch_run") else None
+                product = resume_product_id(previous)
+                if not product and hasattr(repo, "get_app_setting"):
+                    cursor = repo.get_app_setting(store_cursor_key(store_id)) or {}
+                    product = str(cursor.get("next_id") or "").strip() or None
+                if not product:
+                    raise StoreBatchNothingToResume(store_id, title)
+                repo.set_store_batch_cursor(store_id, product)
             groups = groups_for_store(store_id, repo=repo)
             run_id = repo.start_batch_run({
                 "tienda": store_id,
@@ -185,6 +209,7 @@ def start_store_batch(tienda: str, **kwargs) -> dict[str, Any]:
                 "started_at": datetime.now(timezone.utc).isoformat(),
                 "source": kwargs.get("source") or "scrape",
                 "persist": bool(kwargs.get("persist", True)),
+                "resume_mode": action or "schedule",
             })
         finally:
             if repo is not None:
@@ -203,13 +228,42 @@ def start_store_batch(tienda: str, **kwargs) -> dict[str, Any]:
         with _STORE_LOCK:
             _STORE_RUNNING.discard(store_id)
         raise
+    if action == "continue":
+        message = f"Continuando scraping de {title} desde donde quedó."
+    elif action == "restart":
+        message = f"Reiniciando scraping de {title} desde el comienzo."
+    else:
+        message = f"Scraping iniciado para {title}."
     return {
         "ok": True,
         "running": True,
         "tienda": store_id,
         "title": title,
         "run_id": run_id,
-        "message": f"Scraping iniciado para {title}.",
+        "mode": action or "schedule",
+        "message": message,
+    }
+
+
+def stop_store_batch(tienda: str) -> dict[str, Any]:
+    """Pide detener el scraping de una tienda. La corrida lo nota entre consultas."""
+    from retail.batch.store_scope import StoreBatchIdle, normalize_store, store_title
+    from retail.search import connect_repo
+
+    store_id = normalize_store(tienda)
+    title = store_title(store_id)
+    repo = connect_repo()
+    if repo is None:
+        raise RuntimeError("MongoDB no está disponible; no se pudo detener el scraping.")
+    try:
+        if not hasattr(repo, "request_store_stop") or not repo.request_store_stop(store_id):
+            raise StoreBatchIdle(store_id, title)
+    finally:
+        repo.close()
+    return {
+        "ok": True,
+        "tienda": store_id,
+        "message": f"Deteniendo scraping de {title}.",
     }
 
 

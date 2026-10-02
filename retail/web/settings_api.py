@@ -20,8 +20,16 @@ from retail.qdrant_index import connect_qdrant
 from retail.registry import list_stores
 from retail.search import connect_repo
 from retail.batch.basic_scrape import BasicScrapeBusy
-from retail.batch.store_scope import StoreBatchBusy, normalize_store
-from retail.web.jobs import batch_status, start_basic_scrape, start_batch, start_group_batch, start_store_batch, stop_group_batch
+from retail.batch.store_scope import normalize_store
+from retail.web.jobs import (
+    batch_status,
+    start_basic_scrape,
+    start_batch,
+    start_group_batch,
+    start_store_batch,
+    stop_group_batch,
+    stop_store_batch,
+)
 
 router = APIRouter()
 
@@ -133,7 +141,11 @@ def get_batch_status(request: Request) -> dict:
 async def post_store_scrape(request: Request) -> dict:
     """Arranca el scrape de todas las categorías/consultas de una sola tienda."""
     current_user(request, admin=True)
+    from retail.batch.store_scope import StoreBatchBusy, StoreBatchNothingToResume
+
     body = await request.json() if request.headers.get("content-type", "").startswith("application/json") else {}
+    if not isinstance(body, dict):
+        body = {}
     raw = str(body.get("tienda") or body.get("store") or "").strip()
     if not raw:
         raise HTTPException(status_code=400, detail="Elige una tienda.")
@@ -143,9 +155,11 @@ async def post_store_scrape(request: Request) -> dict:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     schedule = load_schedule()
     pause = body.get("pause")
+    mode = body.get("mode")
     try:
         return start_store_batch(
             store_id,
+            mode=mode,
             source=body.get("source") or schedule.get("source") or "both",
             pause=float(pause if pause is not None else schedule.get("pause") or 2),
             delay=float(body.get("delay") or 1),
@@ -156,8 +170,27 @@ async def post_store_scrape(request: Request) -> dict:
         )
     except StoreBatchBusy as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except StoreBatchNothingToResume as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/api/admin/store-scrape/{store_id}/stop", status_code=202)
+def stop_store_scrape(store_id: str, request: Request) -> dict:
+    """Pide detener el scraping de una tienda. El worker lo nota entre consultas."""
+    current_user(request, admin=True)
+    from pymongo.errors import PyMongoError
+    from retail.batch.store_scope import StoreBatchIdle
+
+    try:
+        return stop_store_batch(store_id)
+    except StoreBatchIdle as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except (RuntimeError, PyMongoError) as exc:
+        raise HTTPException(status_code=503, detail="No se pudo detener el scraping. Inténtalo de nuevo.") from exc
 
 
 @router.post("/api/admin/basic-scrape")

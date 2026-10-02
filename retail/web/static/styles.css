@@ -1902,6 +1902,15 @@ html[data-theme="day"] .panel { backdrop-filter: none; }
 }
 .cron-store-live .cron-bar { margin: 8px 0; }
 .cron-store-live .cron-query { margin: 6px 0 0; }
+.cron-store-live-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+.cron-store-live-actions:empty { display: none; }
+.cron-store-live-actions button { min-height: 40px; }
+.cron-store-live-actions button.cron-stop { color: var(--danger); }
 .cron-store-form label { display: grid; gap: 6px; font-size: 14px; color: var(--muted); min-width: 240px; flex: 1; }
 .cron-store-form button { min-height: 44px; }
 .cron-head { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; align-items: flex-start; margin-bottom: 12px; }

@@ -28,7 +28,7 @@ def test_start_group_api_accepts_only_the_selected_group(monkeypatch):
     monkeypatch.setattr("retail.web.settings_api.current_user", lambda *a, **k: {"role": "admin"})
     calls = []
 
-    def start(group):
+    def start(group, mode=None):
         calls.append(group)
         return {"ok": True, "running": True, "grupo": group, "run_id": "r1"}
 
@@ -46,7 +46,7 @@ def test_start_group_api_accepts_only_the_selected_group(monkeypatch):
 def test_start_group_api_reports_failures(monkeypatch, error, status):
     monkeypatch.setattr("retail.web.settings_api.current_user", lambda *a, **k: {"role": "admin"})
 
-    def start(group):
+    def start(group, mode=None):
         raise error
 
     monkeypatch.setattr("retail.web.settings_api.start_group_batch", start)

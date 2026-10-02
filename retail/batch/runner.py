@@ -241,7 +241,14 @@ def run_batch(
     # dos peticiones simultáneas al mismo comercio.
     if group_key and not ids:
         products = _interleave_products_by_origin(products)
-    cursor_key = f"batch_cursor:{group_key}" if group_key and not ids and limit is None else None
+    cursor_key = None
+    if not ids and limit is None:
+        if group_key:
+            cursor_key = f"batch_cursor:{group_key}"
+        elif store_key:
+            from retail.batch.store_scope import store_cursor_key
+
+            cursor_key = store_cursor_key(store_key)
     if repo is not None and cursor_key and hasattr(repo, "get_app_setting"):
         cursor = repo.get_app_setting(cursor_key) or {}
         products = _rotate_products(products, str(cursor.get("next_id") or ""))
@@ -430,6 +437,8 @@ def run_batch(
                 )
                 if group_key and hasattr(repo, "set_group_batch_cursor"):
                     repo.set_group_batch_cursor(group_key, item.get("id"))
+                elif store_key and hasattr(repo, "set_store_batch_cursor"):
+                    repo.set_store_batch_cursor(store_key, item.get("id"))
             if index not in prepared_searches:
                 jobs: list[tuple[int, dict[str, Any], str, list[str], str | None]] = [
                     (index, item, query, query_stores, origin_store)
@@ -620,6 +629,16 @@ def run_batch(
         summary["stopped"] = True
         summary["finished_at"] = datetime.now(timezone.utc).isoformat()
         if repo is not None and run_id:
+            resume_hint = {
+                "current_id": None,
+                "searches": summary.get("searches") or [],
+            }
+            if summary.get("searches"):
+                resume_hint["current_id"] = summary["searches"][-1].get("id")
+            if store_key and hasattr(repo, "remember_store_batch_resume"):
+                repo.remember_store_batch_resume(store_key, resume_hint)
+            elif group_key and hasattr(repo, "remember_group_batch_resume"):
+                repo.remember_group_batch_resume(group_key, resume_hint)
             repo.finish_batch_run(
                 run_id,
                 status="stopped",
@@ -631,6 +650,16 @@ def run_batch(
         if product_executor is not None:
             product_executor.shutdown(wait=False, cancel_futures=True)
         if repo is not None and run_id:
+            if store_key and hasattr(repo, "remember_store_batch_resume"):
+                repo.remember_store_batch_resume(
+                    store_key,
+                    {
+                        "current_id": (summary.get("searches") or [{}])[-1].get("id")
+                        if summary.get("searches")
+                        else None,
+                        "searches": summary.get("searches") or [],
+                    },
+                )
             repo.finish_batch_run(
                 run_id,
                 status="failed",

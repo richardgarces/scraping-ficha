@@ -47,6 +47,8 @@ function statusBadge(status) {
 
 const startingGroups = new Set();
 const stoppingGroups = new Set();
+const startingStores = new Set();
+const stoppingStores = new Set();
 
 function groupStatusCell(group, paused) {
   const badge = statusBadge(group.status);
@@ -135,6 +137,92 @@ async function stopGroup(button) {
   } catch (error) {
     flash(error.message, false);
     stoppingGroups.delete(group);
+  }
+  await refresh().catch((error) => flash(error.message, false));
+}
+
+function storeStatusCell(job) {
+  const badge = statusBadge(job.status);
+  const actions = [];
+  const title = job.title || job.id;
+  if (["running", "paused"].includes(job.status)) {
+    const stopping = stoppingStores.has(job.id) || job.progress?.phase === "stopping";
+    const stopTitle = `Detener scraping de ${title}`;
+    actions.push(`<button type="button" class="secondary cron-stop" data-stop-store="${escapeHtml(job.id)}"
+      title="${escapeHtml(stopTitle)}" aria-label="${escapeHtml(stopTitle)}"${stopping ? " disabled" : ""}>
+      ${stopping ? "Deteniendo…" : "Detener"}
+    </button>`);
+  }
+  if (["failed", "stopped"].includes(job.status)) {
+    const starting = startingStores.has(job.id);
+    const processed = Number(job.last_run?.processed) || 0;
+    if (processed > 0) {
+      const continueTitle = `Continuar scraping de ${title} desde la consulta ${processed}`;
+      actions.push(`<button type="button" class="secondary cron-continue" data-start-store="${escapeHtml(job.id)}" data-start-mode="continue"
+        title="${escapeHtml(continueTitle)}" aria-label="${escapeHtml(continueTitle)}"${starting ? " disabled" : ""}>
+        ${starting ? "Iniciando…" : "Continuar"}
+      </button>`);
+    }
+    const restartTitle = `Reiniciar scraping de ${title} desde el comienzo`;
+    actions.push(`<button type="button" class="secondary cron-restart" data-start-store="${escapeHtml(job.id)}" data-start-mode="restart"
+      title="${escapeHtml(restartTitle)}" aria-label="${escapeHtml(restartTitle)}"${starting ? " disabled" : ""}>
+      ${starting ? "Iniciando…" : "Reiniciar"}
+    </button>`);
+  }
+  if (job.status === "done") {
+    const starting = startingStores.has(job.id);
+    const restartTitle = `Reiniciar scraping de ${title} desde el comienzo`;
+    actions.push(`<button type="button" class="secondary cron-restart" data-start-store="${escapeHtml(job.id)}" data-start-mode="restart"
+      title="${escapeHtml(restartTitle)}" aria-label="${escapeHtml(restartTitle)}"${starting ? " disabled" : ""}>
+      ${starting ? "Iniciando…" : "Reiniciar"}
+    </button>`);
+  }
+  if (!actions.length) return badge;
+  return `<div class="cron-group-action">${badge}${actions.join("")}</div>`;
+}
+
+async function startStore(button) {
+  const tienda = button.dataset.startStore;
+  const mode = button.dataset.startMode || "";
+  if (!tienda || button.disabled || startingStores.has(tienda)) return;
+  startingStores.add(tienda);
+  button.disabled = true;
+  const busyLabel = mode === "continue" ? "Continuando…" : mode === "restart" ? "Reiniciando…" : "Iniciando…";
+  const idleLabel = mode === "continue" ? "Continuar" : mode === "restart" ? "Reiniciar" : "Correr scraping";
+  button.textContent = busyLabel;
+  try {
+    const body = { tienda };
+    if (mode) body.mode = mode;
+    const result = await json("/api/admin/store-scrape", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    flash(result.message || "Scraping iniciado.");
+    watchUntil = Date.now() + 60000;
+  } catch (error) {
+    flash(error.message, false);
+  } finally {
+    startingStores.delete(tienda);
+    button.disabled = false;
+    button.textContent = idleLabel;
+  }
+  await refresh().catch((error) => flash(error.message, false));
+}
+
+async function stopStore(button) {
+  const tienda = button.dataset.stopStore;
+  if (!tienda || button.disabled || stoppingStores.has(tienda)) return;
+  stoppingStores.add(tienda);
+  button.disabled = true;
+  button.textContent = "Deteniendo…";
+  try {
+    const result = await json(`/api/admin/store-scrape/${encodeURIComponent(tienda)}/stop`, { method: "POST" });
+    flash(result.message || "Deteniendo el scraping.");
+    watchUntil = Date.now() + 60000;
+  } catch (error) {
+    flash(error.message, false);
+    stoppingStores.delete(tienda);
   }
   await refresh().catch((error) => flash(error.message, false));
 }
@@ -452,6 +540,8 @@ function renderStoreLive(jobs) {
   const job = (selected && live.find((item) => item.id === selected)) || live[0] || null;
   if (!job) {
     panel.hidden = true;
+    const actions = $("store-live-actions");
+    if (actions) actions.innerHTML = "";
     return;
   }
   const progress = job.progress || {};
@@ -491,6 +581,19 @@ function renderStoreLive(jobs) {
       : phaseLabel;
   }
   if (counts) counts.textContent = countLine(progress) || "";
+  const actions = $("store-live-actions");
+  if (actions) {
+    if (["running", "paused"].includes(job.status)) {
+      const stopping = stoppingStores.has(job.id) || progress.phase === "stopping";
+      const stopTitle = `Detener scraping de ${job.title || job.id}`;
+      actions.innerHTML = `<button type="button" class="secondary cron-stop" data-stop-store="${escapeHtml(job.id)}"
+        title="${escapeHtml(stopTitle)}" aria-label="${escapeHtml(stopTitle)}"${stopping ? " disabled" : ""}>
+        ${stopping ? "Deteniendo…" : "Detener"}
+      </button>`;
+    } else {
+      actions.innerHTML = "";
+    }
+  }
 }
 
 function renderStoreJobs(payload) {
@@ -547,7 +650,7 @@ function renderStoreJobs(payload) {
         <strong>${escapeHtml(job.title || job.id)}</strong>
         <div class="muted">${escapeHtml(job.id)}${groups ? ` · ${escapeHtml(groups)}` : ""}</div>
       </td>
-      <td>${statusBadge(job.status)}</td>
+      <td>${storeStatusCell(job)}</td>
       <td>
         ${progressCell(like)}
         ${counts ? `<div class="cron-basic-counts muted">${escapeHtml(counts)}</div>` : ""}
@@ -663,6 +766,9 @@ function render(payload) {
   for (const group of payload.groups || []) {
     if (!["running", "paused"].includes(group.status)) stoppingGroups.delete(group.id);
   }
+  for (const job of payload.store_jobs || []) {
+    if (!["running", "paused"].includes(job.status)) stoppingStores.delete(job.id);
+  }
   const sched = payload.schedule || {};
   const enabled = sched.enabled ? "activa" : "desactivada";
   $("cron-meta").textContent =
@@ -764,6 +870,16 @@ document.addEventListener("click", (event) => {
   const basic = event.target.closest("button[data-basic-mode]");
   if (basic) {
     startBasicScrape(basic.dataset.basicMode).catch((error) => flash(error.message, false));
+    return;
+  }
+  const stopStoreBtn = event.target.closest("button[data-stop-store]");
+  if (stopStoreBtn) {
+    stopStore(stopStoreBtn).catch((error) => flash(error.message, false));
+    return;
+  }
+  const startStoreBtn = event.target.closest("button[data-start-store]");
+  if (startStoreBtn) {
+    startStore(startStoreBtn).catch((error) => flash(error.message, false));
     return;
   }
   const stop = event.target.closest("button[data-stop-group]");

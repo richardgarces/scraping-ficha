@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#258fdf">
   <title>Cron / lotes</title>
   <script>(function(){var m=localStorage.getItem("retail-theme");if(m==="day"||m==="night"){document.documentElement.dataset.theme=m;return;}var h=new Date().getHours();document.documentElement.dataset.theme=(h>=7&&h<19)?"day":"night";})();</script>
-  <link rel="stylesheet" href="/static/styles.css?v=73">
+  <link rel="stylesheet" href="/static/styles.css?v=74">
 </head>
 <body>
   <header class="top">
@@ -105,6 +105,7 @@
         </div>
         <p id="store-live-query" class="muted cron-query"></p>
         <p id="store-live-counts" class="muted cron-basic-counts"></p>
+        <div id="store-live-actions" class="cron-store-live-actions"></div>
       </div>
       <div class="table-wrap" id="store-jobs-wrap" hidden>
         <table class="results cron-table">
@@ -150,6 +151,6 @@
     </section>
   </main>
   <script src="/static/prices.js?v=29"></script>
-  <script src="/static/cron.js?v=13"></script>
+  <script src="/static/cron.js?v=14"></script>
 </body>
 </html>
