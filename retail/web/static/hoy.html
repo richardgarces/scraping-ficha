@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#258fdf">
   <title>Ofertas de hoy</title>
   <script>(function(){var m=localStorage.getItem("retail-theme");if(m==="day"||m==="night"){document.documentElement.dataset.theme=m;return;}var h=new Date().getHours();document.documentElement.dataset.theme=(h>=7&&h<19)?"day":"night";})();</script>
-  <link rel="stylesheet" href="/static/styles.css?v=68">
+  <link rel="stylesheet" href="/static/styles.css?v=74">
 </head>
 <body>
   <header class="top">
@@ -60,7 +60,24 @@
         <span class="filter-toggle-label" aria-hidden="true"></span>
       </summary>
       <div class="toolbar catalog-filter-grid wide-filter-grid">
-        <label>Día <select id="day" data-filter-control></select></label>
+        <label class="day-picker-field">Día
+          <input type="hidden" id="day" data-filter-control value="">
+          <button type="button" id="day-picker-toggle" class="day-picker-toggle" aria-haspopup="dialog" aria-expanded="false">
+            <span id="day-picker-label">Más reciente</span>
+          </button>
+          <div id="day-picker" class="day-picker" hidden role="dialog" aria-label="Calendario de ofertas">
+            <div class="day-picker-toolbar">
+              <button type="button" id="day-prev-month" class="secondary" aria-label="Mes anterior">‹</button>
+              <strong id="day-month-label"></strong>
+              <button type="button" id="day-next-month" class="secondary" aria-label="Mes siguiente">›</button>
+            </div>
+            <div class="day-picker-weekdays" aria-hidden="true">
+              <span>L</span><span>M</span><span>X</span><span>J</span><span>V</span><span>S</span><span>D</span>
+            </div>
+            <div id="day-picker-grid" class="day-picker-grid"></div>
+            <button type="button" id="day-latest" class="secondary day-picker-latest">Más reciente</button>
+          </div>
+        </label>
         <label>Categoría <select id="category" data-filter-control></select></label>
         <label>Tienda <select id="store" data-filter-control></select></label>
         <label>Motivo <select id="rule" data-filter-control></select></label>
@@ -115,6 +132,6 @@
     </section>
   </main>
   <script src="/static/prices.js?v=29"></script>
-  <script src="/static/hoy.js?v=9"></script>
+  <script src="/static/hoy.js?v=10"></script>
 </body>
 </html>

@@ -11,8 +11,13 @@ const RULES = {
 
 let page = 1;
 let totalPages = 1;
+let availableDays = [];
+let availableDaySet = new Set();
+let calendarCursor = null; // Date at first of visible month
+let dayPickerOpen = false;
 const pageSearchForm = document.querySelector(".desktop-quick-search");
 const pageSearchInput = pageSearchForm?.querySelector('input[name="q"]');
+const MONTHS_ES = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"];
 
 function flash(text, ok = false) {
   $("flash").hidden = false;
@@ -37,6 +42,126 @@ function fillSelect(select, values, current, anyLabel, labels) {
         return `<option value="${attr(value)}" ${value === current ? "selected" : ""}>${attr(text)}</option>`;
       })
       .join("");
+}
+
+function parseDay(value) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value || "").trim());
+  if (!match) return null;
+  const date = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])));
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function formatDayKey(date) {
+  const year = date.getUTCFullYear();
+  const month = String(date.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(date.getUTCDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function formatDayLabel(value) {
+  if (!value) return "Más reciente";
+  const date = parseDay(value);
+  if (!date) return value;
+  return `${date.getUTCDate()} ${MONTHS_ES[date.getUTCMonth()].slice(0, 3)} ${date.getUTCFullYear()}`;
+}
+
+function monthStart(date) {
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1));
+}
+
+function shiftMonth(date, delta) {
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + delta, 1));
+}
+
+function syncDayLabel() {
+  const label = $("day-picker-label");
+  if (label) label.textContent = formatDayLabel($("day").value);
+}
+
+function setDayValue(value, { reload: shouldReload = false } = {}) {
+  const next = availableDaySet.has(value) ? value : "";
+  $("day").value = next;
+  syncDayLabel();
+  if (next) {
+    const parsed = parseDay(next);
+    if (parsed) calendarCursor = monthStart(parsed);
+  } else if (availableDays[0]) {
+    const parsed = parseDay(availableDays[0]);
+    if (parsed) calendarCursor = monthStart(parsed);
+  }
+  renderDayCalendar();
+  if (shouldReload) {
+    page = 1;
+    load(false).catch((error) => flash(error.message));
+  } else {
+    updateFilterBadge("today-filters", "today-filter-count");
+  }
+}
+
+function setAvailableDays(days, selected) {
+  availableDays = [...new Set((days || []).map((item) => String(item || "").trim()).filter(Boolean))]
+    .sort()
+    .reverse();
+  availableDaySet = new Set(availableDays);
+  const current = availableDaySet.has(selected) ? selected : ($("day").value && availableDaySet.has($("day").value) ? $("day").value : "");
+  const anchor = parseDay(current || availableDays[0]) || new Date();
+  calendarCursor = monthStart(anchor);
+  $("day").value = current;
+  syncDayLabel();
+  renderDayCalendar();
+}
+
+function renderDayCalendar() {
+  const grid = $("day-picker-grid");
+  const monthLabel = $("day-month-label");
+  if (!grid || !monthLabel || !calendarCursor) return;
+  monthLabel.textContent = `${MONTHS_ES[calendarCursor.getUTCMonth()]} ${calendarCursor.getUTCFullYear()}`;
+  const selected = $("day").value;
+  const year = calendarCursor.getUTCFullYear();
+  const month = calendarCursor.getUTCMonth();
+  const first = new Date(Date.UTC(year, month, 1));
+  // Monday-first: Sunday=0 -> 6
+  const startOffset = (first.getUTCDay() + 6) % 7;
+  const daysInMonth = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+  const cells = [];
+  for (let i = 0; i < startOffset; i += 1) {
+    cells.push(`<span class="day-picker-cell empty" aria-hidden="true"></span>`);
+  }
+  for (let day = 1; day <= daysInMonth; day += 1) {
+    const key = formatDayKey(new Date(Date.UTC(year, month, day)));
+    const enabled = availableDaySet.has(key);
+    const isSelected = selected === key;
+    const classes = ["day-picker-cell"];
+    if (!enabled) classes.push("disabled");
+    if (isSelected) classes.push("selected");
+    if (enabled && !selected && availableDays[0] === key) classes.push("latest");
+    cells.push(
+      enabled
+        ? `<button type="button" class="${classes.join(" ")}" data-day="${attr(key)}" aria-pressed="${isSelected ? "true" : "false"}">${day}</button>`
+        : `<span class="${classes.join(" ")}" aria-disabled="true">${day}</span>`
+    );
+  }
+  grid.innerHTML = cells.join("");
+  const earliest = availableDays.length ? parseDay(availableDays[availableDays.length - 1]) : null;
+  const latest = availableDays.length ? parseDay(availableDays[0]) : null;
+  const prev = $("day-prev-month");
+  const next = $("day-next-month");
+  if (prev) prev.disabled = Boolean(earliest && calendarCursor <= monthStart(earliest));
+  if (next) next.disabled = Boolean(latest && calendarCursor >= monthStart(latest));
+}
+
+function openDayPicker(open = true) {
+  const picker = $("day-picker");
+  const toggle = $("day-picker-toggle");
+  if (!picker || !toggle) return;
+  dayPickerOpen = open;
+  picker.hidden = !open;
+  toggle.setAttribute("aria-expanded", open ? "true" : "false");
+  if (open) renderDayCalendar();
+}
+
+function closeDayPicker() {
+  openDayPicker(false);
 }
 
 function renderDeals(data) {
@@ -152,7 +277,7 @@ async function load(keepFilters = false) {
     return;
   }
   $("flash").hidden = true;
-  fillSelect($("day"), data.days || [], data.day, "más reciente");
+  setAvailableDays(data.days || [], data.day);
   if (!keepFilters) {
     const facets = data.facets || {};
     fillSelect($("category"), facets.categories || [], $("category").value, "todas");
@@ -175,9 +300,39 @@ function reload() {
 ["category", "store", "rule", "min-price", "max-price", "min-saving", "min-discount", "sort", "size"].forEach((id) => {
   $(id).addEventListener("change", reload);
 });
-$("day").addEventListener("change", () => {
-  page = 1;
-  load(false).catch((error) => flash(error.message));
+
+$("day-picker-toggle")?.addEventListener("click", (event) => {
+  event.preventDefault();
+  openDayPicker(!dayPickerOpen);
+});
+$("day-prev-month")?.addEventListener("click", () => {
+  if (!calendarCursor) return;
+  calendarCursor = shiftMonth(calendarCursor, -1);
+  renderDayCalendar();
+});
+$("day-next-month")?.addEventListener("click", () => {
+  if (!calendarCursor) return;
+  calendarCursor = shiftMonth(calendarCursor, 1);
+  renderDayCalendar();
+});
+$("day-latest")?.addEventListener("click", () => {
+  closeDayPicker();
+  setDayValue("", { reload: true });
+});
+$("day-picker-grid")?.addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-day]");
+  if (!button) return;
+  closeDayPicker();
+  setDayValue(button.dataset.day, { reload: true });
+});
+document.addEventListener("click", (event) => {
+  if (!dayPickerOpen) return;
+  const field = event.target.closest(".day-picker-field");
+  if (field) return;
+  closeDayPicker();
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && dayPickerOpen) closeDayPicker();
 });
 
 pageSearchForm?.addEventListener("submit", (event) => {
