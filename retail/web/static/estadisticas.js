@@ -191,6 +191,41 @@ function renderQueries(rows) {
     .join("");
 }
 
+function renderScrapes(scrapes) {
+  const data = scrapes || {};
+  const totals = data.totals || {};
+  const scraped = totals.scraped || {};
+  const price = totals.price_updated || {};
+  const discount = totals.discount_updated || {};
+  $("scrapes-today").textContent = fmt(scraped.today);
+  $("scrapes-week").textContent = fmt(scraped.days_7);
+  $("scrapes-month").textContent = fmt(scraped.days_30);
+  $("scrapes-price-today").textContent = fmt(price.today);
+  $("scrapes-price-week").textContent = fmt(price.days_7);
+  $("scrapes-price-month").textContent = fmt(price.days_30);
+  $("scrapes-discount-today").textContent = fmt(discount.today);
+  $("scrapes-discount-week").textContent = fmt(discount.days_7);
+  $("scrapes-discount-month").textContent = fmt(discount.days_30);
+  const note = data.mongo === false ? " No se pudo leer el registro de scrapes." : "";
+  $("scrapes-meta").textContent =
+    `Productos que el scraper consultó y guardó. El precio y el descuento solo cuentan cuando cambian frente al valor anterior. Este contador partió con esta versión.${note}`;
+  const rows = [...(data.by_day || [])].reverse();
+  const body = $("scrapes-body");
+  if (!rows.length || rows.every((row) => !(row.scraped || row.price_updated || row.discount_updated))) {
+    body.innerHTML = `<tr><td colspan="4" class="muted">Todavía no hay scrapes registrados en esta ventana.</td></tr>`;
+    return;
+  }
+  body.innerHTML = rows
+    .map((row) => `
+      <tr>
+        <td>${escapeHtml(dayLabel(row.day))}</td>
+        <td class="num">${fmt(row.scraped)}</td>
+        <td class="num">${fmt(row.price_updated)}</td>
+        <td class="num">${fmt(row.discount_updated)}</td>
+      </tr>`)
+    .join("");
+}
+
 function renderClicks(clicks) {
   const data = clicks || {};
   const totals = data.totals || {};
@@ -253,6 +288,7 @@ function render(payload) {
     `Consultas de la caja de búsqueda. No cuenta el cron ni los barridos automáticos.${searchMongo}`;
   $("stats-refresh").textContent = stamp;
   renderClicks(payload.clicks || {});
+  renderScrapes(payload.scrapes || {});
   renderVisitors(payload.by_day || []);
   renderSearches(searches.by_day || []);
   renderQueries(searches.top || []);

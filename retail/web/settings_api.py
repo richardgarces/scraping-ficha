@@ -265,11 +265,13 @@ def admin_stats(request: Request) -> dict:
     current_user(request, admin=True)
     from retail.click_stats import load_click_stats
     from retail.request_stats import load_stats
+    from retail.scrape_stats import load_scrape_stats
     from retail.search_stats import load_search_stats
 
     payload = load_stats()
     payload["searches"] = load_search_stats()
     payload["clicks"] = load_click_stats()
+    payload["scrapes"] = load_scrape_stats()
     return payload
 
 

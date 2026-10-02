@@ -124,6 +124,48 @@
     <section class="panel">
       <div class="cron-head">
         <div>
+          <h2>Productos scrapeados</h2>
+          <p id="scrapes-meta" class="muted">Cargando…</p>
+        </div>
+      </div>
+      <div class="stat-cards">
+        <article class="stat-card"><span>Consultados hoy</span><strong id="scrapes-today">—</strong></article>
+        <article class="stat-card"><span>Precio hoy</span><strong id="scrapes-price-today">—</strong></article>
+        <article class="stat-card"><span>Descuento hoy</span><strong id="scrapes-discount-today">—</strong></article>
+      </div>
+      <div class="stat-cards">
+        <article class="stat-card"><span>Consultados 7 días</span><strong id="scrapes-week">—</strong></article>
+        <article class="stat-card"><span>Precio 7 días</span><strong id="scrapes-price-week">—</strong></article>
+        <article class="stat-card"><span>Descuento 7 días</span><strong id="scrapes-discount-week">—</strong></article>
+      </div>
+      <div class="stat-cards">
+        <article class="stat-card"><span>Consultados 30 días</span><strong id="scrapes-month">—</strong></article>
+        <article class="stat-card"><span>Precio 30 días</span><strong id="scrapes-price-month">—</strong></article>
+        <article class="stat-card"><span>Descuento 30 días</span><strong id="scrapes-discount-month">—</strong></article>
+      </div>
+      <div class="stat-follow">
+        <h3>Por día</h3>
+        <p class="muted">Últimos 30 días, hora de Santiago. Consultados = productos escritos por el scraper; precio y descuento = cambios respecto al valor guardado antes.</p>
+      </div>
+      <div class="table-wrap">
+        <table class="results">
+          <thead>
+            <tr>
+              <th>Día</th>
+              <th>Consultados</th>
+              <th>Precio</th>
+              <th>Descuento</th>
+            </tr>
+          </thead>
+          <tbody id="scrapes-body">
+            <tr><td colspan="4" class="muted">Cargando…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+    <section class="panel">
+      <div class="cron-head">
+        <div>
           <h2>Clics</h2>
           <p id="clicks-meta" class="muted">Cargando…</p>
         </div>
@@ -226,6 +268,6 @@
     </section>
   </main>
   <script src="/static/prices.js?v=27"></script>
-  <script src="/static/estadisticas.js?v=6"></script>
+  <script src="/static/estadisticas.js?v=7"></script>
 </body>
 </html>

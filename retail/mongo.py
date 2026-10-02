@@ -523,6 +523,12 @@ class ProductRepository:
         except Exception as exc:
             print(f"Alerta de precio: no se pudo comparar el precio anterior ({exc}).")
         result = self.collection.bulk_write(operations, ordered=False)
+        try:
+            from retail.scrape_stats import record_product_writes
+
+            record_product_writes(previous, unique, when=now)
+        except Exception as exc:
+            print(f"Estadísticas de scrape: no se pudo registrar el lote ({exc}).")
         if changes:
             self._fanout_price_alerts(changes)
         return {
