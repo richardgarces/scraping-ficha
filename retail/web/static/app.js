@@ -88,6 +88,8 @@ function renderCategoryShortcuts(categories) {
 let storesReady = false;
 /** Query waiting for fillStores when the user searches before checkboxes exist. */
 let pendingSearchQuery = null;
+/** Admin interacted with store checkboxes / Todas / Ninguna (not just hidden defaults). */
+let storeSelectionTouched = false;
 
 function selectedStores() {
   return [...document.querySelectorAll("#stores input[type=checkbox]:checked")].map((item) => item.value);
@@ -96,6 +98,16 @@ function selectedStores() {
 function allStoresSelected() {
   const boxes = storeChecks();
   return boxes.length > 0 && boxes.every((item) => item.checked);
+}
+
+/** Error only when an admin visibly cleared every store checkbox on purpose. */
+function hasExplicitEmptyStoreSelection() {
+  return (
+    searchIsAdmin()
+    && storeSelectionTouched
+    && storeChecks().length > 0
+    && selectedStores().length === 0
+  );
 }
 
 function updateExploreFilterBadge() {
@@ -216,6 +228,7 @@ function fillStores(stores) {
     .join("");
   syncGroupToggles();
   updateExploreFilterBadge();
+  storeSelectionTouched = false;
   storesReady = true;
   const queued = pendingSearchQuery;
   pendingSearchQuery = null;
@@ -1262,6 +1275,7 @@ function runSearch(query) {
   resultFocus = "matches";
   delete $("summary").dataset.technicalSummary;
   resetResultFilters();
+  setResultFiltersVisible(false);
   const stores = selectedStores();
   const quick = quickSearchEnabled();
   const requestedSource = sourceValue();
@@ -1282,11 +1296,12 @@ function runSearch(query) {
       $("summary").textContent = "Cargando tiendas…";
       return;
     }
-    // Sin casillas = sin filtro explícito → todas las tiendas (API sin `stores`).
+    // Casillas ocultas (no admin) o sin tocar = todas las tiendas (API sin `stores`).
     // «Elige al menos una tienda» solo si el admin desmarcó todas a mano.
-    if (storeChecks().length) {
+    if (hasExplicitEmptyStoreSelection()) {
       setSearching(false);
       $("summary").hidden = false;
+      $("summary").className = "summary";
       $("summary").innerHTML = "<p class='err'>Elige al menos una tienda.</p>";
       return;
     }
@@ -1296,7 +1311,6 @@ function runSearch(query) {
   $("summary").hidden = false;
   $("summary").className = "summary";
   $("summary").textContent = "Buscando…";
-  setResultFiltersVisible(false);
   startSearchConversation(quick);
   setSearching(true);
   renderSkeleton();
@@ -1493,14 +1507,22 @@ $("view-grid").addEventListener("click", () => setView("grid"));
 initPageSize();
 setView(currentView());
 
-$("all-stores").addEventListener("click", () => setStoresChecked(true));
-$("no-stores").addEventListener("click", () => setStoresChecked(false));
+$("all-stores").addEventListener("click", () => {
+  storeSelectionTouched = true;
+  setStoresChecked(true);
+});
+$("no-stores").addEventListener("click", () => {
+  storeSelectionTouched = true;
+  setStoresChecked(false);
+});
 $("store-groups").addEventListener("change", (event) => {
   const toggle = event.target.closest("input[data-group]");
   if (!toggle) return;
+  storeSelectionTouched = true;
   setStoresChecked(toggle.checked, toggle.dataset.group);
 });
 $("stores").addEventListener("change", () => {
+  storeSelectionTouched = true;
   syncGroupToggles();
   updateExploreFilterBadge();
 });

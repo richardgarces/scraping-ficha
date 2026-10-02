@@ -179,16 +179,24 @@ def test_first_search_waits_for_stores_before_elige_tienda_error():
     page = (STATIC / "index.html").read_text(encoding="utf-8")
     assert "let storesReady = false;" in app
     assert "let pendingSearchQuery = null;" in app
+    assert "let storeSelectionTouched = false;" in app
     assert "if (!storesReady)" in app
     assert "pendingSearchQuery = query;" in app
     assert 'textContent = "Cargando tiendas…";' in app
     assert "storesReady = true;" in app
+    assert "storeSelectionTouched = false;" in app
     assert "if (queued) runSearch(queued);" in app
-    # Sin casillas = todas las tiendas; el error solo si el admin desmarcó todas.
-    assert "if (storeChecks().length)" in app
+    # Vacío / casillas ocultas = todas; error solo si el admin desmarcó a mano.
+    assert "function hasExplicitEmptyStoreSelection()" in app
+    assert "storeSelectionTouched" in app
+    assert "searchIsAdmin()" in app
+    assert "if (hasExplicitEmptyStoreSelection())" in app
     assert "Elige al menos una tienda." in app
     assert "if (stores.length && !allStoresSelected())" in app
-    assert "app.js?v=53" in page
+    # Ocultar filtros de resultado antes de validar tiendas (evita «Sin filtros» bajo el error).
+    early = app.split("function runSearch(query)")[1].split("pendingSearchQuery = null;")[0]
+    assert "setResultFiltersVisible(false);" in early
+    assert "app.js?v=55" in page
 
 
 def test_refresh_meta_still_fills_stores_if_catalog_fails():
