@@ -58,8 +58,8 @@ function storeLine(row) {
     row.strongest_verified ? '<span class="badge">Mayor baja comprobada</span>' : "",
     row.strongest_published ? '<span class="badge ghost">Mayor descuento publicado</span>' : "",
   ].filter(Boolean).join(" ");
-  const verified = row.verified_discount > 0 ? ` <small>${Math.round(row.verified_discount)}% vs historial</small>` : "";
-  const inner = `${storeLogo(row.display_store || row.store, title)} <span class="price">${money(row.price)}</span>${off}${verified} ${labels}`;
+  const verified = row.verified_discount > 0 ? `<small>${Math.round(row.verified_discount)}% vs historial</small>` : "";
+  const inner = `<span class="compare-store-brand">${storeLogo(row.display_store || row.store, title)}</span><span class="compare-store-value"><span class="price">${money(row.price)}</span>${off}${verified}${labels}</span>`;
   if (ficha) {
     return `<li class="${row.win ? "win" : ""}"><a href="${attr(ficha)}">${inner}</a></li>`;
   }

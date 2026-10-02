@@ -1463,26 +1463,51 @@ button.secondary.current { background: var(--accent); color: var(--btn-ink); }
 .compare-stores a,
 .compare-stores li {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: 6px 8px;
+  min-width: 0;
   color: inherit;
   text-decoration: none;
 }
 .compare-stores .price { font-size: 14px; }
 .compare-stores li > a { width: 100%; min-width: 0; }
-.compare-store-brand { min-width: 0; flex: 1 1 auto; }
-.compare-store-brand .store { min-width: 0; }
+.compare-store-brand {
+  flex: 1 1 5.5rem;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+}
+.compare-store-brand .store,
+.deal .compare-store-brand .store {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  width: auto;
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
 .compare-store-value {
   display: flex;
-  flex: 0 0 auto;
+  flex: 1 1 7rem;
   flex-wrap: wrap;
   align-items: center;
   justify-content: flex-end;
   gap: 6px;
+  min-width: 0;
+  max-width: 100%;
   text-align: right;
 }
 .compare-store-value .price { white-space: nowrap; }
+.compare-store-value .badge,
+.compare-store-value small {
+  flex: 0 1 auto;
+  white-space: nowrap;
+}
 
 /* Comparison modal styles */
 .modal { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; padding: 16px; background: rgba(0,0,0,0.58); z-index: 2000; }
@@ -2600,6 +2625,7 @@ input[type="checkbox"], input[type="radio"] { width: 18px; height: 18px; accent-
   .deal-name { font-size: 14px; }
   .deal-meta { flex-direction: column; align-items: stretch; }
   .deal .store { width: 100%; font-size: 12px; line-height: 1.2; }
+  .deal .compare-store-brand .store { width: auto; max-width: 100%; }
   .deal .store-logo { width: 34px; height: 34px; }
   .deal-meta > .deal-cta,
   .deal-meta > .deal-ctas { width: 100%; }
