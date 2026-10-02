@@ -107,7 +107,8 @@ fi
 
 branch="$(git rev-parse --abbrev-ref HEAD)"
 info "Push $branch → origin/main (sin force)"
-git push -u origin HEAD:main
+# Sin -u: no reescribe git config / upstream (ya suele ser origin/main).
+git push origin HEAD:main
 
 info "OK"
 git status -sb
