@@ -179,7 +179,15 @@ def score_product(query: str, product: Product) -> Relevance:
     score = weight / total if total else 0.0
     if specs and any(hits(token) for token in specs):
         score = min(1.0, score + 0.08)
-    reason = conflict(parse(fold(query)), fold(product.name)) if accepted else None
+    reason = (
+        conflict(
+            parse(fold(query)),
+            fold(" ".join(part for part in (product.name, product.brand or "", product.category or "") if part)),
+            query=fold(query),
+        )
+        if accepted
+        else None
+    )
     if reason:
         accepted = False
     return Relevance(

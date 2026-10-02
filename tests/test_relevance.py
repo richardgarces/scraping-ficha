@@ -109,6 +109,73 @@ def test_discount_keeps_what_the_store_publishes():
     assert sane_discount(90, 100000, 80000) == 20  # etiqueta increíble, manda la resta
 
 
+def test_pasta_corbata_is_not_fashion():
+    """«Corbata» en moda es necktie; fideos Lucchetti/Carozzi no deben pasar."""
+    query = "corbata"
+    pasta = [
+        _product(
+            "Fideos Lucchetti Corbatas, 400g",
+            brand="Lucchetti",
+            store="cugat",
+            product_id="lucchetti-corbatas",
+            price=699,
+        ),
+        _product(
+            "Pasta Corbata Nº88",
+            brand="LUCCHETTI",
+            store="tottus",
+            product_id="pasta-corbata-88",
+            price=790,
+        ),
+        _product(
+            "FIDEO CORBATA TRICOLOR 400 GRS.",
+            brand="CAROZZI",
+            store="tottus",
+            product_id="fideo-corbata-tricolor",
+            price=890,
+        ),
+        _product(
+            "Corbata de seda hombre",
+            brand="Arrow",
+            store="falabella",
+            product_id="corbata-seda",
+            price=12990,
+        ),
+    ]
+    kept, discarded, details = filter_relevant(query, pasta, price_band=False)
+    assert [item.product_id for item in kept] == ["corbata-seda"]
+    discarded_ids = {item.product_id for item in discarded}
+    assert discarded_ids == {
+        "lucchetti-corbatas",
+        "pasta-corbata-88",
+        "fideo-corbata-tricolor",
+    }
+    for item in discarded:
+        reason = details[(item.store, item.product_id)].reason
+        assert reason and "comida" in reason
+
+
+def test_fideos_corbata_query_still_keeps_pasta():
+    assert score_product(
+        "fideos corbata",
+        _product("Fideos Lucchetti Corbatas, 400g", brand="Lucchetti", store="cugat"),
+    ).accepted is True
+
+
+def test_corbata_routes_to_moda_not_supermercados():
+    from retail.index.products import resolve, stores_for
+    from retail.registry import list_stores
+
+    found = resolve("corbata", client=False)
+    assert found is not None
+    assert "moda" in found.groups
+    assert "supermercados" not in found.groups
+    selected = stores_for("corbata", [store.id for store in list_stores()], client=False) or []
+    assert "levis" in selected or "tommy" in selected or "falabella" in selected
+    assert "tottus" not in selected
+    assert "cugat" not in selected
+
+
 def test_embed_text_is_stable_and_normalized():
     first = embed_text("celular s25 512gb")
     second = embed_text("celular s25 512gb")

@@ -141,6 +141,45 @@ NEVER_FURNITURE = {
     "consola",
 }
 
+# Consultas de moda con homónimos alimenticios (p. ej. corbata = necktie vs farfalle).
+# Si la consulta pide la prenda y el título trae señales de comida, se descarta.
+FASHION_FOOD_AMBIGUOUS: dict[str, frozenset[str]] = {
+    "corbata": frozenset(
+        {
+            "fideo",
+            "fideos",
+            "pasta",
+            "pastas",
+            "spaghetti",
+            "spaghettini",
+            "mostaccioli",
+            "farfalle",
+            "fettuccine",
+            "fusilli",
+            "canelones",
+            "lasagna",
+            "lasana",
+            "raviol",
+            "ravioles",
+            "lucchetti",
+            "carozzi",
+            "napolitana",
+        }
+    ),
+    "corbatas": frozenset(
+        {
+            "fideo",
+            "fideos",
+            "pasta",
+            "pastas",
+            "spaghetti",
+            "farfalle",
+            "lucchetti",
+            "carozzi",
+        }
+    ),
+}
+
 
 @dataclass(slots=True)
 class Intent:
@@ -227,8 +266,32 @@ def parse(query: str) -> Intent:
     )
 
 
-def conflict(intent: Intent, name: str) -> str | None:
+def fashion_food_conflict(query: str, name: str) -> str | None:
+    """Descarta comida cuando la consulta pide una prenda con homónimo alimenticio.
+
+    «corbata» en moda es necktie; «fideos corbatas» / Lucchetti sí es pasta.
+    """
+    query_tokens = set(_TOKEN_RE.findall(query or ""))
+    if not query_tokens:
+        return None
+    name_tokens = set(_TOKEN_RE.findall(name or ""))
+    for term, food_markers in FASHION_FOOD_AMBIGUOUS.items():
+        if term not in query_tokens:
+            continue
+        # La consulta ya habla de comida: es pasta, no moda.
+        if query_tokens & food_markers:
+            continue
+        hit = name_tokens & food_markers
+        if hit:
+            return f"es comida ({sorted(hit)[0]}), no moda"
+    return None
+
+
+def conflict(intent: Intent, name: str, *, query: str = "") -> str | None:
     """Motivo por el que el producto no es lo pedido, o None si calza."""
+    food_reason = fashion_food_conflict(query, name) if query else None
+    if food_reason:
+        return food_reason
     if not intent.devices:
         return None
     tokens = _TOKEN_RE.findall(name)

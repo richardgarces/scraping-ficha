@@ -278,6 +278,12 @@
       "groups": ["moda", "retail"]
     },
     {
+      "id": "corbata",
+      "name": "Corbata",
+      "aliases": ["corbatas", "necktie", "corbata hombre"],
+      "groups": ["moda", "retail"]
+    },
+    {
       "id": "chaqueta",
       "name": "Chaqueta",
       "aliases": ["chaquetas", "chamarra", "cortaviento"],
