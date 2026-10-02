@@ -999,11 +999,33 @@ button.secondary:hover { border-color: color-mix(in srgb, var(--accent) 40%, var
 .price-chart-legend { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; margin: 8px 0 4px; color: var(--muted); font-size: 13px; font-weight: 700; }
 .price-chart-legend span { display: inline-flex; align-items: center; gap: 7px; }
 .price-chart-legend i { width: 22px; height: 4px; border-radius: 999px; background: var(--accent); }
-.price-chart-legend i.normal { background: var(--warn); }
+.price-chart-legend i.normal {
+  background: transparent;
+  border-top: 3px dashed var(--warn);
+  height: 0;
+  border-radius: 0;
+}
+.price-chart-legend i.discount {
+  height: 12px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--saving) 42%, transparent);
+  border: 1.5px solid var(--saving);
+}
 .chart-series.offer { stroke: var(--accent); }
-.chart-series.normal { stroke: var(--warn); }
+.chart-series.offer.discounted { stroke: var(--saving); }
+.chart-series.normal {
+  stroke: var(--warn);
+  stroke-dasharray: 7 5;
+  stroke-width: 2.75;
+  opacity: .98;
+}
+.chart-discount-band {
+  fill: color-mix(in srgb, var(--saving) 34%, transparent);
+  stroke: none;
+}
 .chart-point { fill: currentColor; stroke: var(--panel); stroke-width: 1.5; }
 .chart-point.offer { fill: var(--accent); }
+.chart-point.offer.discounted { fill: var(--saving); stroke: color-mix(in srgb, var(--saving) 55%, var(--panel)); }
 .chart-point.normal { fill: var(--warn); }
 .chart-empty { min-height: 120px; display: grid; place-items: center; text-align: center; }
 .chart .axis { fill: var(--muted); font-size: 11px; }
@@ -1554,6 +1576,28 @@ body.modal-open { overflow: hidden; }
   border-color: var(--accent);
 }
 .back-results[hidden] { display: none; }
+.product-trail-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 16px;
+  margin: 0 0 12px;
+}
+.product-siblings {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+.product-siblings[hidden] { display: none; }
+.product-position {
+  font-size: 13px;
+  font-weight: 700;
+  min-width: 3.5rem;
+  text-align: center;
+}
 .price-alert { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
 .price-alert .price-alert-note { margin: 0; }
 .product-head .thumb-lg {

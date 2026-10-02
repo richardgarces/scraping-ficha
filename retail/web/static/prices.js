@@ -13,6 +13,39 @@ const money = (value) =>
 const attr = (value) =>
   String(value ?? "").replaceAll("&", "&amp;").replaceAll('"', "&quot;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
 
+const PRODUCT_TRAIL_KEY = "retail-product-trail";
+
+/** Guarda la lista visible para navegar anterior/siguiente en la ficha. */
+function saveProductTrail(items, sourceHref = `${location.pathname}${location.search}${location.hash}`) {
+  const trail = (items || [])
+    .map((item) => {
+      const store = item?.store || "";
+      const id = item?.product_id || item?.id || "";
+      if (!store || !id) return null;
+      return { store, id, name: item?.name || "" };
+    })
+    .filter(Boolean);
+  if (trail.length < 2) {
+    try { sessionStorage.removeItem(PRODUCT_TRAIL_KEY); } catch (_error) { /* ignore */ }
+    return;
+  }
+  try {
+    sessionStorage.setItem(PRODUCT_TRAIL_KEY, JSON.stringify({ source: sourceHref, items: trail }));
+  } catch (_error) { /* ignore quota */ }
+}
+
+function readProductTrail() {
+  try {
+    const raw = sessionStorage.getItem(PRODUCT_TRAIL_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || !Array.isArray(parsed.items) || parsed.items.length < 2) return null;
+    return parsed;
+  } catch (_error) {
+    return null;
+  }
+}
+
 /** Texto legible de disponibilidad aunque la tienda entregue un objeto anidado. */
 function availabilityLabel(value, stock = null) {
   const quantity = stockQuantity(stock);

@@ -9,8 +9,9 @@ let currentSearchId = "";
 let currentQuery = "";
 const VIEW_KEY = "retail-search-view";
 const PAGE_SIZE_KEY = "retail-page-size";
-const PAGE_SIZES = [10, 20, 50, 100, 500];
-const DEFAULT_PAGE_SIZE = 20;
+const PAGE_SIZES = [12, 24, 48, 96, 480];
+const DEFAULT_PAGE_SIZE = 12;
+const LEGACY_PAGE_SIZES = { 10: 12, 20: 24, 50: 48, 100: 96, 500: 480 };
 let currentPage = 1;
 let lastPagerTotal = 0;
 
@@ -695,17 +696,24 @@ function currentView() {
   return localStorage.getItem(VIEW_KEY) === "list" ? "list" : "grid";
 }
 
+function normalizePageSize(raw) {
+  const value = Number(raw);
+  if (PAGE_SIZES.includes(value)) return value;
+  if (LEGACY_PAGE_SIZES[value]) return LEGACY_PAGE_SIZES[value];
+  return DEFAULT_PAGE_SIZE;
+}
+
 function pageSize() {
   const select = $("page-size");
-  const raw = Number((select && select.value) || localStorage.getItem(PAGE_SIZE_KEY) || DEFAULT_PAGE_SIZE);
-  return PAGE_SIZES.includes(raw) ? raw : DEFAULT_PAGE_SIZE;
+  return normalizePageSize((select && select.value) || localStorage.getItem(PAGE_SIZE_KEY) || DEFAULT_PAGE_SIZE);
 }
 
 function initPageSize() {
   const select = $("page-size");
   if (!select) return;
-  const stored = Number(localStorage.getItem(PAGE_SIZE_KEY) || DEFAULT_PAGE_SIZE);
-  select.value = String(PAGE_SIZES.includes(stored) ? stored : DEFAULT_PAGE_SIZE);
+  const size = normalizePageSize(localStorage.getItem(PAGE_SIZE_KEY) || DEFAULT_PAGE_SIZE);
+  select.value = String(size);
+  localStorage.setItem(PAGE_SIZE_KEY, String(size));
 }
 
 function hidePager() {
@@ -917,6 +925,7 @@ function renderTable() {
   updateResultFilterBadge();
   if (currentView() === "grid") {
     const paged = slicePage(sortRows(visibleRows()));
+    saveProductTrail(paged.items);
     $("results").innerHTML = paged.items.length
       ? `<div class="deal-grid">${paged.items.map(searchDealCard).join("")}</div>`
       : "<p class='panel empty-results'>Ningún resultado con esos filtros.</p>";
@@ -925,6 +934,10 @@ function renderTable() {
     return;
   }
   const paged = slicePage(sortGroups(groupedByProduct(visibleRows())));
+  saveProductTrail(paged.items.map((group) => {
+    const first = (group.offers || []).find((item) => item.product_id) || (group.offers || [])[0] || {};
+    return { store: first.store, product_id: first.product_id, name: group.name };
+  }));
   $("results").innerHTML = paged.items.length
     ? `<div class="result-list">${paged.items.map(resultCard).join("")}</div>`
     : "<p class='panel empty-results'>Ningún resultado con esos filtros.</p>";

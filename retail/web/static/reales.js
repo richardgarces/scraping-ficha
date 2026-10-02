@@ -142,6 +142,7 @@ function render(data) {
   $("deals").innerHTML = rows.length
     ? rows.map(dealCard).join("")
     : `<p class="panel muted">Sin ofertas reales para estos filtros.</p>`;
+  saveProductTrail(rows);
   $("page-label").textContent = `Página ${data.page || 1} de ${totalPages}`;
   $("prev").disabled = (data.page || 1) <= 1;
   $("next").disabled = (data.page || 1) >= totalPages;

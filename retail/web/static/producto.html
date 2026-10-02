@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#258fdf">
   <title>Ficha de producto</title>
   <script>(function(){var m=localStorage.getItem("retail-theme");if(m==="day"||m==="night"){document.documentElement.dataset.theme=m;return;}var h=new Date().getHours();document.documentElement.dataset.theme=(h>=7&&h<19)?"day":"night";})();</script>
-  <link rel="stylesheet" href="/static/styles.css?v=68">
+  <link rel="stylesheet" href="/static/styles.css?v=70">
 </head>
 <body>
   <header class="top">
@@ -53,7 +53,14 @@
   </header>
 
   <main class="settings">
-    <a id="back-results" class="back-results" href="/" hidden>← Volver a resultados</a>
+    <nav class="product-trail-bar" aria-label="Navegación de resultados">
+      <a id="back-results" class="back-results" href="/" hidden>← Volver a resultados</a>
+      <div id="product-siblings" class="product-siblings" hidden>
+        <a id="prev-product" class="back-results" href="#" hidden>← Anterior</a>
+        <span id="product-position" class="muted product-position"></span>
+        <a id="next-product" class="back-results" href="#" hidden>Siguiente →</a>
+      </div>
+    </nav>
     <p id="flash" class="summary" hidden></p>
     <p id="price-notice" class="cheapest" hidden role="status"></p>
     <p id="sweep-status" class="muted" hidden></p>
@@ -90,10 +97,11 @@
           </div>
           <section class="price-history-card price-history-combined" id="chart-combined-card" aria-labelledby="combined-chart-title" hidden>
             <h3 id="combined-chart-title">Precio de oferta y precio normal</h3>
-            <p class="muted">Ambos valores en la misma escala para comparar su evolución.</p>
+            <p class="muted">La zona verde marca cuando el precio de oferta estuvo por debajo del normal.</p>
             <div class="price-chart-legend" aria-label="Leyenda">
               <span><i class="offer"></i>Precio de oferta</span>
               <span><i class="normal"></i>Precio normal</span>
+              <span><i class="discount"></i>Descuento</span>
             </div>
             <div id="chart-combined" class="price-chart-scroll" tabindex="0" aria-label="Gráfico desplazable de precios por día"></div>
             <p id="chart-combined-note" class="muted"></p>
@@ -176,7 +184,7 @@
       <div class="related-row" id="related"></div>
     </section>
   </main>
-  <script src="/static/prices.js?v=27"></script>
-  <script src="/static/producto.js?v=28"></script>
+  <script src="/static/prices.js?v=28"></script>
+  <script src="/static/producto.js?v=30"></script>
 </body>
 </html>

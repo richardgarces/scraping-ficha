@@ -8,21 +8,69 @@ function flash(text) {
 
 function mountBackToResults() {
   const link = $("back-results");
-  if (!link || !document.referrer) return;
-  let previous;
-  try {
-    previous = new URL(document.referrer);
-  } catch (_error) {
+  const siblings = $("product-siblings");
+  const prev = $("prev-product");
+  const next = $("next-product");
+  const position = $("product-position");
+  const trail = typeof readProductTrail === "function" ? readProductTrail() : null;
+  const params = new URLSearchParams(location.search);
+  const store = params.get("store") || "";
+  const id = params.get("id") || "";
+  const listPaths = new Set(["/", "/catalogo", "/hoy", "/reales", "/super", "/ofertas"]);
+
+  let backHref = trail?.source || "";
+  let useHistoryBack = false;
+  if (!backHref && document.referrer) {
+    try {
+      const previous = new URL(document.referrer);
+      if (previous.origin === location.origin && listPaths.has(previous.pathname)) {
+        backHref = `${previous.pathname}${previous.search}${previous.hash}`;
+        useHistoryBack = true;
+      }
+    } catch (_error) {
+      backHref = "";
+    }
+  }
+  if (link && backHref) {
+    link.href = backHref;
+    link.hidden = false;
+    if (useHistoryBack) {
+      link.addEventListener("click", (event) => {
+        if (history.length <= 1) return;
+        event.preventDefault();
+        history.back();
+      });
+    }
+  }
+
+  if (!siblings || !prev || !next || !trail?.items?.length) {
+    if (siblings) siblings.hidden = true;
     return;
   }
-  if (previous.origin !== location.origin || !["/", "/catalogo"].includes(previous.pathname)) return;
-  link.href = `${previous.pathname}${previous.search}${previous.hash}`;
-  link.hidden = false;
-  link.addEventListener("click", (event) => {
-    if (history.length <= 1) return;
-    event.preventDefault();
-    history.back();
-  });
+  const index = trail.items.findIndex((item) => item.store === store && String(item.id) === String(id));
+  if (index < 0) {
+    siblings.hidden = true;
+    return;
+  }
+  siblings.hidden = false;
+  if (position) position.textContent = `${index + 1} / ${trail.items.length}`;
+
+  if (index > 0) {
+    const item = trail.items[index - 1];
+    prev.href = productUrl({ store: item.store, product_id: item.id });
+    prev.hidden = false;
+    prev.setAttribute("aria-label", item.name ? `Anterior: ${item.name}` : "Producto anterior");
+  } else {
+    prev.hidden = true;
+  }
+  if (index < trail.items.length - 1) {
+    const item = trail.items[index + 1];
+    next.href = productUrl({ store: item.store, product_id: item.id });
+    next.hidden = false;
+    next.setAttribute("aria-label", item.name ? `Siguiente: ${item.name}` : "Producto siguiente");
+  } else {
+    next.hidden = true;
+  }
 }
 
 function thumbUrl(item) {
@@ -547,6 +595,99 @@ function seriesSummary(label, history) {
   return `${label}: mín. ${money(Math.min(...prices))} · prom. ${money(average(prices))} · máx. ${money(Math.max(...prices))}`;
 }
 
+function alignOfferNormalSeries(days, offer, normal) {
+  const offerBy = Object.fromEntries(offer.map((item) => [item.day, item.price]));
+  const normalBy = Object.fromEntries(normal.map((item) => [item.day, item.price]));
+  let lastNormal = null;
+  for (const item of fullNormalHistory) {
+    if (item.price == null) continue;
+    if (!days.length || item.day <= days[0]) lastNormal = item.price;
+  }
+  return days.map((day) => {
+    if (normalBy[day] != null) lastNormal = normalBy[day];
+    return {
+      day,
+      offer: offerBy[day] ?? null,
+      normal: normalBy[day] ?? lastNormal,
+    };
+  });
+}
+
+function discountBandMarkup(aligned, toX, toY) {
+  const bands = [];
+  let current = [];
+  const flush = () => {
+    if (current.length) bands.push(current);
+    current = [];
+  };
+  for (const point of aligned) {
+    if (point.offer != null && point.normal != null && point.offer < point.normal) {
+      current.push(point);
+    } else {
+      flush();
+    }
+  }
+  flush();
+
+  return bands.map((band) => {
+    if (band.length === 1) {
+      const point = band[0];
+      const x = toX(point.day);
+      const half = 9;
+      const yNormal = toY(point.normal);
+      const yOffer = toY(point.offer);
+      return `<path class="chart-discount-band" d="M ${(x - half).toFixed(1)},${yNormal.toFixed(1)} L ${(x + half).toFixed(1)},${yNormal.toFixed(1)} L ${(x + half).toFixed(1)},${yOffer.toFixed(1)} L ${(x - half).toFixed(1)},${yOffer.toFixed(1)} Z"/>`;
+    }
+    const top = band.map((point) => `${toX(point.day).toFixed(1)},${toY(point.normal).toFixed(1)}`).join(" ");
+    const bottom = [...band].reverse().map((point) => `${toX(point.day).toFixed(1)},${toY(point.offer).toFixed(1)}`).join(" ");
+    return `<polygon class="chart-discount-band" points="${top} ${bottom}"/>`;
+  }).join("");
+}
+
+function offerLineMarkup(aligned, toX, toY) {
+  const points = aligned.filter((point) => point.offer != null);
+  if (points.length < 2) return "";
+
+  const isDiscounted = (point) => point.normal != null && point.offer < point.normal;
+  const segments = [];
+  let segment = [{ ...points[0], discounted: isDiscounted(points[0]) }];
+
+  for (let index = 1; index < points.length; index += 1) {
+    const point = points[index];
+    const discounted = isDiscounted(point);
+    const previous = segment[segment.length - 1];
+    if (discounted === previous.discounted) {
+      segment.push({ ...point, discounted });
+      continue;
+    }
+    segments.push(segment);
+    segment = [{ ...previous, discounted }, { ...point, discounted }];
+  }
+  segments.push(segment);
+
+  const lines = segments.map((part) => {
+    const coords = part
+      .map((point) => `${toX(point.day).toFixed(1)},${toY(point.offer).toFixed(1)}`)
+      .join(" ");
+    const className = part[0].discounted ? "offer discounted" : "offer";
+    return `<polyline class="chart-series ${className}" fill="none" stroke-width="3.25" points="${coords}"/>`;
+  }).join("");
+
+  const dots = points.map((point) => {
+    const discounted = isDiscounted(point);
+    const className = discounted ? "offer discounted" : "offer";
+    const tip = discounted
+      ? `${chartDateLabel(point.day, true)}: oferta ${money(point.offer)} (normal ${money(point.normal)})`
+      : `${chartDateLabel(point.day, true)}: ${money(point.offer)}`;
+    return `
+      <circle class="chart-series chart-point ${className}" cx="${toX(point.day).toFixed(1)}" cy="${toY(point.offer).toFixed(1)}" r="${discounted ? 5 : 4}">
+        <title>${tip}</title>
+      </circle>`;
+  }).join("");
+
+  return `${lines}${dots}`;
+}
+
 function renderCombinedPriceChart() {
   const offer = chartSeries(fullOfferHistory, windowDays);
   const normal = chartSeries(fullNormalHistory, windowDays);
@@ -559,6 +700,7 @@ function renderCombinedPriceChart() {
   }
 
   const days = [...new Set(drawable.flatMap((series) => series.map((item) => item.day)))].sort();
+  const aligned = alignOfferNormalSeries(days, offer, normal);
   const width = chartWidthForDays(days.length, 1120);
   const height = 260;
   const pad = 36;
@@ -573,15 +715,23 @@ function renderCombinedPriceChart() {
   const toY = (price) => max === min
     ? height / 2
     : height - pad - ((price - min) / (max - min)) * (height - pad * 2);
-  const line = (series, className) => {
-    if (series.length < 2) return "";
-    const points = series.map((item) => `${toX(item.day).toFixed(1)},${toY(item.price).toFixed(1)}`).join(" ");
-    const dots = series.map((item) => `
-      <circle class="chart-series chart-point ${className}" cx="${toX(item.day).toFixed(1)}" cy="${toY(item.price).toFixed(1)}" r="4">
-        <title>${chartDateLabel(item.day, true)}: ${money(item.price)}</title>
+  const normalLine = () => {
+    const refs = aligned.filter((point) => point.normal != null);
+    if (!refs.length) return "";
+    const points = refs.map((point) => `${toX(point.day).toFixed(1)},${toY(point.normal).toFixed(1)}`).join(" ");
+    const line = refs.length >= 2
+      ? `<polyline class="chart-series normal" fill="none" stroke-width="2.75" points="${points}"/>`
+      : "";
+    const seen = new Set(normal.map((item) => item.day));
+    const dots = refs
+      .filter((point) => seen.has(point.day))
+      .map((point) => `
+      <circle class="chart-series chart-point normal" cx="${toX(point.day).toFixed(1)}" cy="${toY(point.normal).toFixed(1)}" r="3.5">
+        <title>${chartDateLabel(point.day, true)}: ${money(point.normal)}</title>
       </circle>`).join("");
-    return `<polyline class="chart-series ${className}" fill="none" stroke-width="3" points="${points}"/>${dots}`;
+    return `${line}${dots}`;
   };
+  const discountDays = aligned.filter((point) => point.offer != null && point.normal != null && point.offer < point.normal).length;
   const spanYears = days[0].slice(0, 4) !== days[days.length - 1].slice(0, 4);
   const dates = chartTickIndexes(days.length).map((index) => {
     const anchor = index === 0 ? "start" : index === days.length - 1 ? "end" : "middle";
@@ -592,17 +742,20 @@ function renderCombinedPriceChart() {
     <svg class="chart combined-chart" style="--chart-min-width: ${width}px" viewBox="0 0 ${width} ${viewHeight}" role="img" aria-label="Precio de oferta y precio normal, día a día">
       <line class="guide avg" x1="${pad}" x2="${width - pad}" y1="${toY(max).toFixed(1)}" y2="${toY(max).toFixed(1)}"/>
       <line class="guide avg" x1="${pad}" x2="${width - pad}" y1="${toY(min).toFixed(1)}" y2="${toY(min).toFixed(1)}"/>
-      ${line(offer, "offer")}
-      ${line(normal, "normal")}
+      ${discountBandMarkup(aligned, toX, toY)}
+      ${offerLineMarkup(aligned, toX, toY)}
+      ${normalLine()}
       <text x="${pad}" y="18" class="axis">máximo ${money(max)}</text>
       <text x="${pad}" y="${height - 7}" class="axis">mínimo ${money(min)}</text>
       ${dates}
     </svg>`;
   showLatestChartDay(container);
-  $("chart-combined-note").textContent = [
+  const summary = [
     seriesSummary("Oferta", offer),
     seriesSummary("Normal", normal),
-  ].join("  |  ");
+  ];
+  if (discountDays) summary.push(`Descuento: ${discountDays} día${discountDays === 1 ? "" : "s"}`);
+  $("chart-combined-note").textContent = summary.join("  |  ");
 }
 
 function applyChartMode() {
