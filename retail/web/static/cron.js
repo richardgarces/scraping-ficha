@@ -158,7 +158,7 @@ async function stopGroup(button) {
 function storeStatusCell(job) {
   const badge = statusBadge(job.status);
   const actions = [];
-  const title = job.title || job.id;
+  const title = job.title || (typeof publicStoreLabel === "function" ? publicStoreLabel(job.id) : job.id);
   if (["running", "paused"].includes(job.status)) {
     const stopping = stoppingStores.has(job.id) || job.progress?.phase === "stopping";
     const stopTitle = `Detener scraping de ${title}`;
@@ -582,7 +582,7 @@ function renderStoreLive(jobs) {
   const bar = $("store-live-bar");
   const query = $("store-live-query");
   const counts = $("store-live-counts");
-  if (title) title.textContent = job.title || job.id;
+  if (title) title.textContent = job.title || (typeof publicStoreLabel === "function" ? publicStoreLabel(job.id) : job.id);
   if (status) {
     status.textContent = job.status === "paused" ? "Pausado" : "En curso";
     status.className = job.status === "paused" ? "badge off" : "badge";
@@ -607,7 +607,7 @@ function renderStoreLive(jobs) {
   if (actions) {
     if (["running", "paused"].includes(job.status)) {
       const stopping = stoppingStores.has(job.id) || progress.phase === "stopping";
-      const stopTitle = `Detener scraping de ${job.title || job.id}`;
+      const stopTitle = `Detener scraping de ${job.title || (typeof publicStoreLabel === "function" ? publicStoreLabel(job.id) : job.id)}`;
       actions.innerHTML = `<button type="button" class="secondary cron-stop" data-stop-store="${escapeHtml(job.id)}"
         title="${escapeHtml(stopTitle)}" aria-label="${escapeHtml(stopTitle)}"${stopping ? " disabled" : ""}>
         ${stopping ? "Deteniendo…" : "Detener"}
@@ -629,6 +629,7 @@ function storeJobsForDisplay(payload) {
   return jobs.concat([
     {
       id: store.id,
+      public_id: store.public_id || store.id,
       title: store.title,
       groups: store.group ? [store.group] : [],
       status: "idle",
@@ -659,15 +660,18 @@ function renderStoreJobs(payload) {
           const items = job.progress?.items ?? job.last_run?.items ?? 0;
           const query = job.progress?.current_query;
           const base = items
-            ? `${job.title || job.id}: ${processed}/${items} productos`
-            : `${job.title || job.id}: arrancando…`;
+          const label = job.title || (typeof publicStoreLabel === "function" ? publicStoreLabel(job.id) : job.id);
+          const base = items
+            ? `${label}: ${processed}/${items} productos`
+            : `${label}: arrancando…`;
           return query ? `${base} · ${query}` : base;
         })
         .join(" · ");
     } else if (selected) {
       const job = displayJobs.find((item) => item.id === selected);
+      const label = job ? (job.title || (typeof publicStoreLabel === "function" ? publicStoreLabel(job.id) : job.id)) : "";
       meta.textContent = job?.last_run
-        ? `Última corrida de ${job.title || job.id}: ${formatWhen(job.last_run.finished_at || job.last_run.started_at)}`
+        ? `Última corrida de ${label}: ${formatWhen(job.last_run.finished_at || job.last_run.started_at)}`
         : "";
     } else {
       meta.textContent = "";
@@ -687,11 +691,12 @@ function renderStoreJobs(payload) {
       const groups = (job.groups || []).join(", ");
       const counts = countLine(job.progress || job.last_run);
       const highlight = selected && job.id === selected ? " cron-store-selected" : "";
+      const publicId = job.public_id || (typeof publicStoreId === "function" ? publicStoreId(job.id) : job.id);
       return `
     <tr class="${highlight.trim()}" data-status="${escapeHtml(job.status)}" data-tienda="${escapeHtml(job.id)}">
       <td>
-        <strong>${escapeHtml(job.title || job.id)}</strong>
-        <div class="muted">${escapeHtml(job.id)}${groups ? ` · ${escapeHtml(groups)}` : ""}</div>
+        <strong>${escapeHtml(job.title || publicId)}</strong>
+        <div class="muted">${escapeHtml(publicId)}${groups ? ` · ${escapeHtml(groups)}` : ""}</div>
       </td>
       <td>${storeStatusCell(job)}</td>
       <td>

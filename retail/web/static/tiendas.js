@@ -144,7 +144,7 @@ function dropList(store, items, key, dir) {
   return `
     <div class="drops-panel">
       <div class="drops-head">
-        <strong>${title} en ${attr(store)}</strong>
+        <strong>${title} en ${attr(publicStoreLabel(store))}</strong>
         <button type="button" class="secondary" data-close-drops>Cerrar</button>
       </div>
       <p class="muted">Solo las bajas que cuenta ese número. No es el catálogo vigilado. Las filas en rojo ahorran más del 40%.</p>
@@ -175,7 +175,7 @@ async function openDrops(button) {
 
   const detail = document.createElement("tr");
   detail.className = "store-drops";
-  detail.innerHTML = `<td colspan="4"><p class="muted">Cargando las bajas de ${attr(store)}…</p></td>`;
+  detail.innerHTML = `<td colspan="4"><p class="muted">Cargando las bajas de ${attr(publicStoreLabel(store))}…</p></td>`;
   row.after(detail);
   button.setAttribute("aria-expanded", "true");
 
@@ -209,8 +209,8 @@ function renderRows(stores) {
       return `
         <tr>
           <td>
-            <a class="store-link" href="/catalogo?store=${encodeURIComponent(row.store)}" title="Ver productos de ${attr(row.store_title || row.store)}">
-              ${storeLogo(row.display_store || row.store, row.store_title || row.store)}
+            <a class="store-link" href="/catalogo?store=${encodeURIComponent(row.store)}" title="Ver productos de ${attr(publicStoreLabel(row.store, row.store_title))}">
+              ${storeLogo(row.display_store || row.store, row.store_title)}
             </a>
           </td>
           <td>${dropsButton(row)}</td>

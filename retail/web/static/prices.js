@@ -364,15 +364,32 @@ const STORE_LOGOS = {
 };
 
 function storeLogoSrc(store) {
-  const id = String(store || "").toLowerCase();
+  const id = publicStoreId(store);
   return `/static/logos/${STORE_LOGOS[id] || "_store.svg"}`;
+}
+
+/** Id visible: el agregador interno no se nombra en la UI. */
+function publicStoreId(store) {
+  const id = String(store || "").toLowerCase();
+  if (id === "knasta" || id === "knaste") return "otro";
+  return id;
+}
+
+/** Nombre visible cuando faltaría caer al id crudo. */
+function publicStoreLabel(store, title) {
+  const label = String(title || "").trim();
+  if (label && !/^knast[ae]$/i.test(label)) return label;
+  const id = String(store || "").toLowerCase();
+  if (id === "knasta" || id === "knaste") return "Otro";
+  return label || store || "";
 }
 
 /** Nombre de la tienda con su marca a la izquierda. */
 function storeLogo(store, title) {
-  const label = title || store || "";
-  if (!store && !title) return "";
-  return `<span class="store"><img class="store-logo" src="${storeLogoSrc(store)}" alt="" width="22" height="22">${attr(label)}</span>`;
+  const id = publicStoreId(store);
+  const label = publicStoreLabel(store, title);
+  if (!id && !label) return "";
+  return `<span class="store"><img class="store-logo" src="${storeLogoSrc(id)}" alt="" width="22" height="22">${attr(label)}</span>`;
 }
 
 /** Actualiza la insignia de un panel plegable sin conocer la API de cada página. */

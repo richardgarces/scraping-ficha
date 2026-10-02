@@ -118,3 +118,12 @@ def test_knasta_muestra_tienda_final_o_otro():
         "otro",
         "Otro",
     )
+
+
+def test_knasta_nunca_aparece_como_etiqueta_publica():
+    from retail.store_display import public_store_key, public_store_label
+
+    assert public_store_key("knasta") == "otro"
+    assert public_store_label("knasta") == "Otro"
+    assert display_store({"store": "falabella", "store_title": "Knasta"}) == ("falabella", "Otro")
+    assert display_store({"store": "paris", "store_title": "Knaste"}) == ("paris", "Otro")

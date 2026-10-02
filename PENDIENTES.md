@@ -37,7 +37,7 @@ Este documento reúne trabajo pendiente o que todavía requiere validación. Una
 
 - [ ] Auditar categorías históricas para fusionar definitivamente duplicados por mayúsculas, minúsculas, tildes y variantes singular/plural.
 - [ ] Revisar falsos positivos de comparación entre productos distintos y ajustar umbrales con casos reales.
-- [ ] Confirmar que `Knasta` nunca se muestre al usuario: usar el comercio final cuando sea identificable y `Otro` en caso contrario.
+- [x] Confirmar que `Knasta` nunca se muestre al usuario: usar el comercio final cuando sea identificable y `Otro` en caso contrario.
 - [ ] Validar que cada categoría abra todos sus productos y que los conteos solo sean visibles para administradores.
 - [ ] Completar la revisión visual de iconos para todas las categorías normalizadas.
 

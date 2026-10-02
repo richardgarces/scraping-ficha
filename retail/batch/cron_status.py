@@ -14,6 +14,7 @@ from retail.batch.config import load_schedule
 from retail.batch.schedule import group_slots, schedule_status
 from retail.registry import group_of, list_stores
 from retail.store_categories import list_store_categories
+from retail.store_display import public_store_key, public_store_label
 
 TZ_CL = ZoneInfo("America/Santiago")
 
@@ -221,7 +222,8 @@ def build_cron_batch_status(*, repo: Any | None = None, today: str | None = None
         store_jobs.append(
             {
                 "id": store_id,
-                "title": titles.get(store_id, store_id),
+                "public_id": public_store_key(store_id),
+                "title": public_store_label(store_id, titles),
                 "groups": list(run.get("groups") or []),
                 "status": status,
                 "progress": progress_payload(run) if status in {"running", "paused"} else None,
@@ -247,7 +249,8 @@ def build_cron_batch_status(*, repo: Any | None = None, today: str | None = None
         registered.append(
             {
                 "id": spec.id,
-                "title": spec.title,
+                "public_id": public_store_key(spec.id),
+                "title": public_store_label(spec.id, titles),
                 "group": gid,
                 "group_title": gtitle,
             }

@@ -700,7 +700,7 @@ function offerRow(row, group, index) {
   // show comparison hint when cheaper elsewhere
   const cheaper = row.cheaper_elsewhere;
   const cheaperHint = cheaper && cheaper.price
-    ? `<div class="muted">Más barato en ${attr(cheaper.store || cheaper.store_title || '')}: ${money(cheaper.price)} (${Math.round(((cheaper.price - (row.price||0))/((cheaper.price)||1))*100)}%)</div>`
+    ? `<div class="muted">Más barato en ${attr(publicStoreLabel(cheaper.store, cheaper.store_title))}: ${money(cheaper.price)} (${Math.round(((cheaper.price - (row.price||0))/((cheaper.price)||1))*100)}%)</div>`
     : "";
   return `
     <div class="offer-row ${lowest ? "lowest" : ""}">

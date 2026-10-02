@@ -139,10 +139,11 @@ def extract_detail_product(payload: dict[str, Any]) -> dict[str, Any] | None:
         id="knasta",
         # Es un agregador, no la tienda que vende. La presentación usa el
         # comercio de destino y cae en “Otro” cuando no puede identificarlo.
+        # El id interno se mantiene; el título público nunca nombra la fuente.
         title="Otro",
         site="knasta.cl",
         sort_map=SORT_MAP,
-        category_help="Slug o ID de Knasta, por ejemplo tecnologia o 20497",
+        category_help="Slug o ID de categoría, por ejemplo tecnologia o 20497",
         platform="custom",
         group="retail",
     )
@@ -169,7 +170,7 @@ class KnastaStore(StoreClient):
         if parsed.kind == "product":
             product = self._product(parsed)
             if not product.name or product.price is None or not product.url:
-                raise HttpError(f"Oferta Knasta incompleta: {parsed.product_id}")
+                raise HttpError(f"Oferta incompleta: {parsed.product_id}")
             return [product]
         products: list[Product] = []
         pages = 1 if max_pages is None else max(1, max_pages)
@@ -193,11 +194,11 @@ class KnastaStore(StoreClient):
         else:
             retail, _, sku = ident.partition("#")
             if not retail or not sku:
-                raise ValueError(f"Aviso Knasta inválido: {ident}")
+                raise ValueError(f"Aviso inválido: {ident}")
             url = f"{BASE}/detail/{retail}/{sku}"
         item = extract_detail_product(extract_next_data(self._get_html(url)))
         if not item:
-            raise HttpError(f"Knasta no devolvió la oferta {ident}")
+            raise HttpError(f"No se devolvió la oferta {ident}")
         return listing_item_to_product(item, source="product")
 
     def _listing(
@@ -242,7 +243,7 @@ class KnastaStore(StoreClient):
                 params["category"] = cat
                 return f"{BASE}/results", params
             return f"{BASE}/results/{cat}", params or None
-        raise ValueError("Búsqueda Knasta sin término")
+        raise ValueError("Búsqueda sin término")
 
     def _get_html(self, url: str, params: dict[str, Any] | None = None) -> str:
         last_error: Exception | None = None
@@ -253,7 +254,7 @@ class KnastaStore(StoreClient):
                 return body
             lowered = (body or "").lower()
             if status in {403, 503} and ("cloudflare" in lowered or "just a moment" in lowered):
-                last_error = HttpError("Knasta bloqueó la solicitud (Cloudflare)", status)
+                last_error = HttpError("La fuente bloqueó la solicitud (Cloudflare)", status)
             else:
                 last_error = HttpError(f"HTTP {status} en {url}", status)
             if status in {403, 429, 500, 502, 503, 504} and attempt < self.retries:

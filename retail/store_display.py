@@ -4,9 +4,32 @@ import re
 from typing import Any, Mapping
 from urllib.parse import urlparse
 
+# Id interno del agregador: se mantiene en Mongo/API, nunca se muestra en la UI.
+_HIDDEN_AGGREGATOR_IDS = frozenset({"knasta"})
+_PUBLIC_FALLBACK_TITLE = "Otro"
+
 
 def _clean(value: Any) -> str:
     return " ".join(str(value or "").split()).strip()
+
+
+def public_store_key(store_id: str | None) -> str:
+    """Clave visible cuando la UI imprimiría un id crudo (nunca el agregador)."""
+    key = _clean(store_id).lower()
+    if key in _HIDDEN_AGGREGATOR_IDS:
+        return "otro"
+    return key
+
+
+def public_store_label(store_id: str | None, titles: Mapping[str, str] | None = None) -> str:
+    """Nombre visible para un id de tienda sin filtrar por producto."""
+    key = _clean(store_id).lower()
+    if key in _HIDDEN_AGGREGATOR_IDS:
+        return _PUBLIC_FALLBACK_TITLE
+    known = dict(titles or {})
+    if not known and key:
+        known, _sites = _catalog()
+    return known.get(key) or key or _PUBLIC_FALLBACK_TITLE
 
 
 def _catalog() -> tuple[dict[str, str], dict[str, str]]:
@@ -47,22 +70,25 @@ def _knasta_destination(row: Mapping[str, Any]) -> tuple[str, str]:
         label = re.sub(r"[^a-z0-9]+", " ", host.split(".")[0], flags=re.I).strip().title()
         if label:
             return "otro", label
-    return "otro", "Otro"
+    return "otro", _PUBLIC_FALLBACK_TITLE
 
 
 def display_store(row: Mapping[str, Any], titles: Mapping[str, str] | None = None) -> tuple[str, str]:
-    """ID y nombre públicos, ocultando al agregador Knasta.
+    """ID y nombre públicos, ocultando al agregador interno.
 
-    Knasta no es quien vende el producto. Se muestra el comercio de destino
-    informado en el aviso o deducido de su enlace; si falta, se usa “Otro”.
+    El agregador no es quien vende el producto. Se muestra el comercio de
+    destino informado en el aviso o deducido de su enlace; si falta, “Otro”.
     """
     store_id = _clean(row.get("store")).lower()
-    if store_id == "knasta":
+    if store_id in _HIDDEN_AGGREGATOR_IDS:
         return _knasta_destination(row)
     known = dict(titles or {})
     if not known:
         known, _sites = _catalog()
-    return store_id, _clean(row.get("store_title")) or known.get(store_id) or store_id or "Otro"
+    title = _clean(row.get("store_title")) or known.get(store_id) or store_id or _PUBLIC_FALLBACK_TITLE
+    if title.casefold() in {"knasta", "knaste"}:
+        title = _PUBLIC_FALLBACK_TITLE
+    return store_id, title
 
 
 def display_store_title(row: Mapping[str, Any], titles: Mapping[str, str] | None = None) -> str:
