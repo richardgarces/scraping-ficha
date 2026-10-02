@@ -2,6 +2,7 @@
 
 let page = 1;
 let totalPages = 1;
+let loadToken = 0;
 const pageSearchForm = document.querySelector(".desktop-quick-search");
 const pageSearchInput = pageSearchForm?.querySelector('input[name="q"]');
 $("super-filter").checked = new URLSearchParams(location.search).get("super") === "1";
@@ -10,6 +11,25 @@ function flash(text, ok = false) {
   $("flash").hidden = false;
   $("flash").className = ok ? "summary" : "err";
   $("flash").textContent = text;
+}
+
+function setDealsBusy(on) {
+  const deals = $("deals");
+  const filters = $("real-filters");
+  if (filters) filters.setAttribute("aria-busy", on ? "true" : "false");
+  if (deals) {
+    deals.setAttribute("aria-busy", on ? "true" : "false");
+    if (on) {
+      deals.innerHTML =
+        `<div class="panel muted compare-loading" role="status" aria-live="polite"><span class="spinner" aria-hidden="true"></span> Cargando ofertas…</div>`;
+    }
+  }
+  if (on) $("summary").textContent = "Cargando ofertas…";
+  $("prev").disabled = on || page <= 1;
+  $("next").disabled = on || page >= totalPages;
+  document.querySelectorAll("#real-filters [data-filter-control]").forEach((el) => {
+    el.disabled = Boolean(on);
+  });
 }
 
 function kindLabel(kind) {
@@ -137,7 +157,7 @@ function render(data) {
       timesfmSummary.textContent = "";
     }
   }
-  if (!comparacion && !historial && !iguales) {
+  if (!comparacion && !historial && !iguales && !superOnly) {
     $("summary").textContent = "Activa al menos un tipo de oferta.";
   } else if (total) {
     const minGap = Number($("min-gap").value) || 0;
@@ -173,17 +193,23 @@ function params() {
 }
 
 async function load() {
+  const token = ++loadToken;
   if (typeof setQuickSearchBusy === "function") setQuickSearchBusy(true);
+  setDealsBusy(true);
   try {
   if (typeof ensureUser === "function") await ensureUser();
+  if (token !== loadToken) return;
   const response = await fetch(`/api/reales?${params()}`);
   const data = await response.json().catch(() => ({}));
+  if (token !== loadToken) return;
   if (response.status === 401) {
     location.href = "/entrar?next=/reales";
     return;
   }
   if (!response.ok) {
     flash(typeof data.detail === "string" ? data.detail : response.statusText);
+    $("deals").innerHTML = `<p class="panel muted">No se pudieron cargar las ofertas.</p>`;
+    $("summary").textContent = "";
     return;
   }
   $("flash").hidden = true;
@@ -191,14 +217,22 @@ async function load() {
   fillSelect("category", data.categories || [], $("category").value, "todas");
   render(data);
   updateFilterBadge("real-filters", "real-filter-count");
+  } catch (error) {
+    if (token !== loadToken) return;
+    flash(error.message || "Error al cargar ofertas");
+    $("deals").innerHTML = `<p class="panel muted">No se pudieron cargar las ofertas.</p>`;
+    $("summary").textContent = "";
   } finally {
-    if (typeof setQuickSearchBusy === "function") setQuickSearchBusy(false);
+    if (token === loadToken) {
+      setDealsBusy(false);
+      if (typeof setQuickSearchBusy === "function") setQuickSearchBusy(false);
+    }
   }
 }
 
 function reload() {
   page = 1;
-  load().catch((error) => flash(error.message));
+  load();
 }
 
 ["comparacion", "historial", "iguales", "super-filter", "category", "store", "min-gap", "size"].forEach((id) => {
@@ -214,14 +248,14 @@ pageSearchInput?.addEventListener("search", reload);
 $("prev").addEventListener("click", () => {
   if (page > 1) {
     page -= 1;
-    load().catch((error) => flash(error.message));
+    load();
   }
 });
 $("next").addEventListener("click", () => {
   if (page < totalPages) {
     page += 1;
-    load().catch((error) => flash(error.message));
+    load();
   }
 });
 
-load().catch((error) => flash(error.message));
+load();

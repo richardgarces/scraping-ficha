@@ -1346,6 +1346,7 @@ button.secondary.current { background: var(--accent); color: var(--btn-ink); }
 .filter-summary { margin: 0; color: var(--muted); font-size: 13px; }
 .deal-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 16px; }
 .deal-grid > .panel.muted { grid-column: 1 / -1; }
+.deal-grid > .compare-loading { grid-column: 1 / -1; }
 .deal { display: flex; flex-direction: column; gap: 0; padding: 0; overflow: hidden; }
 .deal-img {
   width: 100%;
