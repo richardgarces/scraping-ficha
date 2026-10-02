@@ -184,9 +184,21 @@ def test_first_search_waits_for_stores_before_elige_tienda_error():
     assert 'textContent = "Cargando tiendas…";' in app
     assert "storesReady = true;" in app
     assert "if (queued) runSearch(queued);" in app
-    # Real empty selection still surfaces the Spanish error after stores load.
+    # Sin casillas = todas las tiendas; el error solo si el admin desmarcó todas.
+    assert "if (storeChecks().length)" in app
     assert "Elige al menos una tienda." in app
-    assert "app.js?v=51" in page
+    assert "if (stores.length && !allStoresSelected())" in app
+    assert "app.js?v=53" in page
+
+
+def test_refresh_meta_still_fills_stores_if_catalog_fails():
+    """Health/history/catalog must not block fillStores when /api/stores works."""
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    assert 'json("/api/health").catch(() => ({}))' in app
+    assert 'json("/api/history").catch(() => [])' in app
+    assert 'json("/api/catalog?size=1&only_offers=false").catch(() => ({}))' in app
+    assert 'json("/api/stores")' in app
+    assert "fillStores(stores);" in app
 
 
 def test_empty_quick_search_offers_an_expanded_store_search():

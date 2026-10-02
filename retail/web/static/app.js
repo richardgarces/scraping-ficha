@@ -1179,18 +1179,19 @@ function renderExpandedSearchOffer() {
 }
 
 async function refreshMeta() {
+  // /api/stores es lo único bloqueante para buscar; el resto no debe impedir fillStores.
   const [health, stores, history, catalog] = await Promise.all([
-    json("/api/health"),
+    json("/api/health").catch(() => ({})),
     json("/api/stores"),
-    json("/api/history"),
-    json("/api/catalog?size=1&only_offers=false"),
+    json("/api/history").catch(() => []),
+    json("/api/catalog?size=1&only_offers=false").catch(() => ({})),
   ]);
   const mongo = health.mongo ? `MongoDB ${health.products} productos` : "MongoDB no disponible";
   const qdrant = health.qdrant ? "Qdrant conectado" : "Qdrant no disponible";
   const redis = health.redis ? "Redis hoy" : "Redis no disponible";
-  console.info(`health ${mongo} · ${qdrant} · ${redis} · ${health.stores} tiendas`);
+  console.info(`health ${mongo} · ${qdrant} · ${redis} · ${health.stores ?? "?"} tiendas`);
   fillStores(stores);
-  fillHistory(history);
+  fillHistory(Array.isArray(history) ? history : []);
   renderCategoryShortcuts(catalog.facets?.categories || []);
 }
 
@@ -1281,10 +1282,14 @@ function runSearch(query) {
       $("summary").textContent = "Cargando tiendas…";
       return;
     }
-    setSearching(false);
-    $("summary").hidden = false;
-    $("summary").innerHTML = "<p class='err'>Elige al menos una tienda.</p>";
-    return;
+    // Sin casillas = sin filtro explícito → todas las tiendas (API sin `stores`).
+    // «Elige al menos una tienda» solo si el admin desmarcó todas a mano.
+    if (storeChecks().length) {
+      setSearching(false);
+      $("summary").hidden = false;
+      $("summary").innerHTML = "<p class='err'>Elige al menos una tienda.</p>";
+      return;
+    }
   }
   pendingSearchQuery = null;
   currentSearchId = (crypto.randomUUID && crypto.randomUUID()) || `s${Date.now()}`;
@@ -1306,7 +1311,8 @@ function runSearch(query) {
     fresh: $("fresh").checked ? "true" : "false",
     search_id: currentSearchId,
   });
-  if (!allStoresSelected()) {
+  // Vacío o todas marcadas = sin filtro de tienda (el backend enruta por el índice).
+  if (stores.length && !allStoresSelected()) {
     params.set("stores", stores.join(","));
   }
   const source = new EventSource(`/api/search/stream?${params}`);
