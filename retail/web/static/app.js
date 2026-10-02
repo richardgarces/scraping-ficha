@@ -311,6 +311,23 @@ function updateResultFilterBadge() {
   badge.textContent = active
     ? `${active} ${active === 1 ? "filtro activo" : "filtros activos"}`
     : "Sin filtros";
+  syncOnlyOffersChip();
+}
+
+function setResultFiltersVisible(visible) {
+  const bar = $("result-filter-bar");
+  if (bar) {
+    bar.hidden = !visible;
+    return;
+  }
+  $("toolbar").hidden = !visible;
+}
+
+function syncOnlyOffersChip() {
+  const chip = $("only-offers-chip");
+  const box = $("only-offers");
+  if (!chip || !box) return;
+  chip.setAttribute("aria-pressed", box.checked ? "true" : "false");
 }
 
 /** Limpia filtros de resultados al iniciar una búsqueda nueva (no toca vista ni page-size). */
@@ -323,6 +340,7 @@ function resetResultFilters() {
   $("only-lowest").checked = false;
   $("only-offers").checked = false;
   $("only-discounts").checked = false;
+  syncOnlyOffersChip();
   currentPage = 1;
 }
 
@@ -927,13 +945,13 @@ function renderTable() {
     return;
   }
   if (!currentRows.length) {
-    $("toolbar").hidden = false;
+    setResultFiltersVisible(true);
     updateResultFilterBadge();
     hidePager();
     $("results").innerHTML = "<p class='panel empty-results'>No hay productos que coincidan con la búsqueda.</p>";
     return;
   }
-  $("toolbar").hidden = false;
+  setResultFiltersVisible(true);
   updateResultFilterBadge();
   if (currentView() === "grid") {
     const paged = slicePage(sortRows(visibleRows()));
@@ -1096,7 +1114,7 @@ function visibleDiscarded() {
 
 function renderDiscarded() {
   const count = (lastResult && lastResult.discarded_count) || 0;
-  $("toolbar").hidden = false;
+  setResultFiltersVisible(true);
   updateResultFilterBadge();
   if (!currentDiscarded.length) {
     const detail = count
@@ -1146,7 +1164,7 @@ function renderResults(payload) {
 }
 
 function renderExpandedSearchOffer() {
-  $("toolbar").hidden = true;
+  setResultFiltersVisible(false);
   hidePager();
   $("results").innerHTML = `
     <section class="panel quick-search-empty" role="status" aria-live="polite">
@@ -1273,7 +1291,7 @@ function runSearch(query) {
   $("summary").hidden = false;
   $("summary").className = "summary";
   $("summary").textContent = "Buscando…";
-  $("toolbar").hidden = true;
+  setResultFiltersVisible(false);
   startSearchConversation(quick);
   setSearching(true);
   renderSkeleton();
@@ -1426,13 +1444,24 @@ $("history").addEventListener("click", (event) => {
 
 ["table-filter", "only-comparable", "only-lowest", "only-offers", "only-discounts", "min-price", "max-price", "min-discount", "sort-by"].forEach((id) => {
   $(id).addEventListener("input", () => {
+    if (id === "only-offers") syncOnlyOffersChip();
     currentPage = 1;
     renderTable();
   });
   $(id).addEventListener("change", () => {
+    if (id === "only-offers") syncOnlyOffersChip();
     currentPage = 1;
     renderTable();
   });
+});
+
+$("only-offers-chip")?.addEventListener("click", () => {
+  const box = $("only-offers");
+  if (!box) return;
+  box.checked = !box.checked;
+  syncOnlyOffersChip();
+  currentPage = 1;
+  renderTable();
 });
 
 $("page-size").addEventListener("change", () => {

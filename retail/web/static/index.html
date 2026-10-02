@@ -10,7 +10,7 @@
   <link rel="manifest" href="/static/brand/site.webmanifest">
   <title>Comparador de precios</title>
   <script>(function(){var m=localStorage.getItem("retail-theme");if(m==="day"||m==="night"){document.documentElement.dataset.theme=m;return;}var h=new Date().getHours();document.documentElement.dataset.theme=(h>=7&&h<19)?"day":"night";})();</script>
-  <link rel="stylesheet" href="/static/styles.css?v=70">
+  <link rel="stylesheet" href="/static/styles.css?v=76">
 </head>
 <body>
   <header class="top">
@@ -127,56 +127,62 @@
             <div id="store-progress" class="progress"></div>
           </details>
         </div>
-        <details id="toolbar" class="collapsible-filters search-result-filters">
-          <summary>
-            <span class="filter-summary-title">Filtros</span>
-            <span id="search-filter-count" class="filter-count">Sin filtros</span>
-            <span class="filter-toggle-label" aria-hidden="true"></span>
-          </summary>
-          <div class="toolbar catalog-filter-grid search-filter-grid">
-          <label>Nombre, marca o código
-            <input id="table-filter" type="search" placeholder="nombre, marca, código…">
-          </label>
-          <label class="check compact-filter-check"><input id="only-discounts" type="checkbox"> Productos con descuentos</label>
-          <label>Precio desde <input id="min-price" type="number" min="0" step="10000" placeholder="0"></label>
-          <label>Precio hasta <input id="max-price" type="number" min="0" step="10000" placeholder="sin tope"></label>
-          <label>Descuento desde
-            <select id="min-discount">
-              <option value="0">cualquiera</option>
-              <option value="10">10%</option>
-              <option value="20">20%</option>
-              <option value="30">30%</option>
-              <option value="40">40%</option>
-              <option value="50">50%</option>
-              <option value="60">60%</option>
-            </select>
-          </label>
-          <div class="view-toggle" role="group" aria-label="Formato de resultados">
-            <button type="button" id="view-grid" class="secondary">Cuadrícula</button>
-            <button type="button" id="view-list" class="secondary">Lista</button>
-          </div>
-          <label>Por página
-            <select id="page-size">
-              <option value="12" selected>12</option>
-              <option value="24">24</option>
-              <option value="48">48</option>
-              <option value="96">96</option>
-              <option value="480">480</option>
-            </select>
-          </label>
-          <label>Ordenar por
-            <select id="sort-by">
-              <option value="price">Precio</option>
-              <option value="discount">Descuento</option>
-              <option value="saving">Bajo lo habitual</option>
-              <option value="name">Nombre</option>
-            </select>
-          </label>
-          <label class="check compact-filter-check"><input id="only-comparable" type="checkbox"> Solo mismo producto en varias tiendas</label>
-          <label class="check compact-filter-check"><input id="only-lowest" type="checkbox"> Solo menor precio</label>
-          <label class="check compact-filter-check"><input id="only-offers" type="checkbox"> Solo ofertas reales</label>
-          </div>
-        </details>
+        <div id="result-filter-bar" class="result-filter-bar" hidden>
+          <button type="button" id="only-offers-chip" class="offer-toggle-chip" aria-pressed="false" title="Mostrar solo ofertas reales">
+            <span class="offer-toggle-mark" aria-hidden="true"></span>
+            <span>Solo ofertas</span>
+          </button>
+          <details id="toolbar" class="collapsible-filters search-result-filters">
+            <summary>
+              <span class="filter-summary-title">Filtros</span>
+              <span id="search-filter-count" class="filter-count">Sin filtros</span>
+              <span class="filter-toggle-label" aria-hidden="true"></span>
+            </summary>
+            <div class="toolbar catalog-filter-grid search-filter-grid">
+            <label>Nombre, marca o código
+              <input id="table-filter" type="search" placeholder="nombre, marca, código…">
+            </label>
+            <label class="check compact-filter-check"><input id="only-discounts" type="checkbox"> Productos con descuentos</label>
+            <label>Precio desde <input id="min-price" type="number" min="0" step="10000" placeholder="0"></label>
+            <label>Precio hasta <input id="max-price" type="number" min="0" step="10000" placeholder="sin tope"></label>
+            <label>Descuento desde
+              <select id="min-discount">
+                <option value="0">cualquiera</option>
+                <option value="10">10%</option>
+                <option value="20">20%</option>
+                <option value="30">30%</option>
+                <option value="40">40%</option>
+                <option value="50">50%</option>
+                <option value="60">60%</option>
+              </select>
+            </label>
+            <div class="view-toggle" role="group" aria-label="Formato de resultados">
+              <button type="button" id="view-grid" class="secondary">Cuadrícula</button>
+              <button type="button" id="view-list" class="secondary">Lista</button>
+            </div>
+            <label>Por página
+              <select id="page-size">
+                <option value="12" selected>12</option>
+                <option value="24">24</option>
+                <option value="48">48</option>
+                <option value="96">96</option>
+                <option value="480">480</option>
+              </select>
+            </label>
+            <label>Ordenar por
+              <select id="sort-by">
+                <option value="price">Precio</option>
+                <option value="discount">Descuento</option>
+                <option value="saving">Bajo lo habitual</option>
+                <option value="name">Nombre</option>
+              </select>
+            </label>
+            <label class="check compact-filter-check"><input id="only-comparable" type="checkbox"> Solo mismo producto en varias tiendas</label>
+            <label class="check compact-filter-check"><input id="only-lowest" type="checkbox"> Solo menor precio</label>
+            <label class="check compact-filter-check"><input id="only-offers" type="checkbox"> Solo ofertas reales</label>
+            </div>
+          </details>
+        </div>
         <div id="results"></div>
         <nav id="pager" class="pager" hidden></nav>
       </div>
@@ -199,6 +205,6 @@
     </div>
   </div>
   <script src="/static/prices.js?v=29"></script>
-  <script src="/static/app.js?v=51"></script>
+  <script src="/static/app.js?v=52"></script>
 </body>
 </html>
