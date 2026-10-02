@@ -501,3 +501,167 @@ def store_store_products(
         SearchCache(client, qdrant).store_stores(query, by_store, max_items=max_items)
     except Exception:
         return
+
+
+def _iter_redis_keys(client: Any, pattern: str):
+    scan_iter = getattr(client, "scan_iter", None)
+    if callable(scan_iter):
+        yield from scan_iter(match=pattern, count=200)
+        return
+    data = getattr(client, "data", None)
+    if isinstance(data, dict):
+        regex = re.compile("^" + re.escape(pattern).replace("\\*", ".*") + "$")
+        for key in data:
+            if regex.match(key):
+                yield key
+
+
+def _redis_ttl(client: Any, key: str) -> int | None:
+    ttl_fn = getattr(client, "ttl", None)
+    if callable(ttl_fn):
+        try:
+            value = int(ttl_fn(key))
+        except Exception:
+            return None
+        return value if value >= 0 else None
+    ttls = getattr(client, "ttls", None)
+    if isinstance(ttls, dict) and key in ttls:
+        try:
+            return max(0, int(ttls[key]))
+        except Exception:
+            return None
+    return None
+
+
+def _store_title(store_id: str) -> str:
+    try:
+        from retail.batch.store_scope import store_title
+
+        return store_title(store_id)
+    except Exception:
+        return store_id
+
+
+def summarize_search_cache(
+    client: Any,
+    *,
+    now: datetime | None = None,
+    redis: bool = True,
+) -> dict[str, Any]:
+    """Lista las consultas cacheadas hoy (Santiago) para el panel admin."""
+    stamp = now or _now()
+    day = chile_today(stamp)
+    buckets: dict[str, dict[str, Any]] = {}
+
+    def bucket(digest: str) -> dict[str, Any]:
+        row = buckets.get(digest)
+        if row is None:
+            row = {
+                "digest": digest,
+                "query": "",
+                "stores": set(),
+                "result_cached": False,
+                "ttls": [],
+            }
+            buckets[digest] = row
+        return row
+
+    query_re = re.compile(rf"^search:{re.escape(day)}:query:([a-f0-9]{{24}})$")
+    store_re = re.compile(rf"^search:{re.escape(day)}:store:v2:([^:]+):([a-f0-9]{{24}})$")
+    result_re = re.compile(rf"^search:{re.escape(day)}:result:v2:([a-f0-9]{{24}}):([a-f0-9]{{16}})$")
+
+    for key in _iter_redis_keys(client, f"search:{day}:query:*"):
+        match = query_re.match(str(key))
+        if not match:
+            continue
+        digest = match.group(1)
+        row = bucket(digest)
+        raw = client.get(key)
+        if raw:
+            row["query"] = str(raw)
+        ttl = _redis_ttl(client, key)
+        if ttl is not None:
+            row["ttls"].append(ttl)
+
+    for key in _iter_redis_keys(client, f"search:{day}:store:v2:*"):
+        match = store_re.match(str(key))
+        if not match:
+            continue
+        store_id, digest = match.group(1), match.group(2)
+        row = bucket(digest)
+        row["stores"].add(store_id)
+        if not row["query"]:
+            try:
+                payload = json.loads(client.get(key) or "")
+            except json.JSONDecodeError:
+                payload = None
+            if isinstance(payload, dict) and payload.get("cached_query"):
+                row["query"] = str(payload["cached_query"])
+        ttl = _redis_ttl(client, key)
+        if ttl is not None:
+            row["ttls"].append(ttl)
+
+    for key in _iter_redis_keys(client, f"search:{day}:result:v2:*"):
+        match = result_re.match(str(key))
+        if not match:
+            continue
+        digest = match.group(1)
+        row = bucket(digest)
+        row["result_cached"] = True
+        if not row["query"]:
+            try:
+                payload = json.loads(client.get(key) or "")
+            except json.JSONDecodeError:
+                payload = None
+            if isinstance(payload, dict) and payload.get("cached_query"):
+                row["query"] = str(payload["cached_query"])
+        ttl = _redis_ttl(client, key)
+        if ttl is not None:
+            row["ttls"].append(ttl)
+
+    items: list[dict[str, Any]] = []
+    for digest, row in buckets.items():
+        query = str(row.get("query") or "").strip()
+        stores = sorted(row["stores"])
+        ttls = [int(value) for value in row["ttls"] if value is not None]
+        ttl = min(ttls) if ttls else ttl_until_midnight(stamp)
+        items.append(
+            {
+                "query": query or digest,
+                "folded": canonical_query(query) if query else digest,
+                "digest": digest,
+                "day": day,
+                "stores": stores,
+                "store_titles": [_store_title(store_id) for store_id in stores],
+                "store_count": len(stores),
+                "result_cached": bool(row["result_cached"]),
+                "ttl": ttl,
+            }
+        )
+    items.sort(key=lambda item: (-item["store_count"], -int(item["result_cached"]), item["query"].casefold()))
+    return {
+        "redis": redis,
+        "day": day,
+        "timezone": "America/Santiago",
+        "count": len(items),
+        "items": items,
+    }
+
+
+def load_search_cache(*, now: datetime | None = None) -> dict[str, Any]:
+    """Agregado admin de la caché Redis del día (Santiago)."""
+    stamp = now or _now()
+    empty = {
+        "redis": False,
+        "day": chile_today(stamp),
+        "timezone": "America/Santiago",
+        "count": 0,
+        "items": [],
+    }
+    client = connect_redis()
+    if client is None:
+        return empty
+    try:
+        return summarize_search_cache(client, now=stamp, redis=True)
+    except Exception:
+        return empty

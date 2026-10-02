@@ -203,4 +203,4 @@ def test_stats_script_is_isolated_from_shared_price_globals():
     page = Path("retail/web/static/estadisticas.html").read_text(encoding="utf-8")
     assert "(() => {" in script
     assert script.rstrip().endswith("})();")
-    assert 'estadisticas.js?v=7' in page
+    assert 'estadisticas.js?v=8' in page

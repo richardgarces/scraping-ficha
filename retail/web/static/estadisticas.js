@@ -191,6 +191,53 @@ function renderQueries(rows) {
     .join("");
 }
 
+function ttlLabel(seconds) {
+  const total = Math.max(0, Number(seconds) || 0);
+  if (!total) return "—";
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  if (hours && minutes) return `${hours} h ${minutes} min`;
+  if (hours) return `${hours} h`;
+  if (minutes) return `${minutes} min`;
+  return `${total} s`;
+}
+
+function renderSearchCache(cache) {
+  const data = cache || {};
+  const items = data.items || [];
+  $("search-cache-count").textContent = fmt(data.count ?? items.length);
+  $("search-cache-day").textContent = data.day ? dayLabel(data.day) : "—";
+  const note = data.redis === false
+    ? " Redis no está disponible, así que la lista sale vacía."
+    : "";
+  $("search-cache-meta").textContent =
+    `Consultas guardadas hoy en Redis para no volver a scrapear. Caducan a medianoche (Santiago).${note}`;
+  const body = $("search-cache-body");
+  if (!items.length) {
+    body.innerHTML = `<tr><td colspan="4" class="muted">${
+      data.redis === false
+        ? "No se pudo leer la caché de Redis."
+        : "Todavía no hay búsquedas cacheadas hoy."
+    }</td></tr>`;
+    return;
+  }
+  body.innerHTML = items
+    .map((row) => {
+      const query = String(row.query || "").trim() || "—";
+      const titles = (row.store_titles || row.stores || []).map((item) => String(item || "").trim()).filter(Boolean);
+      const stores = titles.length ? titles.join(", ") : "—";
+      const result = row.result_cached ? "Sí" : "No";
+      return `
+        <tr>
+          <td class="query-cell" title="${escapeHtml(query)}">${escapeHtml(query)}</td>
+          <td title="${escapeHtml(stores)}">${escapeHtml(stores)}</td>
+          <td>${escapeHtml(result)}</td>
+          <td>${escapeHtml(ttlLabel(row.ttl))}</td>
+        </tr>`;
+    })
+    .join("");
+}
+
 function renderScrapes(scrapes) {
   const data = scrapes || {};
   const totals = data.totals || {};
@@ -289,6 +336,7 @@ function render(payload) {
   $("stats-refresh").textContent = stamp;
   renderClicks(payload.clicks || {});
   renderScrapes(payload.scrapes || {});
+  renderSearchCache(payload.search_cache || {});
   renderVisitors(payload.by_day || []);
   renderSearches(searches.by_day || []);
   renderQueries(searches.top || []);

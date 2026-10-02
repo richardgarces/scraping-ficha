@@ -1,5 +1,6 @@
 from datetime import datetime
 from zoneinfo import ZoneInfo
+import re
 
 import pytest
 
@@ -9,9 +10,11 @@ from retail.search_cache import (
     canonical_query,
     chile_today,
     compatible_queries,
+    load_search_cache,
     query_digest,
     result_redis_key,
     store_redis_key,
+    summarize_search_cache,
     ttl_until_midnight,
     typo_equivalent,
 )
@@ -28,6 +31,17 @@ class MemoryRedis:
     def setex(self, key: str, ttl: int, value: str) -> None:
         self.data[key] = value
         self.ttls[key] = ttl
+
+    def ttl(self, key: str) -> int:
+        if key not in self.data:
+            return -2
+        return int(self.ttls.get(key, -1))
+
+    def scan_iter(self, match: str = "*", count: int = 10):
+        regex = re.compile("^" + re.escape(match).replace("\\*", ".*") + "$")
+        for key in list(self.data):
+            if regex.match(key):
+                yield key
 
     def ping(self) -> bool:
         return True
@@ -436,3 +450,95 @@ def test_search_stream_returns_cached_result(monkeypatch):
     assert [item["type"] for item in events] == ["start", "done"]
     assert events[-1]["result"]["rows"][0]["name"] == "TV LG"
     assert events[0]["progress"][0]["cached"] is True
+
+
+def test_summarize_search_cache_lists_today_queries(monkeypatch):
+    now = datetime(2026, 10, 2, 15, 30, tzinfo=ZoneInfo("America/Santiago"))
+    monkeypatch.setattr("retail.search_cache._now", lambda: now)
+    redis = MemoryRedis()
+    cache = SearchCache(redis)
+    cache.store_stores(
+        "galaxy s25 512gb",
+        {"falabella": [_phone("falabella", "A")], "ripley": [_phone("ripley", "B")]},
+        max_items=8,
+    )
+    cache.store_result(
+        "tv 50",
+        source="both",
+        stores=["lider"],
+        max_items=8,
+        price_band=True,
+        result={
+            "query": "tv 50",
+            "rows": [{"name": "TV", "price": 1, "store": "lider"}],
+            "progress": [{"id": "lider", "state": "ok"}],
+            "store_errors": [],
+            "warnings": [],
+        },
+    )
+
+    payload = summarize_search_cache(redis, now=now)
+    assert payload["redis"] is True
+    assert payload["day"] == "2026-10-02"
+    assert payload["count"] == 2
+    by_query = {item["query"]: item for item in payload["items"]}
+    phone = by_query["galaxy s25 512gb"]
+    assert phone["folded"] == "galaxy s25 512gb"
+    assert phone["stores"] == ["falabella", "ripley"]
+    assert phone["store_count"] == 2
+    assert phone["result_cached"] is False
+    assert phone["ttl"] == ttl_until_midnight(now)
+    tv = by_query["tv 50"]
+    assert tv["result_cached"] is True
+    assert tv["stores"] == []
+
+
+def test_load_search_cache_returns_empty_when_redis_down(monkeypatch):
+    monkeypatch.setattr("retail.search_cache.connect_redis", lambda: None)
+    payload = load_search_cache(now=datetime(2026, 10, 2, 12, tzinfo=ZoneInfo("America/Santiago")))
+    assert payload == {
+        "redis": False,
+        "day": "2026-10-02",
+        "timezone": "America/Santiago",
+        "count": 0,
+        "items": [],
+    }
+
+
+def test_admin_stats_includes_search_cache(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from retail.web.app import app
+
+    cache_payload = {
+        "redis": True,
+        "day": "2026-10-02",
+        "timezone": "America/Santiago",
+        "count": 1,
+        "items": [
+            {
+                "query": "tv",
+                "folded": "tv",
+                "digest": "abc",
+                "day": "2026-10-02",
+                "stores": ["lider"],
+                "store_titles": ["Lider"],
+                "store_count": 1,
+                "result_cached": True,
+                "ttl": 3600,
+            }
+        ],
+    }
+    monkeypatch.setattr("retail.web.settings_api.current_user", lambda *a, **k: {"role": "admin"})
+    monkeypatch.setattr(
+        "retail.request_stats.load_stats",
+        lambda: {"mongo": True, "totals": {}, "by_day": [], "by_hour": [], "origins": [], "groups": []},
+    )
+    monkeypatch.setattr("retail.search_stats.load_search_stats", lambda: {"mongo": True, "totals": {}, "by_day": [], "top": []})
+    monkeypatch.setattr("retail.click_stats.load_click_stats", lambda: {"mongo": True, "totals": {}, "items": [], "by_day": []})
+    monkeypatch.setattr("retail.scrape_stats.load_scrape_stats", lambda: {"mongo": True, "totals": {}, "by_day": []})
+    monkeypatch.setattr("retail.search_cache.load_search_cache", lambda: cache_payload)
+
+    response = TestClient(app).get("/api/admin/stats")
+    assert response.status_code == 200
+    assert response.json()["search_cache"] == cache_payload
