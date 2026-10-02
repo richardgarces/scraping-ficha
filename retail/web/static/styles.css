@@ -990,7 +990,16 @@ a.btn.secondary {
 .analysis-form { display: grid; gap: 10px; max-width: 900px; }
 .analysis-form > label:first-child { color: var(--muted); font-size: 14px; }
 .analysis-form .check { display: flex; align-items: center; gap: 8px; }
+.analysis-form.is-busy #analysis-query { opacity: 0.82; }
 .analysis-search { display: grid; grid-template-columns: minmax(240px, 1fr) auto; gap: 10px; }
+.analysis-search button .spinner {
+  display: inline-block;
+  vertical-align: middle;
+  margin-right: 8px;
+  width: 14px;
+  height: 14px;
+  border-width: 2px;
+}
 .analysis-results { display: grid; gap: 18px; margin-top: 18px; }
 .analysis-group { margin: 0; }
 .form-grid { display: grid; gap: 12px; grid-template-columns: 1fr 1fr; }
