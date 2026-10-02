@@ -383,6 +383,7 @@ STORE_GROUP: dict[str, str] = {
     "volkanica": "deporte",
     "wayu": "hogar",
     "yonex": "deporte",
+    "decathlon": "deporte",
 }
 
 
