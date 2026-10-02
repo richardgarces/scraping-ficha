@@ -109,6 +109,7 @@ STORE_GROUP: dict[str, str] = {
     "marleycoffee": "gastronomia",
     "mundovino": "gastronomia",
     "wineclub": "gastronomia",
+    "santaritaonline": "gastronomia",
     "varsovienne": "gastronomia",
     "descorcha": "gastronomia",
     "piwen": "gastronomia",
