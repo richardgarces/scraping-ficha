@@ -458,6 +458,9 @@ $("test-email")?.addEventListener("click", () => {
   const typed = ($("test_email_to")?.value || "").trim();
   sendNoticeTest("/api/admin/test-email", $("test-email"), { to: typed || TEST_EMAIL_DEFAULT });
 });
+$("test-push")?.addEventListener("click", () => {
+  sendNoticeTest("/api/admin/test-push", $("test-push"));
+});
 
 $("run-dry").addEventListener("click", () => runBatch(true).catch((error) => flash(error.message, false)));
 $("run-batch").addEventListener("click", () => runBatch(false).catch((error) => flash(error.message, false)));

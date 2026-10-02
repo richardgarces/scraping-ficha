@@ -87,12 +87,23 @@ def test_notice_panel_lives_on_configurar():
     assert "Pruebas de aviso" in html
     assert "Enviar prueba por Telegram" in html
     assert "Enviar correo de prueba" in html
+    assert "Enviar prueba push al celular" in html
+    assert 'value="push"' in html
+    assert "Celular (push)" in html
     assert 'id="test_email_to"' in html
     assert 'value="richardgarces@gmail.com"' in html
     assert "TEST_EMAIL_DEFAULT" in js
     assert "richardgarces@gmail.com" in js
     assert "/api/admin/test-telegram" in js
     assert "/api/admin/test-email" in js
+    assert "/api/admin/test-push" in js
+
+
+def test_notice_endpoints_require_admin(anonymous_repo):
+    client = TestClient(app)
+    for path in ("/api/admin/test-telegram", "/api/admin/test-email", "/api/admin/test-push"):
+        denied = client.post(path)
+        assert denied.status_code == 401
 
 
 def test_email_filters_have_compact_responsive_controls():
@@ -115,6 +126,7 @@ def test_email_filters_have_compact_responsive_controls():
     assert '.store-state-control' in styles
     assert 'src="/static/siguiendo.js?v=' in html
     assert 'href="/static/styles.css?v=' in html
+    assert "Celular (push)" in html
 
 
 def test_catalog_editor_limits_rows_without_dropping_hidden_products():
@@ -125,13 +137,6 @@ def test_catalog_editor_limits_rows_without_dropping_hidden_products():
     assert "products.filter((_item, index) => !removedCatalogIndexes.has(index)).concat(added)" in js
     assert 'id="catalog-limit-note"' in html
     assert 'src="/static/settings.js?v=' in html
-
-
-def test_notice_endpoints_require_admin(anonymous_repo):
-    client = TestClient(app)
-    for path in ("/api/admin/test-telegram", "/api/admin/test-email"):
-        denied = client.post(path)
-        assert denied.status_code == 401
 
 
 def test_telegram_test_reports_missing_token_without_secrets(monkeypatch):
@@ -502,3 +507,81 @@ def test_global_telegram_does_not_repeat_product_during_cooldown(monkeypatch, tm
     alerts.dispatch_alerts([deal], ["telegram"], log_path=tmp_path / "a", repo=repo)
     alerts.dispatch_alerts([deal], ["telegram"], log_path=tmp_path / "a", repo=repo)
     assert len(sent) == 1
+
+
+def test_user_push_requires_admin_channel_and_subscription(monkeypatch):
+    from retail.batch import alerts
+    from retail.batch.rules import Alert
+
+    sent = []
+    monkeypatch.setattr(
+        "retail.web_push.send_user_push",
+        lambda user, payload, **kwargs: sent.append(payload) or True,
+    )
+    deal = Alert(
+        catalog_id="tv", query="tv", rule="common_discount", name="TV",
+        store="lider", price=100000, previous_price=200000, message="50%",
+        url=None, compare_code="tv-push",
+        extra={"percent": 50, "product_id": "p1"},
+    )
+    user = {
+        "id": "u1",
+        "push_subscriptions": [{"endpoint": "https://push.example/1", "keys": {"p256dh": "a", "auth": "b"}}],
+        "notification_preferences": {"channels": ["push"], "kinds": ["common"]},
+    }
+    assert alerts.dispatch_user_alerts([deal], [user], system_channels=["log", "telegram"]) == 0
+    assert sent == []
+    assert alerts.dispatch_user_alerts([deal], [user], system_channels=["push"]) == 1
+    assert len(sent) == 1
+
+
+def test_push_test_needs_subscription_and_hides_endpoint(monkeypatch):
+    from retail.batch import alerts
+
+    class Repo:
+        def update_user_fields(self, *_args, **_kwargs):
+            return True
+
+    assert alerts.send_push_test({}, repo=Repo())["ok"] is False
+    monkeypatch.setattr("retail.web_push.send_user_push", lambda *args, **kwargs: True)
+    result = alerts.send_push_test(
+        {
+            "id": "1",
+            "push_subscriptions": [
+                {"endpoint": "https://fcm.googleapis.com/secret-endpoint", "keys": {"p256dh": "a", "auth": "b"}},
+            ],
+        },
+        repo=Repo(),
+    )
+    assert result["ok"] is True
+    assert "secret-endpoint" not in str(result)
+    assert "push" in result["message"].lower()
+
+
+def test_admin_push_test_endpoint(monkeypatch):
+    monkeypatch.setattr(
+        "retail.web.settings_api.current_user",
+        lambda *args, **kwargs: {"role": "admin", "id": "1", "email": "admin@example.com"},
+    )
+
+    class Repo:
+        def find_user_by_id(self, _user_id):
+            return {
+                "id": "1",
+                "push_subscriptions": [
+                    {"endpoint": "https://push.example/secret", "keys": {"p256dh": "a", "auth": "b"}},
+                ],
+            }
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr("retail.web.settings_api.connect_repo", lambda: Repo())
+    monkeypatch.setattr(
+        "retail.batch.alerts.send_push_test",
+        lambda document, repo=None: {"ok": True, "message": "Aviso push de prueba enviado a tus dispositivos."},
+    )
+    response = TestClient(app).post("/api/admin/test-push")
+    assert response.status_code == 200
+    assert "push" in response.json()["message"].lower()
+    assert "secret" not in response.text

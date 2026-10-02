@@ -591,11 +591,23 @@ def send_to_user(user_document: dict[str, Any], text: str, image_url: str | None
 
 
 def dispatch_user_alerts(
-    alerts: list[Alert], users: list[dict[str, Any]], *, repo: Any | None = None,
+    alerts: list[Alert],
+    users: list[dict[str, Any]],
+    *,
+    repo: Any | None = None,
+    system_channels: list[str] | None = None,
 ) -> int:
     """Envía solo las alertas que coinciden con la selección de cada cuenta."""
+    from retail.batch.rules import load_rules
     from retail.notification_preferences import wants_alert
 
+    enabled = set(
+        system_channels
+        if system_channels is not None
+        else (load_rules().get("channels") or [])
+    )
+    # Push al celular solo si el admin lo activó en Medios de alerta.
+    push_enabled = "push" in enabled
     delivered = 0
     for user in users:
         preferences = user.get("notification_preferences") or {}
@@ -639,7 +651,8 @@ def dispatch_user_alerts(
                 ):
                     delivered += 1
             if (
-                "push" in channels
+                push_enabled
+                and "push" in channels
                 and user.get("push_subscriptions")
                 and wants_alert(preferences, alert, channel="push")
             ):
@@ -652,6 +665,38 @@ def dispatch_user_alerts(
                     if send_user_push(user, payload, repo=repo, tag=key):
                         delivered += 1
     return delivered
+
+
+def send_push_test(user_document: dict[str, Any] | None = None, *, repo: Any | None = None) -> dict[str, Any]:
+    """Prueba Web Push a los dispositivos de la cuenta admin. Sin secretos en el resultado."""
+    document = user_document or {}
+    subscriptions = [
+        item for item in (document.get("push_subscriptions") or [])
+        if isinstance(item, dict) and item.get("endpoint")
+    ]
+    if not subscriptions:
+        return {
+            "ok": False,
+            "error": "Tu cuenta no tiene dispositivos push. En el celular, entra a Siguiendo y pulsa Activar en este dispositivo.",
+        }
+    if repo is None:
+        return {"ok": False, "error": "MongoDB no está disponible para firmar el aviso push."}
+    from retail.web_push import send_user_push
+
+    sample = {
+        "name": "Producto de ejemplo",
+        "store": "lider",
+        "price": 99990,
+        "message": "Prueba de aviso push. Si lees esto en el celular, está bien configurado.",
+        "short_url": "/siguiendo",
+        "extra": {"store_title": "Tienda de ejemplo", "product_id": "ejemplo"},
+    }
+    if send_user_push({**document, "push_subscriptions": subscriptions}, sample, repo=repo, tag="prueba"):
+        return {"ok": True, "message": "Aviso push de prueba enviado a tus dispositivos."}
+    return {
+        "ok": False,
+        "error": "No se pudo enviar el push. Revisa que el dispositivo siga suscrito y que el sitio esté en HTTPS.",
+    }
 
 
 def _telegram_text(text: str, image_url: str | None = None) -> bool:

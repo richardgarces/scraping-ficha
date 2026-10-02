@@ -361,6 +361,22 @@ async def admin_test_email(request: Request) -> dict:
     return _notice_response(send_email_test(recipient))
 
 
+@router.post("/api/admin/test-push")
+def admin_test_push(request: Request) -> dict:
+    """Push de prueba a los dispositivos de la cuenta admin (suscritos en Siguiendo)."""
+    user = current_user(request, admin=True) or {}
+    from retail.batch.alerts import send_push_test
+
+    repo = connect_repo()
+    if repo is None:
+        raise HTTPException(status_code=503, detail="MongoDB no está disponible.")
+    try:
+        document = repo.find_user_by_id(str(user.get("id") or "")) or {}
+        return _notice_response(send_push_test(document, repo=repo))
+    finally:
+        repo.close()
+
+
 @router.get("/api/admin/overview")
 def admin_overview(request: Request) -> dict:
     current_user(request, admin=True)

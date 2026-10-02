@@ -27,6 +27,7 @@ Este documento reúne trabajo pendiente o que todavía requiere validación. Una
 
 ## Alertas y notificaciones
 
+- [x] Canal Celular (push) en Medios de alerta, prueba admin y envío integrado con preferencias de Siguiendo (pendiente validar en dispositivo real tras deploy).
 - [ ] Probar de extremo a extremo las notificaciones push para usuarios autenticados: permiso, suscripción, envío, enlace y baja.
 - [ ] Confirmar que una alerta seguida se active ante cualquier cambio de precio, tanto al subir como al bajar, sin solicitar un precio objetivo.
 - [ ] Verificar la deduplicación de Telegram con ejecuciones simultáneas y reintentos de workers.
@@ -60,7 +61,7 @@ Este documento reúne trabajo pendiente o que todavía requiere validación. Una
 ## Dependencias externas
 
 - [ ] Confirmar DNS y certificado TLS de `lnk.meincart.cl`.
-- [ ] Documentar credenciales, variables de entorno y permisos necesarios para push, Telegram y acortamiento de enlaces, sin guardar secretos en Git.
+- [x] Documentar credenciales, variables de entorno y permisos necesarios para push, Telegram y acortamiento de enlaces, sin guardar secretos en Git.
 - [ ] Revisar términos de uso, `robots.txt`, límites y permisos de cada fuente antes de activar nuevos scrapers en producción.
 
 ## Criterio de cierre

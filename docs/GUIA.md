@@ -162,14 +162,25 @@ Definen qué merece una alerta. Viven en `retail/batch/reglas_ofertas.json` y se
 
 ### Canales de alerta
 
-`channels` acepta cuatro destinos:
+`channels` acepta estos destinos:
 
 - `log`: a la salida estándar
 - `file`: una línea JSON por alerta en `output/alerts.jsonl`
 - `telegram`: mensaje al chat configurado
 - `email`: correo por SMTP
+- `push`: notificación al celular (Web Push) para cuentas que lo activaron en `/siguiendo`
 
-Los dos últimos necesitan credenciales, por variable de entorno o desde `/ofertas` (que las guarda en `output/canales.local.json`). La variable de entorno tiene prioridad.
+Los de Telegram y correo necesitan credenciales, por variable de entorno o desde `/ofertas` (que las guarda en `output/canales.local.json`). La variable de entorno tiene prioridad.
+
+El push al celular usa Web Push del navegador. Las llaves VAPID se generan solas la primera vez y quedan en Mongo (`web_push_vapid`), o se fijan con:
+
+```
+WEB_PUSH_VAPID_PUBLIC_KEY=...
+WEB_PUSH_VAPID_PRIVATE_KEY=...
+WEB_PUSH_SUBJECT=mailto:alertas@meincart.cl
+```
+
+El sitio debe servirse por HTTPS. En el celular: entrar a Siguiendo → Activar en este dispositivo → permitir notificaciones. En admin (`/ofertas`): marcar **Celular (push)** y usar **Enviar prueba push al celular**.
 
 Para cada destinatario y canal, un mismo producto al mismo precio no vuelve a
 notificarse durante **5 días (120 horas)**. Esta ventana se comparte entre

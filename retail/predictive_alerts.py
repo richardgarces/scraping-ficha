@@ -338,6 +338,16 @@ def dispatch_predictive_alerts(repo: Any) -> dict[str, Any]:
                     text,
                     html=product_email_html(payload, eyebrow="Estimación de precio", heading=heading),
                 )) or delivered
+            if "push" in channels and user.get("push_subscriptions"):
+                from retail.batch.rules import load_rules
+                from retail.web_push import send_user_push
+
+                if "push" in (load_rules().get("channels") or []):
+                    claimed = not hasattr(repo, "claim_user_notification_send") or repo.claim_user_notification_send(
+                        user_id, "push", entity_key, product.get("price"),
+                    )
+                    if claimed:
+                        delivered = send_user_push(user, payload, repo=repo, tag=entity_key) or delivered
             if delivered:
                 sends.insert_one({**key, "sent_at": datetime.now(timezone.utc), "channels": channels})
                 sent += 1

@@ -45,3 +45,17 @@ def test_push_message_links_to_internal_product_card():
     assert "Tienda Chile · $12.990" in message["body"]
     assert message["url"] == "https://lnk.meincart.cl/o/123456789"
     assert message["tag"] == "precio-audifonos"
+
+
+def test_save_rules_accepts_push_channel(tmp_path, monkeypatch):
+    from retail.batch import config
+
+    target = tmp_path / "reglas.json"
+    monkeypatch.setattr(config, "default_rules_path", lambda: target)
+    saved = config.save_rules({
+        "enabled": ["price_drop_percent"],
+        "channels": ["log", "push", "invalid"],
+        "price_drop_percent": 10,
+    })
+    assert saved["channels"] == ["log", "push"]
+    assert "push" in target.read_text()

@@ -63,7 +63,10 @@ RULE_NAMES = {"price_drop_percent", "price_drop_amount", "cross_store_gap", "bel
 
 def save_rules(data: dict[str, Any]) -> dict[str, Any]:
     enabled = [item for item in (data.get("enabled") or []) if item in RULE_NAMES]
-    channels = [item for item in (data.get("channels") or []) if item in {"log", "file", "telegram", "email"}]
+    channels = [
+        item for item in (data.get("channels") or [])
+        if item in {"log", "file", "telegram", "email", "push"}
+    ]
     payload = {
         "comment": data.get("comment") or "Reglas editables desde la interfaz web.",
         "enabled": enabled,

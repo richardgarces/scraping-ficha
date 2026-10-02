@@ -547,7 +547,9 @@ def run_batch(
             if alerts:
                 dispatch_alerts(alerts, por_alerta, repo=repo)
             if personal_alerts:
-                dispatch_user_alerts(personal_alerts, notification_users, repo=repo)
+                dispatch_user_alerts(
+                    personal_alerts, notification_users, repo=repo, system_channels=channels,
+                )
             saved = result.get("saved") or {}
             row = {
                 "id": item.get("id"),
@@ -788,7 +790,7 @@ def _check_watches(
             dispatch_alerts(alerts, [channel for channel in channels if channel not in {"email", "telegram"}], repo=repo)
             owner = repo.find_user_by_id(str(watch.get("user_id") or "")) if hasattr(repo, "find_user_by_id") else None
             if owner:
-                dispatch_user_alerts(alerts, [owner], repo=repo)
+                dispatch_user_alerts(alerts, [owner], repo=repo, system_channels=channels)
             repo.mark_watch_notified(watch.get("_id") or watch.get("id"), alerts[0].price)
             sent += len(alerts)
         if pause and index + 1 < len(by_query):

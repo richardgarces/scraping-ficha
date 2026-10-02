@@ -187,4 +187,20 @@ def notify_price_changes(repo: Any, changes: list[dict[str, Any]]) -> int:
                     sent += 1
             except Exception:
                 pass
+            try:
+                from retail.batch.rules import load_rules
+                from retail.web_push import send_user_push
+
+                user = repo.find_user_by_id(user_id) or {}
+                prefs = user.get("notification_preferences") or {}
+                if (
+                    "push" in (prefs.get("channels") or [])
+                    and user.get("push_subscriptions")
+                    and "push" in (load_rules().get("channels") or [])
+                    and claim("push")
+                    and send_user_push(user, payload, repo=repo, tag=f"{change['store']}:{change['product_id']}")
+                ):
+                    sent += 1
+            except Exception:
+                pass
     return sent
