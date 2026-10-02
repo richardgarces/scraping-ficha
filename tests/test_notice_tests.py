@@ -535,6 +535,34 @@ def test_user_push_requires_admin_channel_and_subscription(monkeypatch):
     assert len(sent) == 1
 
 
+def test_user_email_requires_admin_correo_channel(monkeypatch):
+    from retail.batch import alerts
+    from retail.batch.rules import Alert
+
+    sent = []
+    monkeypatch.setattr(alerts, "send_email", lambda *args, **kwargs: sent.append(args) or True)
+    deal = Alert(
+        catalog_id="tv", query="tv", rule="common_discount", name="TV",
+        store="lider", price=100000, previous_price=200000, message="50%",
+        url=None, compare_code="tv-email-gate",
+        extra={"percent": 50, "product_id": "p1"},
+    )
+    user = {
+        "id": "u1",
+        "email": "ana@example.com",
+        "notification_preferences": {"channels": ["email"], "kinds": ["common"]},
+    }
+    assert alerts.dispatch_user_alerts(
+        [deal], [user], system_channels=["log", "file", "telegram"],
+    ) == 0
+    assert sent == []
+    assert alerts.dispatch_user_alerts(
+        [deal], [user], system_channels=["log", "file", "telegram", "email"],
+    ) == 1
+    assert len(sent) == 1
+    assert sent[0][0] == "ana@example.com"
+
+
 def test_push_test_needs_subscription_and_hides_endpoint(monkeypatch):
     from retail.batch import alerts
 

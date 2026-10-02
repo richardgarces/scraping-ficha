@@ -113,6 +113,11 @@ def notify_price_changes(repo: Any, changes: list[dict[str, Any]]) -> int:
         return 0
     if not alerts:
         return 0
+    from retail.batch.rules import load_rules
+
+    # Medios de alerta del admin: sin «Correo» no se manda email de precio.
+    system_channels = set(load_rules().get("channels") or [])
+    email_enabled = "email" in system_channels
     by_product: dict[tuple[str, str], list[dict[str, Any]]] = {}
     for alert in alerts:
         by_product.setdefault((alert.get("store") or "", alert.get("product_id") or ""), []).append(alert)
@@ -163,7 +168,7 @@ def notify_price_changes(repo: Any, changes: list[dict[str, Any]]) -> int:
             }
             # Enviar por email y webhook/Telegram si están configurados.
             try:
-                if claim("email") and send_email(email, subject, body, **send_kwargs):
+                if email_enabled and claim("email") and send_email(email, subject, body, **send_kwargs):
                     sent += 1
                     print(f"Correo de alerta de precio enviado ({change['store']} {change['product_id']}).")
             except Exception:
@@ -188,7 +193,6 @@ def notify_price_changes(repo: Any, changes: list[dict[str, Any]]) -> int:
             except Exception:
                 pass
             try:
-                from retail.batch.rules import load_rules
                 from retail.web_push import send_user_push
 
                 user = repo.find_user_by_id(user_id) or {}
@@ -196,7 +200,7 @@ def notify_price_changes(repo: Any, changes: list[dict[str, Any]]) -> int:
                 if (
                     "push" in (prefs.get("channels") or [])
                     and user.get("push_subscriptions")
-                    and "push" in (load_rules().get("channels") or [])
+                    and "push" in system_channels
                     and claim("push")
                     and send_user_push(user, payload, repo=repo, tag=f"{change['store']}:{change['product_id']}")
                 ):

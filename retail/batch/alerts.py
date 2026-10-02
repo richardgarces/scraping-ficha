@@ -606,7 +606,8 @@ def dispatch_user_alerts(
         if system_channels is not None
         else (load_rules().get("channels") or [])
     )
-    # Push al celular solo si el admin lo activó en Medios de alerta.
+    # Correo y push solo si el admin los activó en Medios de alerta.
+    email_enabled = "email" in enabled
     push_enabled = "push" in enabled
     delivered = 0
     for user in users:
@@ -639,7 +640,12 @@ def dispatch_user_alerts(
                     if claimed and send_to_user(user, text, image_url=alert.image_url):
                         delivered += 1
             email = str(user.get("email") or "").strip()
-            if "email" in channels and email and wants_alert(preferences, alert, channel="email"):
+            if (
+                email_enabled
+                and "email" in channels
+                and email
+                and wants_alert(preferences, alert, channel="email")
+            ):
                 claimed = not repo or not hasattr(repo, "claim_user_notification_send") or repo.claim_user_notification_send(
                     user_id, "email", key, alert.price,
                 )

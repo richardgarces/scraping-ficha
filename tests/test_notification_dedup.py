@@ -138,6 +138,10 @@ def test_price_change_and_offer_do_not_send_duplicate_email(repo, monkeypatch):
     monkeypatch.setattr(alerts, "send_email", send_email)
     monkeypatch.setattr(alerts, "_webhook_targets", lambda: [])
     monkeypatch.setattr(alerts, "send_to_user", lambda *args, **kwargs: False)
+    monkeypatch.setattr(
+        "retail.batch.rules.load_rules",
+        lambda: {"channels": ["log", "file", "telegram", "email"]},
+    )
     change = {"store": "lider", "product_id": "p1", "name": "TV", "previous_price": 2000, "price": 1000}
     assert notify_price_changes(repo, [change]) == 1
     assert notify_price_changes(repo, [{**change, "previous_price": 1200}]) == 0
@@ -191,10 +195,46 @@ def test_predictive_alerts_share_product_key_and_ignore_new_forecast_generation(
     monkeypatch.setattr(predictive_alerts, "anticipated_drop_validation_status", lambda _: {"enabled": False})
     monkeypatch.setattr(predictive_alerts, "predictive_message", lambda *args, **kwargs: ("buy_now", "Oferta"))
     monkeypatch.setattr(alerts, "send_email", lambda *args, **kwargs: deliveries.append(args) or True)
+    monkeypatch.setattr(
+        "retail.batch.rules.load_rules",
+        lambda: {"channels": ["log", "file", "telegram", "email"]},
+    )
     assert repo.claim_user_notification_send("u1", "email", "product:lider:p1", 1000)
     assert predictive_alerts.dispatch_predictive_alerts(repo)["sent"] == 0
     monkeypatch.setattr("retail.mongo._now", lambda: NOW + timedelta(days=5))
     assert predictive_alerts.dispatch_predictive_alerts(repo)["sent"] == 1
     repo.forecasts.insert_one({**forecast, "generated_at": NOW + timedelta(days=5)})
     assert predictive_alerts.dispatch_predictive_alerts(repo)["sent"] == 0
+
+
+def test_predictive_email_requires_admin_correo_channel(repo, monkeypatch):
+    from retail.batch import alerts
+    from retail import predictive_alerts
+
+    deliveries = []
+    user = {"id": "u1", "email": "ana@example.com", "notification_preferences": {
+        "channels": ["email"], "kinds": ["predictive"],
+    }}
+    repo.collection.insert_one({"store": "lider", "product_id": "p2", "price": 1000})
+    repo.forecasts.insert_one({
+        "store": "lider", "product_id": "p2", "model": "timesfm",
+        "forecast_key": "lider:p2", "generated_at": NOW,
+    })
+    monkeypatch.setattr(repo, "list_notification_users", lambda: [user])
+    monkeypatch.setattr(predictive_alerts, "predictive_validation_status", lambda _: {"enabled": True})
+    monkeypatch.setattr(predictive_alerts, "anticipated_drop_validation_status", lambda _: {"enabled": False})
+    monkeypatch.setattr(predictive_alerts, "predictive_message", lambda *args, **kwargs: ("buy_now", "Oferta"))
+    monkeypatch.setattr(alerts, "send_email", lambda *args, **kwargs: deliveries.append(args) or True)
+    monkeypatch.setattr(
+        "retail.batch.rules.load_rules",
+        lambda: {"channels": ["log", "file", "telegram"]},
+    )
+    assert predictive_alerts.dispatch_predictive_alerts(repo)["sent"] == 0
+    assert deliveries == []
+    monkeypatch.setattr(
+        "retail.batch.rules.load_rules",
+        lambda: {"channels": ["log", "file", "telegram", "email"]},
+    )
+    assert predictive_alerts.dispatch_predictive_alerts(repo)["sent"] == 1
+    assert len(deliveries) == 1
     assert len(deliveries) == 1

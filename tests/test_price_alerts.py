@@ -69,6 +69,10 @@ def test_notify_sends_once_per_change(monkeypatch):
         return True
 
     monkeypatch.setattr("retail.price_alerts.send_email", fake_send)
+    monkeypatch.setattr(
+        "retail.batch.rules.load_rules",
+        lambda: {"channels": ["log", "file", "telegram", "email"]},
+    )
     claimed = set()
 
     class Repo:
@@ -112,6 +116,44 @@ def test_notify_sends_once_per_change(monkeypatch):
     assert "Audífonos" in sent[0][3]["html"]
 
 
+def test_notify_skips_email_when_admin_correo_disabled(monkeypatch):
+    sent = []
+    monkeypatch.setattr(
+        "retail.price_alerts.send_email",
+        lambda *args, **kwargs: sent.append(args) or True,
+    )
+    monkeypatch.setattr(
+        "retail.batch.rules.load_rules",
+        lambda: {"channels": ["log", "file", "telegram"]},
+    )
+
+    class Repo:
+        price_alerts = object()
+
+        def price_alerts_for(self, keys):
+            return [
+                {
+                    "user_id": "u1",
+                    "store": "falabella",
+                    "product_id": "p1",
+                    "email": "ana@example.com",
+                    "active": True,
+                }
+            ]
+
+        def claim_price_alert_send(self, *args, **kwargs):
+            return True
+
+        def find_user_by_id(self, user_id):
+            return {"email": "ana@example.com", "status": "approved"}
+
+    assert notify_price_changes(
+        Repo(),
+        [{"store": "falabella", "product_id": "p1", "name": "TV", "previous_price": 2000, "price": 1500}],
+    ) == 0
+    assert sent == []
+
+
 def test_notify_accepts_a_pymongo_collection_without_boolean_evaluation(monkeypatch):
     class CollectionLike:
         def __bool__(self):
@@ -135,6 +177,10 @@ def test_notify_accepts_a_pymongo_collection_without_boolean_evaluation(monkeypa
 def test_notify_skips_clearly_when_smtp_missing(monkeypatch, capsys):
     monkeypatch.delenv("SMTP_HOST", raising=False)
     monkeypatch.setattr("retail.batch.alerts.load_channels", lambda: {})
+    monkeypatch.setattr(
+        "retail.batch.rules.load_rules",
+        lambda: {"channels": ["log", "file", "email"]},
+    )
 
     class Repo:
         price_alerts = object()

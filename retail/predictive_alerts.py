@@ -269,6 +269,7 @@ def dispatch_predictive_alerts(repo: Any) -> dict[str, Any]:
         return {"enabled": False, "sent": 0, "reason": status["reason"]}
 
     from retail.batch.alerts import _notification_text, product_email_html, send_email, send_to_user
+    from retail.batch.rules import load_rules
     from retail.short_links import attach_short_url
 
     users = [
@@ -278,6 +279,10 @@ def dispatch_predictive_alerts(repo: Any) -> dict[str, Any]:
     if not users:
         return {"enabled": True, "sent": 0, "reason": "No hay usuarios suscritos."}
 
+    # Medios de alerta del admin: sin «Correo» no se manda email predictivo.
+    system_channels = set(load_rules().get("channels") or [])
+    email_enabled = "email" in system_channels
+    push_enabled = "push" in system_channels
     anticipated_status = anticipated_drop_validation_status(repo)
     forecasts = repo.db.get_collection("forecasts")
     sends = getattr(repo, "predictive_alert_sends", repo.db.get_collection("predictive_alert_sends"))
@@ -327,7 +332,7 @@ def dispatch_predictive_alerts(repo: Any) -> dict[str, Any]:
                 if claimed:
                     delivered = send_to_user(user, text, image_url=product.get("image_url")) or delivered
             email = str(user.get("email") or "").strip()
-            if "email" in channels and email:
+            if email_enabled and "email" in channels and email:
                 claimed = not hasattr(repo, "claim_user_notification_send") or repo.claim_user_notification_send(
                     user_id, "email", entity_key, product.get("price"),
                 )
@@ -338,16 +343,14 @@ def dispatch_predictive_alerts(repo: Any) -> dict[str, Any]:
                     text,
                     html=product_email_html(payload, eyebrow="Estimación de precio", heading=heading),
                 )) or delivered
-            if "push" in channels and user.get("push_subscriptions"):
-                from retail.batch.rules import load_rules
+            if push_enabled and "push" in channels and user.get("push_subscriptions"):
                 from retail.web_push import send_user_push
 
-                if "push" in (load_rules().get("channels") or []):
-                    claimed = not hasattr(repo, "claim_user_notification_send") or repo.claim_user_notification_send(
-                        user_id, "push", entity_key, product.get("price"),
-                    )
-                    if claimed:
-                        delivered = send_user_push(user, payload, repo=repo, tag=entity_key) or delivered
+                claimed = not hasattr(repo, "claim_user_notification_send") or repo.claim_user_notification_send(
+                    user_id, "push", entity_key, product.get("price"),
+                )
+                if claimed:
+                    delivered = send_user_push(user, payload, repo=repo, tag=entity_key) or delivered
             if delivered:
                 sends.insert_one({**key, "sent_at": datetime.now(timezone.utc), "channels": channels})
                 sent += 1
