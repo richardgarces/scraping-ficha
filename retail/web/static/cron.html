@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#258fdf">
   <title>Cron / lotes</title>
   <script>(function(){var m=localStorage.getItem("retail-theme");if(m==="day"||m==="night"){document.documentElement.dataset.theme=m;return;}var h=new Date().getHours();document.documentElement.dataset.theme=(h>=7&&h<19)?"day":"night";})();</script>
-  <link rel="stylesheet" href="/static/styles.css?v=74">
+  <link rel="stylesheet" href="/static/styles.css?v=75">
 </head>
 <body>
   <header class="top">
@@ -62,6 +62,7 @@
       </div>
       <form id="basic-scrape-form" class="cron-store-form">
         <button type="submit" id="basic-scrape-run">Scraping básico</button>
+        <span id="basic-scrape-actions" class="cron-basic-actions"></span>
       </form>
       <p id="basic-scrape-meta" class="muted cron-basic-counts"></p>
       <div class="table-wrap" id="basic-scrape-wrap" hidden>
@@ -151,6 +152,6 @@
     </section>
   </main>
   <script src="/static/prices.js?v=29"></script>
-  <script src="/static/cron.js?v=14"></script>
+  <script src="/static/cron.js?v=15"></script>
 </body>
 </html>

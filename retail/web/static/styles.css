@@ -1923,6 +1923,8 @@ html[data-theme="day"] .panel { backdrop-filter: none; }
 .cron-group-action button { min-height: 44px; white-space: nowrap; }
 .cron-group-action button.cron-stop { color: var(--danger); }
 .cron-group-action button.cron-continue { color: var(--ok, #1a7f37); }
+.cron-basic-actions { display: inline-flex; gap: 8px; align-items: center; }
+.cron-basic-actions button.cron-stop { color: var(--danger); min-height: 44px; }
 tr.cron-store-selected td { background: color-mix(in srgb, var(--accent, #2563eb) 8%, transparent); }
 .badge.status-stopped { background: color-mix(in srgb, var(--muted) 18%, var(--panel-2)); color: var(--muted); }
 .cron-progress-wrap { min-width: 160px; max-width: 320px; }

@@ -349,6 +349,26 @@ def start_basic_scrape(**kwargs) -> dict[str, Any]:
     }
 
 
+def stop_basic_scrape() -> dict[str, Any]:
+    """Pide detener el scraping básico. La corrida lo nota entre productos."""
+    from retail.batch.basic_scrape import BasicScrapeIdle
+    from retail.search import connect_repo
+
+    repo = connect_repo()
+    if repo is None:
+        raise RuntimeError("MongoDB no está disponible; no se pudo detener el scraping básico.")
+    try:
+        if not hasattr(repo, "request_basic_stop") or not repo.request_basic_stop():
+            raise BasicScrapeIdle()
+    finally:
+        repo.close()
+    return {
+        "ok": True,
+        "job": "scraping_basico",
+        "message": "Deteniendo scraping básico.",
+    }
+
+
 def _run_basic(**kwargs) -> None:
     global _BASIC_RUNNING
     try:

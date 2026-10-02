@@ -49,6 +49,8 @@ const startingGroups = new Set();
 const stoppingGroups = new Set();
 const startingStores = new Set();
 const stoppingStores = new Set();
+let stoppingBasic = false;
+let startingBasic = false;
 
 function groupStatusCell(group, paused) {
   const badge = statusBadge(group.status);
@@ -672,20 +674,80 @@ function countLine(run) {
   return bits.join(" · ");
 }
 
+function basicStatusCell(job) {
+  const badge = statusBadge(job.status);
+  const actions = [];
+  if (["running", "paused"].includes(job.status)) {
+    const stopping = stoppingBasic || job.progress?.phase === "stopping";
+    const stopTitle = "Detener scraping básico";
+    actions.push(`<button type="button" class="secondary cron-stop" data-stop-basic="1"
+      title="${escapeHtml(stopTitle)}" aria-label="${escapeHtml(stopTitle)}"${stopping ? " disabled" : ""}>
+      ${stopping ? "Deteniendo…" : "Detener"}
+    </button>`);
+  }
+  if (["failed", "stopped"].includes(job.status)) {
+    const starting = startingBasic;
+    const processed = Number(job.last_run?.processed) || 0;
+    if (processed > 0) {
+      const continueTitle = `Continuar scraping básico desde el producto ${processed}`;
+      actions.push(`<button type="button" class="secondary cron-continue" data-basic-mode="continue"
+        title="${escapeHtml(continueTitle)}" aria-label="${escapeHtml(continueTitle)}"${starting ? " disabled" : ""}>
+        ${starting ? "Iniciando…" : "Continuar"}
+      </button>`);
+    }
+    const restartTitle = "Reiniciar scraping básico desde el comienzo";
+    actions.push(`<button type="button" class="secondary cron-restart" data-basic-mode="restart"
+      title="${escapeHtml(restartTitle)}" aria-label="${escapeHtml(restartTitle)}"${starting ? " disabled" : ""}>
+      ${starting ? "Iniciando…" : "Reiniciar"}
+    </button>`);
+  }
+  if (job.status === "done") {
+    const starting = startingBasic;
+    const restartTitle = "Reiniciar scraping básico desde el comienzo";
+    actions.push(`<button type="button" class="secondary cron-restart" data-basic-mode="restart"
+      title="${escapeHtml(restartTitle)}" aria-label="${escapeHtml(restartTitle)}"${starting ? " disabled" : ""}>
+      ${starting ? "Iniciando…" : "Reiniciar"}
+    </button>`);
+  }
+  if (!actions.length) return badge;
+  return `<div class="cron-group-action">${badge}${actions.join("")}</div>`;
+}
+
 function renderBasic(payload) {
   const job = payload.basic_scrape || { status: "idle", title: "Scraping básico" };
   const button = $("basic-scrape-run");
   const wrap = $("basic-scrape-wrap");
   const meta = $("basic-scrape-meta");
-  const running = job.status === "running";
+  const formActions = $("basic-scrape-actions");
+  const running = ["running", "paused"].includes(job.status);
   const failed = ["failed", "stopped"].includes(job.status);
   const canContinue = failed && (Number(job.last_run?.processed) || 0) > 0;
+  if (!["running", "paused"].includes(job.status)) stoppingBasic = false;
   if (button && button.dataset.busy !== "1") {
-    button.disabled = running;
+    button.disabled = running || startingBasic;
     if (running) button.textContent = "En curso";
-    else if (canContinue) button.textContent = "Reiniciar";
-    else button.textContent = "Scraping básico";
-    button.dataset.startMode = canContinue ? "restart" : "";
+    else if (canContinue) {
+      button.textContent = "Continuar";
+      button.dataset.startMode = "continue";
+    } else if (failed || job.status === "done") {
+      button.textContent = "Reiniciar";
+      button.dataset.startMode = "restart";
+    } else {
+      button.textContent = "Scraping básico";
+      button.dataset.startMode = "";
+    }
+  }
+  if (formActions) {
+    if (running) {
+      const stopping = stoppingBasic || job.progress?.phase === "stopping";
+      const stopTitle = "Detener scraping básico";
+      formActions.innerHTML = `<button type="button" class="secondary cron-stop" data-stop-basic="1"
+        title="${escapeHtml(stopTitle)}" aria-label="${escapeHtml(stopTitle)}"${stopping ? " disabled" : ""}>
+        ${stopping ? "Deteniendo…" : "Detener"}
+      </button>`;
+    } else {
+      formActions.innerHTML = "";
+    }
   }
   if (meta) {
     meta.textContent = running
@@ -702,23 +764,13 @@ function renderBasic(payload) {
   wrap.hidden = false;
   const like = { status: job.status, progress: job.progress, last_run: job.last_run };
   const counts = countLine(job.progress || job.last_run);
-  const actions = [];
-  if (canContinue) {
-    actions.push(`<button type="button" class="secondary cron-continue" data-basic-mode="continue">Continuar</button>`);
-  }
-  if (failed) {
-    actions.push(`<button type="button" class="secondary cron-restart" data-basic-mode="restart">Reiniciar</button>`);
-  }
-  const statusCell = actions.length
-    ? `<div class="cron-group-action">${statusBadge(job.status)}${actions.join("")}</div>`
-    : statusBadge(job.status);
   wrap.querySelector("tbody").innerHTML = `
     <tr data-status="${escapeHtml(job.status)}">
       <td>
         <strong>${escapeHtml(job.title || "Scraping básico")}</strong>
         <div class="muted">${escapeHtml(job.id || "scraping_basico")}</div>
       </td>
-      <td>${statusCell}</td>
+      <td>${basicStatusCell(job)}</td>
       <td>
         ${progressCell(like)}
         ${counts ? `<div class="cron-basic-counts muted">${escapeHtml(counts)}</div>` : ""}
@@ -729,6 +781,8 @@ function renderBasic(payload) {
 
 async function startBasicScrape(mode) {
   const button = $("basic-scrape-run");
+  if (startingBasic) return;
+  startingBasic = true;
   if (button) {
     button.dataset.busy = "1";
     button.disabled = true;
@@ -747,7 +801,26 @@ async function startBasicScrape(mode) {
   } catch (error) {
     flash(error.message, false);
   } finally {
+    startingBasic = false;
     if (button) delete button.dataset.busy;
+  }
+  await refresh().catch((error) => flash(error.message, false));
+}
+
+async function stopBasicScrape(button) {
+  if (button?.disabled || stoppingBasic) return;
+  stoppingBasic = true;
+  if (button) {
+    button.disabled = true;
+    button.textContent = "Deteniendo…";
+  }
+  try {
+    const result = await json("/api/admin/basic-scrape/stop", { method: "POST" });
+    flash(result.message || "Deteniendo scraping básico.");
+    watchUntil = Date.now() + 60000;
+  } catch (error) {
+    flash(error.message, false);
+    stoppingBasic = false;
   }
   await refresh().catch((error) => flash(error.message, false));
 }
@@ -867,6 +940,11 @@ $("basic-scrape-form")?.addEventListener("submit", async (event) => {
 });
 
 document.addEventListener("click", (event) => {
+  const stopBasic = event.target.closest("button[data-stop-basic]");
+  if (stopBasic) {
+    stopBasicScrape(stopBasic).catch((error) => flash(error.message, false));
+    return;
+  }
   const basic = event.target.closest("button[data-basic-mode]");
   if (basic) {
     startBasicScrape(basic.dataset.basicMode).catch((error) => flash(error.message, false));

@@ -27,6 +27,7 @@ from retail.web.jobs import (
     start_batch,
     start_group_batch,
     start_store_batch,
+    stop_basic_scrape,
     stop_group_batch,
     stop_store_batch,
 )
@@ -227,6 +228,21 @@ async def post_basic_scrape(request: Request) -> dict:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/api/admin/basic-scrape/stop", status_code=202)
+def stop_basic_scrape_api(request: Request) -> dict:
+    """Pide detener el scraping básico. El worker lo nota entre productos."""
+    current_user(request, admin=True)
+    from pymongo.errors import PyMongoError
+    from retail.batch.basic_scrape import BasicScrapeIdle
+
+    try:
+        return stop_basic_scrape()
+    except BasicScrapeIdle as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except (RuntimeError, PyMongoError) as exc:
+        raise HTTPException(status_code=503, detail="No se pudo detener el scraping básico. Inténtalo de nuevo.") from exc
 
 
 @router.get("/api/admin/users")

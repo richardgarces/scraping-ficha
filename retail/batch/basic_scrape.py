@@ -13,6 +13,7 @@ import time
 from datetime import datetime, timezone
 from typing import Any
 
+from retail.batch.group_scope import GroupBatchStopped
 from retail.batch.store_scope import STALE_AFTER, _parse_when
 from retail.registry import GROUP_TITLES, STORE_GROUP, list_stores
 from retail.search import SEARCH_TIMEOUT, search_products
@@ -30,6 +31,11 @@ _TITLE_TO_GROUP = {title.casefold(): key for key, title in GROUP_TITLES.items()}
 class BasicScrapeBusy(Exception):
     def __init__(self) -> None:
         super().__init__("Ya hay un scraping básico en curso.")
+
+
+class BasicScrapeIdle(RuntimeError):
+    def __init__(self) -> None:
+        super().__init__("No hay un scraping básico en curso.")
 
 
 class BasicScrapeNothingToResume(ValueError):
@@ -290,12 +296,14 @@ def run_basic_scrape(
             groups = groups_for_product(doc, resolve_fn=resolve_fn) if query else []
             if mongo_id is not None and hasattr(repo, "set_basic_scrape_cursor"):
                 repo.set_basic_scrape_cursor(mongo_id)
+                summary["resume_after_id"] = str(mongo_id)
             if not query or not groups:
                 logger.info("Scraping básico: sin categoría, se omite %s", label)
                 summary["skipped"] += 1
                 summary["processed"] += 1
                 repo.advance_batch_run(run_id, processed=1, skipped=1)
                 if mongo_id is not None:
+                    summary["resume_after_id"] = str(mongo_id)
                     repo.update_batch_run(run_id, resume_after_id=str(mongo_id))
                 continue
             stores = stores_for_groups(groups, repo=repo)
@@ -309,6 +317,7 @@ def run_basic_scrape(
                 summary["processed"] += 1
                 repo.advance_batch_run(run_id, processed=1, skipped=1)
                 if mongo_id is not None:
+                    summary["resume_after_id"] = str(mongo_id)
                     repo.update_batch_run(run_id, resume_after_id=str(mongo_id))
                 continue
             key = (query.casefold(), tuple(groups))
@@ -316,9 +325,12 @@ def run_basic_scrape(
                 summary["processed"] += 1
                 repo.advance_batch_run(run_id, processed=1)
                 if mongo_id is not None:
+                    summary["resume_after_id"] = str(mongo_id)
                     repo.update_batch_run(run_id, resume_after_id=str(mongo_id))
                 continue
             seen.add(key)
+            if mongo_id is not None:
+                summary["resume_after_id"] = str(mongo_id)
             repo.update_batch_run(
                 run_id,
                 phase="products",
@@ -386,6 +398,20 @@ def run_basic_scrape(
             finished_at=summary["finished_at"],
             skipped=summary["skipped"],
             failed=summary["failed"],
+        )
+        return summary
+    except GroupBatchStopped:
+        summary["stopped"] = True
+        summary["finished_at"] = datetime.now(timezone.utc).isoformat()
+        # Conserva el cursor para que «Continuar» retome desde el último producto.
+        repo.finish_batch_run(
+            run_id,
+            status="stopped",
+            phase="stopped",
+            finished_at=summary["finished_at"],
+            skipped=summary["skipped"],
+            failed=summary["failed"],
+            resume_after_id=summary.get("resume_after_id"),
         )
         return summary
     except Exception as exc:

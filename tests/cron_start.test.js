@@ -176,6 +176,54 @@ test("continuar y detener scraping de tienda llaman a las APIs correctas", async
   assert.deepEqual(calls[1], ["/api/admin/store-scrape/doite/stop", "POST", undefined]);
 });
 
+test("scraping básico ofrece detener, continuar y reiniciar según estado", () => {
+  const cron = loadCron();
+  const job = {
+    id: "scraping_basico",
+    title: "Scraping básico",
+    status: "running",
+    progress: { phase: "products", processed: 96, items: 202001 },
+    last_run: { processed: 96 },
+  };
+  const running = cron.basicStatusCell(job);
+  assert.match(running, /data-stop-basic/);
+  assert.match(running, /Detener/);
+  assert.doesNotMatch(running, /data-basic-mode/);
+
+  const stopping = cron.basicStatusCell({
+    ...job,
+    progress: { ...job.progress, phase: "stopping" },
+  });
+  assert.match(stopping, /Deteniendo/);
+  assert.match(stopping, / disabled/);
+
+  const stopped = cron.basicStatusCell({
+    ...job,
+    status: "stopped",
+    last_run: { processed: 96, items: 202001 },
+  });
+  assert.match(stopped, /data-basic-mode="continue"/);
+  assert.match(stopped, /Continuar/);
+  assert.match(stopped, /data-basic-mode="restart"/);
+  assert.match(stopped, /Reiniciar/);
+
+  const done = cron.basicStatusCell({ ...job, status: "done", last_run: { processed: 202001 } });
+  assert.doesNotMatch(done, /data-basic-mode="continue"/);
+  assert.match(done, /data-basic-mode="restart"/);
+});
+
+test("detener scraping básico llama a la API de stop", async () => {
+  const calls = [];
+  const cron = loadCron(async (url, options) => {
+    calls.push([url, options?.method]);
+    return { status: 202, ok: true, json: async () => ({ message: "Deteniendo scraping básico." }) };
+  });
+  await cron.stopBasicScrape({ dataset: { stopBasic: "1" }, disabled: false, textContent: "Detener" });
+  assert.deepEqual(calls, [["/api/admin/basic-scrape/stop", "POST"]]);
+  assert.equal(cron.notices[0][0], "Deteniendo scraping básico.");
+  assert.equal(cron.refreshes, 1);
+});
+
 test("un rechazo se muestra y permite reintentar tras actualizar", async () => {
   let attempts = 0;
   const cron = loadCron(async () => {

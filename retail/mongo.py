@@ -936,6 +936,18 @@ class ProductRepository:
         )
         return bool(result.matched_count)
 
+    def request_basic_stop(self) -> bool:
+        """Pide parar el scraping básico. No toca corridas de grupos ni tiendas."""
+        result = self.batch_runs.update_one(
+            {
+                "job": "scraping_basico",
+                "scope": "basico",
+                "status": "running",
+            },
+            {"$set": {"stop_requested": True, "phase": "stopping"}},
+        )
+        return bool(result.matched_count)
+
     def request_group_stop(self, group: str) -> bool:
         """Pide parar la corrida de un grupo. No toca las de los demás."""
         result = self.batch_runs.update_one(

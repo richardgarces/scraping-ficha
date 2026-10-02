@@ -476,3 +476,136 @@ def test_resolve_basic_resume_after_uses_run_or_offset():
     except BasicScrapeNothingToResume:
         raised = True
     assert raised
+
+
+def test_stop_basic_scrape_flags_running_run(monkeypatch):
+    from retail.batch.basic_scrape import BasicScrapeIdle
+    from retail.web import jobs
+
+    flagged = []
+
+    class _Repo:
+        def request_basic_stop(self):
+            flagged.append(True)
+            return True
+
+        def close(self):
+            return None
+
+    monkeypatch.setattr("retail.search.connect_repo", lambda: _Repo())
+    result = jobs.stop_basic_scrape()
+    assert result["job"] == "scraping_basico"
+    assert flagged == [True]
+
+    class _Idle:
+        def request_basic_stop(self):
+            return False
+
+        def close(self):
+            return None
+
+    monkeypatch.setattr("retail.search.connect_repo", lambda: _Idle())
+    try:
+        jobs.stop_basic_scrape()
+        raised = False
+    except BasicScrapeIdle:
+        raised = True
+    assert raised
+
+
+def test_basic_stop_api_requires_admin(anonymous_repo, monkeypatch):
+    import pytest
+
+    monkeypatch.setattr("retail.web.settings_api.stop_basic_scrape", lambda: pytest.fail("should not run"))
+    client = TestClient(app)
+    assert client.post("/api/admin/basic-scrape/stop").status_code == 401
+
+
+def test_basic_stop_api_ok(monkeypatch):
+    from retail.web import settings_api
+
+    seen = []
+
+    def stop():
+        seen.append(True)
+        return {"ok": True, "job": "scraping_basico", "message": "Deteniendo scraping básico."}
+
+    monkeypatch.setattr(settings_api, "current_user", lambda *a, **k: {"role": "admin"})
+    monkeypatch.setattr(settings_api, "stop_basic_scrape", stop)
+    response = TestClient(app).post("/api/admin/basic-scrape/stop")
+    assert response.status_code == 202
+    assert seen == [True]
+    assert "Deteniendo" in response.json()["message"]
+
+
+def test_run_basic_scrape_honors_stop(monkeypatch):
+    from retail.batch.basic_scrape import run_basic_scrape
+    from retail.batch.group_scope import GroupBatchStopped
+
+    calls = {"n": 0}
+
+    def wait(repo, run_id=None, poll_seconds=2.0):
+        calls["n"] += 1
+        if calls["n"] > 1:
+            raise GroupBatchStopped()
+
+    monkeypatch.setattr("retail.batch.config.wait_while_paused", wait)
+    monkeypatch.setattr(
+        "retail.batch.basic_scrape.search_products",
+        lambda *a, **k: {"groups": [], "saved": {"upserted": 0, "modified": 0}},
+    )
+    monkeypatch.setattr(
+        "retail.store_categories.stores_for_group",
+        lambda group, **kwargs: ["ahumada"],
+    )
+    monkeypatch.setattr(
+        "retail.batch.basic_scrape.list_stores",
+        lambda: [SimpleNamespace(id="ahumada"), SimpleNamespace(id="cruzverde")],
+    )
+
+    class Repo:
+        def __init__(self):
+            self.finished = None
+            self.cursor = None
+
+        def start_batch_run(self, data):
+            return "run-stop"
+
+        def update_batch_run(self, run_id, **fields):
+            return None
+
+        def advance_batch_run(self, run_id, **fields):
+            return None
+
+        def set_basic_scrape_cursor(self, after_id):
+            self.cursor = after_id
+
+        def finish_batch_run(self, run_id, **fields):
+            self.finished = fields
+
+    repo = Repo()
+    summary = run_basic_scrape(
+        products=[
+            {
+                "_id": "a1",
+                "store": "ahumada",
+                "product_id": "1",
+                "name": "Para",
+                "last_search_query": "paracetamol",
+                "groups": ["farmacias"],
+            },
+            {
+                "_id": "a2",
+                "store": "ahumada",
+                "product_id": "2",
+                "name": "Ibuprofeno",
+                "last_search_query": "ibuprofeno",
+                "groups": ["farmacias"],
+            },
+        ],
+        repo=repo,
+        pause=0,
+    )
+    assert summary.get("stopped") is True
+    assert repo.finished["status"] == "stopped"
+    assert repo.cursor is not None
