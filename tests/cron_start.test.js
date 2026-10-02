@@ -146,6 +146,20 @@ test("scraping de tienda ofrece detener, continuar y reiniciar según estado", (
   assert.doesNotMatch(done, /data-start-mode="continue"/);
   assert.match(done, /data-start-mode="restart"/);
   assert.match(done, /Reiniciar/);
+
+  const idle = cron.storeStatusCell({ id: "acqui", title: "Acqui", status: "idle" });
+  assert.match(idle, /data-start-store="acqui"/);
+  assert.match(idle, /Correr scraping/);
+  assert.doesNotMatch(idle, /data-start-mode/);
+
+  const failed = cron.storeStatusCell({
+    id: "doite",
+    title: "Doite",
+    status: "failed",
+    last_run: { processed: 0 },
+  });
+  assert.doesNotMatch(failed, /Continuar/);
+  assert.match(failed, /Reiniciar/);
 });
 
 test("continuar y detener scraping de tienda llaman a las APIs correctas", async () => {
@@ -174,6 +188,56 @@ test("continuar y detener scraping de tienda llaman a las APIs correctas", async
     textContent: "Detener",
   });
   assert.deepEqual(calls[1], ["/api/admin/store-scrape/doite/stop", "POST", undefined]);
+});
+
+test("el formulario de tienda pasa a Continuar, Reiniciar o Detener según el estado", () => {
+  const select = { value: "doite" };
+  const button = { dataset: {}, disabled: true, textContent: "Correr scraping" };
+  const actions = { innerHTML: "" };
+  const nodes = {
+    "store-select": select,
+    "store-run": button,
+    "store-scrape-actions": actions,
+  };
+  const cron = loadCron();
+  cron.$ = (id) => nodes[id] || null;
+  const vm = require("node:vm");
+  vm.runInContext(
+    `lastStoreJobs = ${JSON.stringify([
+      { id: "doite", title: "Doite", status: "failed", last_run: { processed: 246, items: 2324 } },
+    ])}`,
+    cron,
+  );
+
+  cron.syncRunButton();
+  assert.equal(button.disabled, false);
+  assert.equal(button.textContent, "Continuar");
+  assert.equal(button.dataset.startMode, "continue");
+  assert.equal(button.dataset.startStore, "doite");
+  assert.match(actions.innerHTML, /data-start-mode="restart"/);
+  assert.match(actions.innerHTML, /Reiniciar/);
+
+  vm.runInContext(`lastStoreJobs[0].status = "done"`, cron);
+  cron.syncRunButton();
+  assert.equal(button.textContent, "Reiniciar");
+  assert.equal(button.dataset.startMode, "restart");
+  assert.equal(actions.innerHTML, "");
+
+  vm.runInContext(
+    `lastStoreJobs[0] = ${JSON.stringify({
+      id: "doite",
+      title: "Doite",
+      status: "running",
+      progress: { phase: "products" },
+      last_run: { processed: 10 },
+    })}`,
+    cron,
+  );
+  cron.syncRunButton();
+  assert.equal(button.disabled, true);
+  assert.equal(button.textContent, "En curso");
+  assert.match(actions.innerHTML, /data-stop-store="doite"/);
+  assert.match(actions.innerHTML, /Detener/);
 });
 
 test("scraping básico ofrece detener, continuar y reiniciar según estado", () => {

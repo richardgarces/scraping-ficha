@@ -40,8 +40,16 @@ const STATUS_LABEL = {
   failed: "Falló hoy",
 };
 
+function normalizedGroupStatus(status) {
+  return STATUS_LABEL[status] ? status : "idle";
+}
+
+function groupHasStores(group) {
+  return Number(group.store_count) > 0;
+}
+
 function statusBadge(status) {
-  const key = STATUS_LABEL[status] ? status : "idle";
+  const key = normalizedGroupStatus(status);
   return `<span class="badge status-${key}">${STATUS_LABEL[key]}</span>`;
 }
 
@@ -52,10 +60,14 @@ const stoppingStores = new Set();
 let stoppingBasic = false;
 let startingBasic = false;
 
-function groupStatusCell(group, paused) {
-  const badge = statusBadge(group.status);
+function groupStatusCell(group) {
+  return statusBadge(group.status);
+}
+
+function groupActionsCell(group, paused) {
+  const status = normalizedGroupStatus(group.status);
   const actions = [];
-  if (["running", "paused"].includes(group.status)) {
+  if (["running", "paused"].includes(status)) {
     const stopping = stoppingGroups.has(group.id) || group.progress?.phase === "stopping";
     const title = `Detener ${group.title || group.id}. Las demás corridas siguen.`;
     actions.push(`<button type="button" class="secondary cron-stop" data-stop-group="${escapeHtml(group.id)}"
@@ -63,7 +75,7 @@ function groupStatusCell(group, paused) {
       ${stopping ? "Deteniendo…" : "Detener"}
     </button>`);
   }
-  if (group.status === "idle" && group.store_count) {
+  if (status === "idle" && groupHasStores(group)) {
     const starting = startingGroups.has(group.id);
     const title = paused
       ? "Reanuda las corridas antes de iniciar un grupo."
@@ -73,7 +85,7 @@ function groupStatusCell(group, paused) {
       ${starting ? "Iniciando…" : "Iniciar ahora"}
     </button>`);
   }
-  if (["failed", "stopped"].includes(group.status) && group.store_count) {
+  if (["failed", "stopped"].includes(status) && groupHasStores(group)) {
     const starting = startingGroups.has(group.id);
     const processed = Number(group.last_run?.processed) || 0;
     const canContinue = processed > 0;
@@ -94,8 +106,8 @@ function groupStatusCell(group, paused) {
       ${starting ? "Iniciando…" : "Reiniciar"}
     </button>`);
   }
-  if (!actions.length) return badge;
-  return `<div class="cron-group-action">${badge}${actions.join("")}</div>`;
+  if (!actions.length) return "—";
+  return `<div class="cron-group-action">${actions.join("")}</div>`;
 }
 
 async function startGroup(button) {
@@ -179,18 +191,26 @@ function storeStatusCell(job) {
       ${starting ? "Iniciando…" : "Reiniciar"}
     </button>`);
   }
+  if (job.status === "idle") {
+    const starting = startingStores.has(job.id);
+    const startTitle = `Iniciar scraping de ${title}`;
+    actions.push(`<button type="button" class="secondary" data-start-store="${escapeHtml(job.id)}"
+      title="${escapeHtml(startTitle)}" aria-label="${escapeHtml(startTitle)}"${starting ? " disabled" : ""}>
+      ${starting ? "Iniciando…" : "Correr scraping"}
+    </button>`);
+  }
   if (!actions.length) return badge;
   return `<div class="cron-group-action">${badge}${actions.join("")}</div>`;
 }
 
 async function startStore(button) {
-  const tienda = button.dataset.startStore;
+  const tienda = button.dataset.startStore || $("store-select")?.value || "";
   const mode = button.dataset.startMode || "";
   if (!tienda || button.disabled || startingStores.has(tienda)) return;
   startingStores.add(tienda);
+  button.dataset.busy = "1";
   button.disabled = true;
   const busyLabel = mode === "continue" ? "Continuando…" : mode === "restart" ? "Reiniciando…" : "Iniciando…";
-  const idleLabel = mode === "continue" ? "Continuar" : mode === "restart" ? "Reiniciar" : "Correr scraping";
   button.textContent = busyLabel;
   try {
     const body = { tienda };
@@ -206,8 +226,8 @@ async function startStore(button) {
     flash(error.message, false);
   } finally {
     startingStores.delete(tienda);
-    button.disabled = false;
-    button.textContent = idleLabel;
+    delete button.dataset.busy;
+    syncRunButton();
   }
   await refresh().catch((error) => flash(error.message, false));
 }
@@ -828,10 +848,59 @@ async function stopBasicScrape(button) {
 function syncRunButton() {
   const select = $("store-select");
   const button = $("store-run");
+  const formActions = $("store-scrape-actions");
   if (!select || !button || button.dataset.busy === "1") return;
-  const running = lastStoreJobs.some((job) => job.id === select.value && job.status === "running");
-  button.disabled = !select.value || running;
-  button.textContent = running ? "En curso" : "Correr scraping";
+  const tienda = select.value || "";
+  const job = lastStoreJobs.find((item) => item.id === tienda);
+  const status = job?.status || "idle";
+  const running = ["running", "paused"].includes(status);
+  const failed = ["failed", "stopped"].includes(status);
+  const processed = Number(job?.last_run?.processed) || 0;
+  const canContinue = failed && processed > 0;
+  const starting = Boolean(tienda && startingStores.has(tienda));
+  const title = job?.title || tienda;
+
+  button.dataset.startStore = tienda;
+  if (!tienda) {
+    button.disabled = true;
+    button.textContent = "Correr scraping";
+    button.dataset.startMode = "";
+  } else if (running || starting) {
+    button.disabled = true;
+    button.textContent = running ? "En curso" : "Iniciando…";
+    button.dataset.startMode = "";
+  } else if (canContinue) {
+    button.disabled = false;
+    button.textContent = "Continuar";
+    button.dataset.startMode = "continue";
+  } else if (failed || status === "done") {
+    button.disabled = false;
+    button.textContent = "Reiniciar";
+    button.dataset.startMode = "restart";
+  } else {
+    button.disabled = false;
+    button.textContent = "Correr scraping";
+    button.dataset.startMode = "";
+  }
+
+  if (formActions) {
+    const bits = [];
+    if (running && tienda) {
+      const stopping = stoppingStores.has(tienda) || job?.progress?.phase === "stopping";
+      const stopTitle = `Detener scraping de ${title}`;
+      bits.push(`<button type="button" class="secondary cron-stop" data-stop-store="${escapeHtml(tienda)}"
+        title="${escapeHtml(stopTitle)}" aria-label="${escapeHtml(stopTitle)}"${stopping ? " disabled" : ""}>
+        ${stopping ? "Deteniendo…" : "Detener"}
+      </button>`);
+    } else if (canContinue && tienda) {
+      const restartTitle = `Reiniciar scraping de ${title} desde el comienzo`;
+      bits.push(`<button type="button" class="secondary cron-restart" data-start-store="${escapeHtml(tienda)}" data-start-mode="restart"
+        title="${escapeHtml(restartTitle)}" aria-label="${escapeHtml(restartTitle)}"${starting ? " disabled" : ""}>
+        ${starting ? "Iniciando…" : "Reiniciar"}
+      </button>`);
+    }
+    formActions.innerHTML = bits.join("");
+  }
 }
 
 function render(payload) {
@@ -861,19 +930,20 @@ function render(payload) {
 
   const groups = payload.groups || [];
   if (!groups.length) {
-    $("cron-body").innerHTML = `<tr><td colspan="5" class="muted">No hay grupos de tiendas.</td></tr>`;
+    $("cron-body").innerHTML = `<tr><td colspan="6" class="muted">No hay grupos de tiendas.</td></tr>`;
     return;
   }
   $("cron-body").innerHTML = groups
     .map(
       (group) => `
-    <tr data-status="${escapeHtml(group.status)}">
+    <tr data-status="${escapeHtml(normalizedGroupStatus(group.status))}">
       <td>
         <strong>${escapeHtml(group.title || group.id)}</strong>
         <div class="muted">${escapeHtml(group.id)} · ${group.store_count || 0} tiendas</div>
       </td>
       <td>${escapeHtml(group.schedule?.label || "—")}</td>
-      <td>${groupStatusCell(group, sched.paused)}</td>
+      <td>${groupStatusCell(group)}</td>
+      <td>${groupActionsCell(group, sched.paused)}</td>
       <td>${progressCell(group)}</td>
       <td>${lastRunCell(group)}</td>
     </tr>`
@@ -982,27 +1052,11 @@ document.addEventListener("click", (event) => {
 
 $("store-scrape-form")?.addEventListener("submit", async (event) => {
   event.preventDefault();
-  const tienda = $("store-select").value;
-  if (!tienda) return;
   const button = $("store-run");
-  button.dataset.busy = "1";
-  button.disabled = true;
-  button.textContent = "Iniciando…";
-  try {
-    const result = await json("/api/admin/store-scrape", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ tienda }),
-    });
-    flash(result.message || "Scraping iniciado.");
-    watchUntil = Date.now() + 60000;
-    await refresh();
-  } catch (error) {
-    flash(error.message, false);
-  } finally {
-    delete button.dataset.busy;
-    syncRunButton();
-  }
+  const tienda = $("store-select")?.value;
+  if (!button || !tienda) return;
+  button.dataset.startStore = tienda;
+  await startStore(button);
 });
 
 refresh().catch((error) => flash(error.message, false));
