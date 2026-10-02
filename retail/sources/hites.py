@@ -23,10 +23,42 @@ SORT_MAP = {
 }
 _GTM_RE = re.compile(r'data-gtmselectitem="([^"]+)"')
 _HREF_RE = re.compile(r'href="(/[^"]+-(\d+)\.html)"')
-_IMAGE_RE = re.compile(
-    r'<img\b[^>]*\bsrc="([^"]*/pim/(\d+)/[^"]+)"',
+# Formato antiguo: /pim/978689001/978689001_1.jpg
+# Formato nuevo: .../images/original/television-y-video/961015001_1.jpg
+_IMG_TAG_RE = re.compile(r"<img\b[^>]*>", re.I)
+_IMG_SRC_RE = re.compile(r'\bsrc="([^"]+)"', re.I)
+_IMG_PID_RE = re.compile(
+    r"/pim/(\d+)/|/(?:images/original/[^\"?]*/)?(\d{6,})(?:_\d+)?\.(?:jpe?g|png|webp)",
     re.I,
 )
+
+
+def _product_id_from_image_url(url: str) -> str | None:
+    match = _IMG_PID_RE.search(url or "")
+    if not match:
+        return None
+    return match.group(1) or match.group(2)
+
+
+def _collect_hites_images(html_text: str) -> dict[str, str]:
+    """Primera imagen de producto por ID (tile o galería)."""
+    images: dict[str, str] = {}
+    for tag in _IMG_TAG_RE.findall(html_text):
+        src_match = _IMG_SRC_RE.search(tag)
+        if not src_match:
+            continue
+        image_url = html.unescape(src_match.group(1))
+        lowered = tag.lower()
+        # Evita logos/ribbons; acepta tiles y cualquier imagen con ID de producto.
+        if "product-warranty" in lowered or "ribbon-" in lowered:
+            continue
+        pid = _product_id_from_image_url(image_url)
+        if not pid:
+            continue
+        if "tile-image" not in lowered and "js-image" not in lowered and "/pim/" not in image_url and "mastercatalog" not in image_url:
+            continue
+        images.setdefault(pid, image_url)
+    return images
 
 
 def parse_hites_target(value: str) -> Target:
@@ -53,9 +85,7 @@ def parse_hites_grid(html_text: str) -> list[dict[str, Any]]:
     hrefs = {pid: urljoin(BASE + "/", path) for path, pid in _HREF_RE.findall(html_text)}
     # Cada tarjeta puede traer una galería (js-image1, js-image2, ...). El mapa
     # conserva la primera URL no vacía que aparece para el ID del producto.
-    images: dict[str, str] = {}
-    for image_url, pid in _IMAGE_RE.findall(html_text):
-        images.setdefault(pid, html.unescape(image_url))
+    images = _collect_hites_images(html_text)
 
     def image_for(pid: str) -> str | None:
         direct = images.get(pid)

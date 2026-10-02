@@ -66,6 +66,25 @@ def test_parse_hites_search_and_grid():
     assert rows[0]["image"] == "https://www.hites.com/dw/image/pim/978689001/978689001_1.jpg?sw=306&sh=306"
 
 
+def test_hites_grid_reads_mastercatalog_tile_images():
+    html = (
+        '<a href="/led-43-akai-google-tv-961015001.html"></a>'
+        '<img class="img-fluid w-100 tile-image js-image1" '
+        'src="https://www.hites.com/dw/image/v2/BDPN_PRD/on/demandware.static/-/Sites-mastercatalog_HITES/'
+        'default/dw43aa395e/images/original/television-y-video/961015001_1.jpg?sw=306&amp;sh=306">'
+        '<img class="img-fluid w-100 tile-image js-image2 d-none" '
+        'src="https://www.hites.com/dw/image/v2/BDPN_PRD/on/demandware.static/-/Sites-mastercatalog_HITES/'
+        'default/dw71075a5d/images/original/television-y-video/961015001_2.jpg?sw=306&amp;sh=306">'
+        '<div data-gtmselectitem="{&quot;item&quot;:{&quot;item_id&quot;:&quot;961015001&quot;,'
+        '&quot;item_name&quot;:&quot;Led 43 Akai&quot;,&quot;price&quot;:149990}}"></div>'
+    )
+    rows = parse_hites_grid(html)
+    assert len(rows) == 1
+    assert rows[0]["pid"] == "961015001"
+    assert "961015001_1.jpg" in rows[0]["image"]
+    assert "mastercatalog_HITES" in rows[0]["image"]
+
+
 def test_hites_uses_first_variant_image_when_item_id_is_shorter():
     html = (
         '<a href="/zapatilla-953407.html"></a>'
