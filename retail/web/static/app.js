@@ -84,6 +84,11 @@ function renderCategoryShortcuts(categories) {
   }
 }
 
+/** True after /api/stores has populated #stores (even if the admin filters UI is hidden). */
+let storesReady = false;
+/** Query waiting for fillStores when the user searches before checkboxes exist. */
+let pendingSearchQuery = null;
+
 function selectedStores() {
   return [...document.querySelectorAll("#stores input[type=checkbox]:checked")].map((item) => item.value);
 }
@@ -211,6 +216,10 @@ function fillStores(stores) {
     .join("");
   syncGroupToggles();
   updateExploreFilterBadge();
+  storesReady = true;
+  const queued = pendingSearchQuery;
+  pendingSearchQuery = null;
+  if (queued) runSearch(queued);
 }
 
 function fillHistory(items) {
@@ -1244,11 +1253,22 @@ function runSearch(query) {
     renderExpandedSearchOffer();
   };
   if (!stores.length) {
+    // First paint / header submit often races refreshMeta(): #stores is still empty.
+    // Queue the query and resume from fillStores instead of a false "elige tienda" error.
+    if (!storesReady) {
+      pendingSearchQuery = query;
+      setSearching(false);
+      $("summary").hidden = false;
+      $("summary").className = "summary";
+      $("summary").textContent = "Cargando tiendas…";
+      return;
+    }
     setSearching(false);
     $("summary").hidden = false;
     $("summary").innerHTML = "<p class='err'>Elige al menos una tienda.</p>";
     return;
   }
+  pendingSearchQuery = null;
   currentSearchId = (crypto.randomUUID && crypto.randomUUID()) || `s${Date.now()}`;
   $("summary").hidden = false;
   $("summary").className = "summary";
@@ -1460,6 +1480,8 @@ refreshMeta()
     const start = new URLSearchParams(location.search);
     const query = start.get("q")?.trim() || "";
     if (!query) return;
+    // fillStores may have already flushed the same queued header submit.
+    if (currentQuery === query && storeChecks().length) return;
     const checkbox = document.querySelector('.desktop-quick-search input[name="quick"]');
     if (checkbox) checkbox.checked = start.get("quick") !== "0";
     const headerInput = document.querySelector('.desktop-quick-search input[name="q"]');
@@ -1469,4 +1491,11 @@ refreshMeta()
   })
   .catch((error) => {
     console.error(error.message);
+    storesReady = true;
+    if (pendingSearchQuery) {
+      pendingSearchQuery = null;
+      setSearching(false);
+      $("summary").hidden = false;
+      $("summary").innerHTML = "<p class='err'>No se pudieron cargar las tiendas. Vuelve a intentar.</p>";
+    }
   });

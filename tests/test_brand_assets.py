@@ -173,6 +173,22 @@ def test_unchecked_quick_search_from_other_pages_opens_store_search():
     assert "runSearch(query);" in app
 
 
+def test_first_search_waits_for_stores_before_elige_tienda_error():
+    """Header submit must not show 'Elige al menos una tienda' before fillStores."""
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    page = (STATIC / "index.html").read_text(encoding="utf-8")
+    assert "let storesReady = false;" in app
+    assert "let pendingSearchQuery = null;" in app
+    assert "if (!storesReady)" in app
+    assert "pendingSearchQuery = query;" in app
+    assert 'textContent = "Cargando tiendas…";' in app
+    assert "storesReady = true;" in app
+    assert "if (queued) runSearch(queued);" in app
+    # Real empty selection still surfaces the Spanish error after stores load.
+    assert "Elige al menos una tienda." in app
+    assert "app.js?v=51" in page
+
+
 def test_empty_quick_search_offers_an_expanded_store_search():
     script = (STATIC / "app.js").read_text(encoding="utf-8")
     styles = (STATIC / "styles.css").read_text(encoding="utf-8")
