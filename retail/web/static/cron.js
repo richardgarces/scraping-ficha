@@ -659,7 +659,6 @@ function renderStoreJobs(payload) {
           const processed = job.progress?.processed ?? job.last_run?.processed ?? 0;
           const items = job.progress?.items ?? job.last_run?.items ?? 0;
           const query = job.progress?.current_query;
-          const base = items
           const label = job.title || (typeof publicStoreLabel === "function" ? publicStoreLabel(job.id) : job.id);
           const base = items
             ? `${label}: ${processed}/${items} productos`
