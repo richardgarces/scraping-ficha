@@ -811,15 +811,13 @@ function patternMarkup(patterns) {
 function renderForecast(summary, patterns = []) {
   const panel = $("forecast-panel");
   if (!panel) return;
-  panel.hidden = false;
+  panel.open = false;
   if (!summary) {
-    panel.open = false;
     $("forecast-content").innerHTML = `
       <p class="muted">Todavía no hay un pronóstico para este producto. Se necesitan al menos 30 días de precios válidos.</p>
       ${patternMarkup(patterns)}`;
     return;
   }
-  panel.open = true;
   const trend = FORECAST_TRENDS[summary.trend] || FORECAST_TRENDS.stable;
   const rangeNote = summary.range_has_uncertainty
     ? "Rango de incertidumbre calculado por el modelo."
@@ -837,19 +835,12 @@ function renderForecast(summary, patterns = []) {
 async function loadForecast(store, id) {
   const panel = $("forecast-panel");
   if (!panel) return;
-  panel.hidden = true; // start hidden until permissions checked
   panel.open = false;
-  $("forecast-content").innerHTML = `<p class="muted">Buscando un pronóstico disponible…</p>`;
   try {
     const user = await ensureUser();
-    // Only show the experimental forecast to authenticated users.
-    // Admins are included by virtue of being logged-in.
-    if (!user) {
-      // not logged in: do not show panel
-      return;
-    }
-    // permission granted: show panel and proceed to load forecast
+    if (user?.role !== "admin") return;
     panel.hidden = false;
+    $("forecast-content").innerHTML = `<p class="muted">Buscando un pronóstico disponible…</p>`;
     const params = new URLSearchParams({ store });
     const response = await fetch(`/api/forecasts/${encodeURIComponent(id)}?${params}`);
     if (response.status === 404) {

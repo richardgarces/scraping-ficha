@@ -110,3 +110,13 @@ def test_product_comparison_is_only_shown_to_logged_in_users() -> None:
     assert "data-auth hidden" in script
     assert "mountCompareAccess()" in script
     assert 'link.hidden = !user' in script
+
+
+def test_product_forecast_panel_is_admin_only_and_collapsed_by_default() -> None:
+    page = Path("retail/web/static/producto.html").read_text(encoding="utf-8")
+    script = Path("retail/web/static/producto.js").read_text(encoding="utf-8")
+    assert 'id="forecast-panel" data-admin hidden' in page
+    assert '<details class="panel forecast-panel"' in page
+    assert 'user?.role !== "admin"' in script
+    assert "panel.open = false" in script
+    assert "panel.open = true" not in script
