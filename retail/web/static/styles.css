@@ -1254,9 +1254,34 @@ button.secondary:hover { border-color: color-mix(in srgb, var(--accent) 40%, var
   .chart-mode { width: 100%; }
   .chart-mode .secondary { flex: 1 1 50%; }
 }
-.forecast-title { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.forecast-panel > summary.forecast-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+.forecast-panel > summary.forecast-title::-webkit-details-marker,
+.forecast-panel > summary.forecast-title::marker { display: none; content: ""; }
+.forecast-title-main { display: flex; align-items: center; gap: 12px; min-width: 0; }
 .forecast-title h2 { margin: 0; }
-.forecast-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-top: 14px; }
+.forecast-toggle-label {
+  margin-left: auto;
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+.forecast-toggle-label::before { content: "Mostrar"; }
+.forecast-panel[open] > summary .forecast-toggle-label::before { content: "Ocultar"; }
+.forecast-panel[open] > summary.forecast-title {
+  margin-bottom: 14px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line);
+}
+.forecast-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-top: 0; }
 .forecast-stat { display: grid; align-content: start; gap: 6px; padding: 14px; border: 1px solid var(--line); border-radius: 14px; background: var(--panel-2); }
 .forecast-stat span, .forecast-stat small { color: var(--muted); }
 .forecast-stat span { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; }
