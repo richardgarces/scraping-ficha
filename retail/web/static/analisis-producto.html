@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#258fdf">
   <title>Análisis de producto</title>
   <script>(function(){var m=localStorage.getItem("retail-theme");if(m==="day"||m==="night"){document.documentElement.dataset.theme=m;return;}var h=new Date().getHours();document.documentElement.dataset.theme=(h>=7&&h<19)?"day":"night";})();</script>
-  <link rel="stylesheet" href="/static/styles.css?v=68">
+  <link rel="stylesheet" href="/static/styles.css?v=76">
 </head>
 <body>
   <header class="top">
@@ -54,11 +54,11 @@
   <main class="settings">
     <section class="panel">
       <h2>Consultar precio</h2>
-      <p class="muted">Busca el producto nuevamente en las tiendas relacionadas. Se muestra la cantidad exacta cuando la tienda la publica; si solo informa disponibilidad, se indica sin inventar una cifra.</p>
+      <p class="muted">Pega la URI de una ficha o busca por nombre, modelo, SKU o código de barras. Se consulta en las tiendas relacionadas y se muestra la cantidad exacta cuando la tienda la publica; si solo informa disponibilidad, se indica sin inventar una cifra.</p>
       <form id="analysis-form" class="analysis-form">
-        <label for="analysis-query">Nombre, modelo, SKU o código de barras</label>
+        <label for="analysis-query">URI de ficha, nombre, modelo, SKU o código de barras</label>
         <div class="analysis-search">
-          <input id="analysis-query" name="query" type="search" minlength="2" maxlength="160" placeholder="Ej.: Samsung Galaxy S25 256GB" required autofocus>
+          <input id="analysis-query" name="query" type="search" minlength="2" maxlength="500" placeholder="Ej.: /producto?store=dolly&amp;id=9227 o Samsung Galaxy S25" required autofocus>
           <button id="analysis-submit" type="submit">Analizar ahora</button>
         </div>
         <label class="check" data-admin hidden><input id="analysis-live" type="checkbox" checked> Consultar las tiendas ahora</label>
@@ -76,6 +76,6 @@
     <div id="analysis-results" class="analysis-results"></div>
   </main>
   <script src="/static/prices.js?v=27"></script>
-  <script src="/static/analisis-producto.js?v=6"></script>
+  <script src="/static/analisis-producto.js?v=7"></script>
 </body>
 </html>

@@ -2,10 +2,57 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from typing import Any
+from urllib.parse import parse_qs, unquote, urlparse
 
 
 OUT_OF_STOCK = ("sin stock", "agotado", "no disponible", "out of stock", "unavailable")
 IN_STOCK = ("en stock", "disponible", "available", "in stock")
+FICHA_QUERY_MAX = 500
+TEXT_QUERY_MAX = 160
+
+
+def parse_ficha_ref(raw: str) -> tuple[str, str] | None:
+    """Detecta URI de ficha `/producto?store=…&id=…` (absoluta o relativa)."""
+    text = " ".join(str(raw or "").split()).strip()
+    if not text or len(text) > FICHA_QUERY_MAX:
+        return None
+
+    candidate = text
+    lowered = text.casefold()
+    if lowered.startswith("/producto?") or lowered.startswith("/producto#"):
+        candidate = f"https://local.invalid{text}"
+    elif lowered.startswith("producto?"):
+        candidate = f"https://local.invalid/{text}"
+    elif "://" not in text and "/producto?" in lowered:
+        # Pegaron host+ruta sin esquema, p. ej. precios.meincart.cl/producto?...
+        candidate = f"https://{text.lstrip('/')}"
+    elif "://" not in text:
+        return None
+
+    try:
+        parsed = urlparse(candidate)
+    except ValueError:
+        return None
+
+    if parsed.scheme and parsed.scheme not in {"http", "https"}:
+        return None
+    path = (parsed.path or "").rstrip("/") or "/"
+    if path.casefold() != "/producto":
+        return None
+
+    params = parse_qs(parsed.query, keep_blank_values=False)
+    store = unquote((params.get("store") or [""])[0]).strip().lower()[:80]
+    product_id = unquote((params.get("id") or [""])[0]).strip()[:180]
+    if not store or not product_id:
+        return None
+    return store, product_id
+
+
+def analysis_search_text(document: dict[str, Any]) -> str:
+    """Texto de búsqueda a partir del producto semilla de una ficha."""
+    from retail.ficha_sweep import search_query
+
+    return search_query(document)
 
 
 def _quantity(value: Any) -> int | None:

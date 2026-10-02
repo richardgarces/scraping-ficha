@@ -98,6 +98,29 @@
     </section>`).join("");
   }
 
+  function setAnalysisBusy(on) {
+    const label = "Analizando…";
+    form.classList.toggle("is-busy", Boolean(on));
+    form.setAttribute("aria-busy", on ? "true" : "false");
+    query.disabled = Boolean(on);
+    if (on) {
+      if (!submit.dataset.idleLabel) {
+        submit.dataset.idleLabel = (submit.textContent || "Analizar ahora").replace(/\s+/g, " ").trim() || "Analizar ahora";
+      }
+      submit.disabled = true;
+      submit.setAttribute("aria-busy", "true");
+      submit.setAttribute("aria-label", label);
+      submit.innerHTML = `<span class="spinner" aria-hidden="true"></span><span>${label}</span>`;
+      return;
+    }
+    submit.disabled = false;
+    const idle = submit.dataset.idleLabel || "Analizar ahora";
+    submit.removeAttribute("aria-busy");
+    submit.setAttribute("aria-label", idle);
+    submit.textContent = idle;
+    delete submit.dataset.idleLabel;
+  }
+
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     currentUser = await ensureUser();
@@ -106,8 +129,7 @@
     error.hidden = true;
     summary.hidden = true;
     results.innerHTML = "";
-    submit.disabled = true;
-    submit.textContent = "Analizando…";
+    setAnalysisBusy(true);
     status.textContent = live
       ? "Consultando. Esto puede tardar algunos segundos…"
       : "Buscando en los datos guardados…";
@@ -124,14 +146,14 @@
       }
       if (!response.ok) throw new Error(data.detail || "No se pudo realizar el análisis.");
       render(data);
-      status.textContent = `Análisis terminado: ${data.store_count || 0} tiendas encontradas.`;
+      const seedHint = data.seed?.name ? ` Semilla: ${data.seed.name}.` : "";
+      status.textContent = `Análisis terminado: ${data.store_count || 0} tiendas encontradas.${seedHint}`;
     } catch (reason) {
       error.hidden = false;
       error.textContent = reason.message || "No se pudo realizar el análisis.";
       status.textContent = "";
     } finally {
-      submit.disabled = false;
-      submit.textContent = "Analizar ahora";
+      setAnalysisBusy(false);
     }
   });
 

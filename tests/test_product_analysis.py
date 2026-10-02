@@ -3,7 +3,7 @@ from pathlib import Path
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
-from retail.product_analysis import build_product_analysis, stock_state
+from retail.product_analysis import build_product_analysis, parse_ficha_ref, stock_state
 from retail.web.app import app
 
 
@@ -16,6 +16,18 @@ def test_stock_state_does_not_invent_quantities():
     assert stock_state(None, None)["quantity_kind"] == "unknown"
     assert stock_state(None, {"message": "Disponible para despacho"})["availability"] == "Disponible para despacho"
     assert stock_state(None, {"available": False})["availability"] == "Sin stock"
+
+
+def test_parse_ficha_ref_accepts_absolute_relative_and_host_without_scheme():
+    assert parse_ficha_ref("https://precios.meincart.cl/producto?store=dolly&id=9227") == ("dolly", "9227")
+    assert parse_ficha_ref("/producto?store=Dolly&id=9227") == ("dolly", "9227")
+    assert parse_ficha_ref("producto?store=dolly&id=9227") == ("dolly", "9227")
+    assert parse_ficha_ref("precios.meincart.cl/producto?id=9227&store=dolly") == ("dolly", "9227")
+    assert parse_ficha_ref("https://precios.meincart.cl/producto?store=thelab&id=sku%201") == ("thelab", "sku 1")
+    assert parse_ficha_ref("Samsung Galaxy S25") is None
+    assert parse_ficha_ref("https://www.paris.cl/producto/algo") is None
+    assert parse_ficha_ref("/producto?store=dolly") is None
+    assert parse_ficha_ref("") is None
 
 
 def test_analysis_groups_stores_prices_and_stock():
@@ -74,6 +86,8 @@ def test_product_analysis_page_and_api_require_login(monkeypatch):
     assert "Análisis de producto" in html
     assert "<h2>Consultar precio</h2>" in html
     assert "Consultar precio y existencias" not in html
+    assert "URI de ficha, nombre, modelo, SKU o código de barras" in html
+    assert 'maxlength="500"' in html
     assert 'data-admin hidden><input id="analysis-live"' in html
     assert "/api/product-analysis" in script
     assert "currentUser?.role === \"admin\"" in script
@@ -81,6 +95,9 @@ def test_product_analysis_page_and_api_require_login(monkeypatch):
     assert "Cantidad" in script
     assert "Todo medio" in script
     assert 'const adminHeaders = currentUser?.role === "admin"' in script
+    assert "setAnalysisBusy" in script
+    assert 'class="spinner"' in script
+    assert "Analizando…" in script
 
 
 def test_product_analysis_api_returns_shaped_results(monkeypatch):
@@ -105,6 +122,67 @@ def test_product_analysis_api_returns_shaped_results(monkeypatch):
     body = response.json()
     assert body["store_count"] == 1
     assert body["groups"][0]["offers"][0]["quantity"] == 3
+
+
+def test_product_analysis_api_resolves_ficha_uri_to_seed_name(monkeypatch):
+    class Repo:
+        def product_detail(self, store, product_id):
+            assert store == "dolly"
+            assert product_id == "9227"
+            return {
+                "store": "dolly",
+                "product_id": "9227",
+                "name": "Silla ergonómica Dolly Pro",
+                "brand": "Dolly",
+            }
+
+        def close(self):
+            return None
+
+    calls = []
+    monkeypatch.setattr("retail.web.admin_analysis_api.repo_or_503", lambda: Repo())
+    monkeypatch.setattr(
+        "retail.web.admin_analysis_api.current_user",
+        lambda *args, **kwargs: {"id": "1", "role": "admin"},
+    )
+    monkeypatch.setattr(
+        "retail.web.admin_analysis_api.search_products",
+        lambda query, **kwargs: calls.append(query) or {
+            "query": query,
+            "groups": [{"name": query, "offers": [{"store": "dolly", "product_id": "9227", "price": 19990, "stock": 2}]}],
+        },
+    )
+    response = TestClient(app).post(
+        "/api/product-analysis",
+        json={"query": "https://precios.meincart.cl/producto?store=dolly&id=9227", "live": False},
+    )
+    assert response.status_code == 200
+    assert calls == ["Silla ergonómica Dolly Pro"]
+    body = response.json()
+    assert body["seed"] == {"store": "dolly", "product_id": "9227", "name": "Silla ergonómica Dolly Pro"}
+    assert body["resolved_query"] == "Silla ergonómica Dolly Pro"
+    assert body["store_count"] == 1
+
+
+def test_product_analysis_api_rejects_unknown_ficha(monkeypatch):
+    class Repo:
+        def product_detail(self, store, product_id):
+            return None
+
+        def close(self):
+            return None
+
+    monkeypatch.setattr("retail.web.admin_analysis_api.repo_or_503", lambda: Repo())
+    monkeypatch.setattr(
+        "retail.web.admin_analysis_api.current_user",
+        lambda *args, **kwargs: {"id": "1", "role": "admin"},
+    )
+    response = TestClient(app).post(
+        "/api/product-analysis",
+        json={"query": "/producto?store=dolly&id=999999", "live": False},
+    )
+    assert response.status_code == 404
+    assert "guardado" in response.json()["detail"]
 
 
 def test_regular_user_can_analyze_saved_data_but_not_query_stores(monkeypatch):

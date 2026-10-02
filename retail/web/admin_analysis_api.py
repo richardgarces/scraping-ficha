@@ -6,7 +6,13 @@ import uuid
 from fastapi import APIRouter, HTTPException, Request
 from starlette.concurrency import run_in_threadpool
 
-from retail.product_analysis import build_product_analysis
+from retail.product_analysis import (
+    FICHA_QUERY_MAX,
+    TEXT_QUERY_MAX,
+    analysis_search_text,
+    build_product_analysis,
+    parse_ficha_ref,
+)
 from retail.registry import list_stores
 from retail.search import SEARCH_TIMEOUT, search_products
 from retail.stock_validation import validate_result_stock
@@ -40,22 +46,43 @@ def _entity_products(body: dict) -> list[tuple[str, str]]:
     return products
 
 
+def _resolve_analysis_query(repo, raw_query: str) -> tuple[str, dict | None]:
+    """URI de ficha → nombre del producto semilla; texto libre se deja igual."""
+    query = " ".join(str(raw_query or "").split()).strip()
+    if len(query) < 2:
+        raise HTTPException(status_code=400, detail="Escribe un producto o pega la URI de su ficha.")
+    ficha = parse_ficha_ref(query)
+    if ficha is None:
+        if len(query) > TEXT_QUERY_MAX:
+            raise HTTPException(status_code=400, detail="La búsqueda es demasiado larga.")
+        return query, None
+    if len(query) > FICHA_QUERY_MAX:
+        raise HTTPException(status_code=400, detail="La URI de ficha es demasiado larga.")
+    store, product_id = ficha
+    document = repo.product_detail(store, product_id)
+    if document is None:
+        raise HTTPException(status_code=404, detail="No tenemos ese producto guardado.")
+    search_text = analysis_search_text(document)
+    if len(search_text) < 2:
+        raise HTTPException(
+            status_code=400,
+            detail="Ese producto no tiene nombre para buscar comparables.",
+        )
+    return search_text, {"store": store, "product_id": product_id, "name": document.get("name")}
+
+
 async def _product_analysis(request: Request, *, admin_only: bool = False) -> dict:
+    body = await request.json()
+    live = body.get("live") is True
     repo = repo_or_503()
     try:
         user = current_user(request, repo, required=True, admin=admin_only) or {}
+        if live and user.get("role") != "admin":
+            raise HTTPException(status_code=403, detail="Solo el administrador puede consultar las tiendas ahora.")
+        query, seed = _resolve_analysis_query(repo, body.get("query") or "")
     finally:
         repo.close()
 
-    body = await request.json()
-    query = " ".join(str(body.get("query") or "").split())
-    if len(query) < 2:
-        raise HTTPException(status_code=400, detail="Escribe un producto para analizar.")
-    if len(query) > 160:
-        raise HTTPException(status_code=400, detail="La búsqueda es demasiado larga.")
-    live = body.get("live") is True
-    if live and user.get("role") != "admin":
-        raise HTTPException(status_code=403, detail="Solo el administrador puede consultar las tiendas ahora.")
     try:
         result = await run_in_threadpool(
             partial(
@@ -78,6 +105,9 @@ async def _product_analysis(request: Request, *, admin_only: bool = False) -> di
         await run_in_threadpool(validate_result_stock, result)
     titles = {spec.id: spec.title for spec in list_stores()}
     payload = build_product_analysis(result, titles)
+    if seed:
+        payload["seed"] = seed
+        payload["resolved_query"] = query
     if user.get("role") != "admin":
         payload.pop("exact_quantity_count", None)
         for group in payload.get("groups") or []:
