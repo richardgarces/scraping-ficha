@@ -17,6 +17,7 @@ from urllib.request import HTTPSHandler, Request
 
 from retail.batch.config import load_channels
 from retail.batch.rules import Alert
+from retail.offer_screenshot import apply_offer_screenshot, is_local_image
 from retail.short_links import attach_short_url, public_product_url, short_product_url
 
 DEFAULT_LOG = Path("output/alerts.jsonl")
@@ -79,7 +80,11 @@ def send_digest(alerts: list[Alert], channels: list[str], *, title: str, top: in
     if not destinos:
         return []
     texto = digest_text(alerts, title=title, top=top)
-    image_url = next((alert.image_url for alert in sorted(alerts, key=lambda item: -(item.saving or 0)) if alert.image_url), None)
+    top_alert = next(iter(sorted(alerts, key=lambda item: -(item.saving or 0))), None)
+    image_url = None
+    if top_alert is not None:
+        media = apply_offer_screenshot(_payload(top_alert))
+        image_url = media.get("image_url") or top_alert.image_url
     enviados = []
     for destino in destinos:
         if destino == "telegram":
@@ -180,7 +185,7 @@ def dispatch_alerts(
 ) -> list[str]:
     sent: list[str] = []
     for alert in deduplicate_product_alerts(alerts):
-        payload = attach_short_url(_payload(alert), repo)
+        payload = apply_offer_screenshot(attach_short_url(_payload(alert), repo))
         if "log" in channels:
             print(f"ALERTA [{alert.rule}] {alert.query}: {alert.message}")
             sent.append("log")
@@ -364,7 +369,11 @@ def product_email_html(
     price = payload.get("price")
     percent, reference = _discount(payload)
     saving = payload.get("saving")
-    image = _safe_http_url(payload.get("image_url"))
+    raw_image = payload.get("image_url")
+    if is_local_image(raw_image):
+        image = "cid:offer-screenshot"
+    else:
+        image = _safe_http_url(raw_image)
     ficha_url, store_url = _product_urls(payload)
     main_url = ficha_url or store_url
     old_price = reference or payload.get("previous_price") or payload.get("price_normal")
@@ -609,6 +618,7 @@ def dispatch_user_alerts(
     # Correo y push solo si el admin los activó en Medios de alerta.
     email_enabled = "email" in enabled
     push_enabled = "push" in enabled
+    media_cache: dict[str, dict[str, Any]] = {}
     delivered = 0
     for user in users:
         preferences = user.get("notification_preferences") or {}
@@ -621,8 +631,13 @@ def dispatch_user_alerts(
             if key in seen:
                 continue
             seen.add(key)
-            payload = attach_short_url(_payload(alert), repo)
+            if key not in media_cache:
+                media_cache[key] = apply_offer_screenshot(attach_short_url(_payload(alert), repo))
+            payload = media_cache[key]
             text = _notification_text(payload)
+            image_url = payload.get("image_url") or alert.image_url
+            # Push usa el payload original de producto; la captura es solo Telegram/correo.
+            push_payload = {**payload, "image_url": alert.image_url}
             user_id = str(user.get("_id") or user.get("id") or user.get("email") or "")
             if (
                 "telegram" in channels
@@ -637,7 +652,7 @@ def dispatch_user_alerts(
                     claimed = not repo or not hasattr(repo, "claim_user_notification_send") or repo.claim_user_notification_send(
                         user_id, "telegram", key, alert.price,
                     )
-                    if claimed and send_to_user(user, text, image_url=alert.image_url):
+                    if claimed and send_to_user(user, text, image_url=image_url):
                         delivered += 1
             email = str(user.get("email") or "").strip()
             if (
@@ -653,6 +668,7 @@ def dispatch_user_alerts(
                     email,
                     f"Oferta: {alert.name or alert.query}",
                     text,
+                    image_url=image_url if is_local_image(image_url) else None,
                     html=product_email_html(payload, eyebrow="Oferta detectada"),
                 ):
                     delivered += 1
@@ -668,7 +684,7 @@ def dispatch_user_alerts(
                 if claimed:
                     from retail.web_push import send_user_push
 
-                    if send_user_push(user, payload, repo=repo, tag=key):
+                    if send_user_push(user, push_payload, repo=repo, tag=key):
                         delivered += 1
     return delivered
 
@@ -811,7 +827,14 @@ def _send_telegram_result(
         return False, "No se pudo resolver el chat de Telegram."
     if image_url:
         caption = _telegram_caption(text)
-        payload = _telegram_api(token, "sendPhoto", {"chat_id": resolved, "photo": image_url, "caption": caption})
+        if is_local_image(image_url):
+            payload = _telegram_api_photo_file(
+                token, chat_id=resolved, path=Path(str(image_url)), caption=caption,
+            )
+        else:
+            payload = _telegram_api(
+                token, "sendPhoto", {"chat_id": resolved, "photo": image_url, "caption": caption},
+            )
         if not payload.get("ok"):
             detail = str(payload.get("description") or payload.get("error") or "sin respuesta")
             print(f"Telegram: la imagen no se pudo enviar ({detail}); se intenta solo texto.")
@@ -887,6 +910,56 @@ def _telegram_api(token: str, method: str, params: dict[str, str]) -> dict[str, 
         method="POST",
         headers={"Content-Type": "application/x-www-form-urlencoded"},
     )
+    return _telegram_request(request)
+
+
+def _telegram_api_photo_file(
+    token: str,
+    *,
+    chat_id: str,
+    path: Path,
+    caption: str,
+) -> dict[str, Any]:
+    """Sube un PNG/JPEG local con sendPhoto (multipart)."""
+    boundary = f"----RetailBoundary{os.urandom(8).hex()}"
+    chunks: list[bytes] = []
+
+    def field(name: str, value: str) -> None:
+        chunks.append(
+            (
+                f"--{boundary}\r\n"
+                f'Content-Disposition: form-data; name="{name}"\r\n\r\n'
+                f"{value}\r\n"
+            ).encode()
+        )
+
+    field("chat_id", chat_id)
+    if caption:
+        field("caption", caption)
+    filename = path.name or "offer.png"
+    mime = "image/png" if path.suffix.lower() == ".png" else "image/jpeg"
+    chunks.append(
+        (
+            f"--{boundary}\r\n"
+            f'Content-Disposition: form-data; name="photo"; filename="{filename}"\r\n'
+            f"Content-Type: {mime}\r\n\r\n"
+        ).encode()
+    )
+    try:
+        chunks.append(path.read_bytes())
+    except OSError as exc:
+        return {"ok": False, "error": str(exc)}
+    chunks.append(f"\r\n--{boundary}--\r\n".encode())
+    request = Request(
+        f"https://api.telegram.org/bot{token}/sendPhoto",
+        data=b"".join(chunks),
+        method="POST",
+        headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+    )
+    return _telegram_request(request)
+
+
+def _telegram_request(request: Request) -> dict[str, Any]:
     try:
         with _ipv4_open(request) as response:
             raw = response.read()
@@ -1085,9 +1158,27 @@ def send_email(
     message["From"] = _secret("SMTP_FROM", "smtp_from") or _secret("SMTP_USER", "smtp_user") or "ofertas@localhost"
     message["To"] = recipient
     message.set_content(body)
+    local_image = Path(str(image_url)) if is_local_image(image_url) else None
+
+    def _attach_local_image(html_body: str) -> None:
+        message.add_alternative(html_body, subtype="html")
+        if local_image is None or "cid:offer-screenshot" not in html_body:
+            return
+        html_part = message.get_payload()[-1]
+        try:
+            html_part.add_related(
+                local_image.read_bytes(),
+                maintype="image",
+                subtype="png" if local_image.suffix.lower() == ".png" else "jpeg",
+                cid="offer-screenshot",
+                filename=local_image.name,
+            )
+        except OSError as exc:
+            print(f"Correo: no se pudo adjuntar la captura ({exc})")
+
     if html:
-        message.add_alternative(html, subtype="html")
-    elif image_url:
+        _attach_local_image(html)
+    elif image_url and local_image is None:
         html_body = escape(body).replace("\n", "<br>\n")
         safe_image = escape(str(image_url), quote=True)
         message.add_alternative(
@@ -1095,6 +1186,13 @@ def send_email(
             f'style="display:block;max-width:420px;max-height:420px;object-fit:contain;margin-bottom:16px">'
             f'<div>{html_body}</div></body></html>',
             subtype="html",
+        )
+    elif local_image is not None:
+        html_body = escape(body).replace("\n", "<br>\n")
+        _attach_local_image(
+            f'<html><body><img src="cid:offer-screenshot" alt="Producto" '
+            f'style="display:block;max-width:420px;max-height:420px;object-fit:contain;margin-bottom:16px">'
+            f'<div>{html_body}</div></body></html>'
         )
     try:
         with smtplib.SMTP(host, int(os.environ.get("SMTP_PORT") or local.get("smtp_port") or 587), timeout=20) as smtp:

@@ -41,6 +41,8 @@ services:
   web:
     build:
       context: .
+      # Slim por defecto. Para capturas en alertas: dockerfile: Dockerfile.screenshots
+      # y OFFER_SCREENSHOTS=1 en .env (ver docs/offer_screenshots.md).
       dockerfile: Dockerfile
     container_name: precios-web
     restart: unless-stopped

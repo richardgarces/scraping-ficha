@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Any
 
 from retail.batch.alerts import _money, product_email_html, send_email
+from retail.offer_screenshot import apply_offer_screenshot, is_local_image
 from retail.short_links import attach_short_url, public_product_url
 
 def _as_int(value: Any) -> int | None:
@@ -124,6 +125,33 @@ def notify_price_changes(repo: Any, changes: list[dict[str, Any]]) -> int:
     sent = 0
     for change in changes:
         watchers = by_product.get((change["store"], change["product_id"])) or []
+        if not watchers:
+            continue
+        from retail.store_display import display_store
+
+        display_store_id, store_name = display_store(change)
+        direction = "Bajó de precio" if int(change["price"]) < int(change["previous_price"]) else "Subió de precio"
+        payload = {
+            **change,
+            "saving": max(0, int(change["previous_price"]) - int(change["price"])),
+            "message": f"El precio {direction.lower()} de {_money(change['previous_price'])} a {_money(change['price'])}.",
+            "extra": {
+                "product_id": change.get("product_id"),
+                "store_title": store_name,
+                "display_store": display_store_id,
+            },
+        }
+        attach_short_url(payload, repo)
+        original_image = payload.get("image_url")
+        apply_offer_screenshot(payload)
+        image_url = payload.get("image_url") or change.get("image_url")
+        change_with_link = {**change, "short_url": payload.get("short_url")}
+        subject, body = price_change_message(change_with_link)
+        send_kwargs = {
+            "log_skip": True,
+            "image_url": image_url if is_local_image(image_url) else None,
+            "html": product_email_html(payload, eyebrow="Producto que sigues", heading=direction),
+        }
         for alert in watchers:
             user_id = str(alert.get("user_id") or "")
 
@@ -145,27 +173,6 @@ def notify_price_changes(repo: Any, changes: list[dict[str, Any]]) -> int:
             if not email:
                 print("Alerta de precio: la cuenta no tiene correo; no se envía.")
                 continue
-            from retail.store_display import display_store
-
-            display_store_id, store_name = display_store(change)
-            direction = "Bajó de precio" if int(change["price"]) < int(change["previous_price"]) else "Subió de precio"
-            payload = {
-                **change,
-                "saving": max(0, int(change["previous_price"]) - int(change["price"])),
-                "message": f"El precio {direction.lower()} de {_money(change['previous_price'])} a {_money(change['price'])}.",
-                "extra": {
-                    "product_id": change.get("product_id"),
-                    "store_title": store_name,
-                    "display_store": display_store_id,
-                },
-            }
-            attach_short_url(payload, repo)
-            change_with_link = {**change, "short_url": payload.get("short_url")}
-            subject, body = price_change_message(change_with_link)
-            send_kwargs = {
-                "log_skip": True,
-                "html": product_email_html(payload, eyebrow="Producto que sigues", heading=direction),
-            }
             # Enviar por email y webhook/Telegram si están configurados.
             try:
                 if email_enabled and claim("email") and send_email(email, subject, body, **send_kwargs):
@@ -188,7 +195,7 @@ def notify_price_changes(repo: Any, changes: list[dict[str, Any]]) -> int:
             try:
                 from retail.batch.alerts import send_to_user
 
-                if claim("telegram") and send_to_user(repo.find_user_by_id(user_id) or {}, body, image_url=change.get("image_url")):
+                if claim("telegram") and send_to_user(repo.find_user_by_id(user_id) or {}, body, image_url=image_url):
                     sent += 1
             except Exception:
                 pass
@@ -197,12 +204,13 @@ def notify_price_changes(repo: Any, changes: list[dict[str, Any]]) -> int:
 
                 user = repo.find_user_by_id(user_id) or {}
                 prefs = user.get("notification_preferences") or {}
+                push_payload = {**payload, "image_url": original_image}
                 if (
                     "push" in (prefs.get("channels") or [])
                     and user.get("push_subscriptions")
                     and "push" in system_channels
                     and claim("push")
-                    and send_user_push(user, payload, repo=repo, tag=f"{change['store']}:{change['product_id']}")
+                    and send_user_push(user, push_payload, repo=repo, tag=f"{change['store']}:{change['product_id']}")
                 ):
                     sent += 1
             except Exception:

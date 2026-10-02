@@ -194,6 +194,8 @@ Con `digest` en `true` (lo predeterminado), Telegram y correo reciben **un solo 
 
 Si la tienda entrega una imagen del producto, las notificaciones de Telegram y correo incluyen la imagen de la mejor oferta. Si Telegram no puede descargarla, envía automáticamente el texto sin imagen.
 
+Opcional: con `OFFER_SCREENSHOTS=1` y Playwright/Chromium instalados, Telegram y correo adjuntan una captura de la página de la oferta (URL de la tienda o, si falta, la ficha pública). El push web no usa captura. Detalle en `docs/offer_screenshots.md`.
+
 `log` y `file` siguen registrando cada alerta por separado, así que no se pierde nada: el detalle completo queda en `output/alerts.jsonl` y en Mongo, y se ve en `/hoy`.
 
 Los productos que sigues desde `/siguiendo` son la excepción: esos avisan al instante por todos los canales, porque son los que pediste explícitamente.

@@ -21,6 +21,11 @@ dependencies = [
     "pywebpush>=2.0.0,<3.0.0",
 ]
 
+[project.optional-dependencies]
+screenshots = [
+    "playwright>=1.40.0",
+]
+
 [project.scripts]
 retail = "retail.cli:unified_main"
 falabella = "retail.cli:main_falabella"

@@ -270,6 +270,7 @@ def dispatch_predictive_alerts(repo: Any) -> dict[str, Any]:
 
     from retail.batch.alerts import _notification_text, product_email_html, send_email, send_to_user
     from retail.batch.rules import load_rules
+    from retail.offer_screenshot import apply_offer_screenshot, is_local_image
     from retail.short_links import attach_short_url
 
     users = [
@@ -316,6 +317,9 @@ def dispatch_predictive_alerts(repo: Any) -> dict[str, Any]:
             "message": message, "url": product.get("url"), "image_url": product.get("image_url"),
         }
         attach_short_url(payload, repo)
+        original_image = payload.get("image_url")
+        apply_offer_screenshot(payload)
+        image_url = payload.get("image_url") or product.get("image_url")
         text = _notification_text(payload)
         entity_key = str(product.get("compare_code") or f"product:{forecast.get('store')}:{forecast.get('product_id')}")
         for user in users:
@@ -330,7 +334,7 @@ def dispatch_predictive_alerts(repo: Any) -> dict[str, Any]:
                     user_id, "telegram", entity_key, product.get("price"),
                 )
                 if claimed:
-                    delivered = send_to_user(user, text, image_url=product.get("image_url")) or delivered
+                    delivered = send_to_user(user, text, image_url=image_url) or delivered
             email = str(user.get("email") or "").strip()
             if email_enabled and "email" in channels and email:
                 claimed = not hasattr(repo, "claim_user_notification_send") or repo.claim_user_notification_send(
@@ -341,6 +345,7 @@ def dispatch_predictive_alerts(repo: Any) -> dict[str, Any]:
                     email,
                     f"Pronóstico de precio: {forecast.get('name') or 'producto'}",
                     text,
+                    image_url=image_url if is_local_image(image_url) else None,
                     html=product_email_html(payload, eyebrow="Estimación de precio", heading=heading),
                 )) or delivered
             if push_enabled and "push" in channels and user.get("push_subscriptions"):
@@ -350,7 +355,8 @@ def dispatch_predictive_alerts(repo: Any) -> dict[str, Any]:
                     user_id, "push", entity_key, product.get("price"),
                 )
                 if claimed:
-                    delivered = send_user_push(user, payload, repo=repo, tag=entity_key) or delivered
+                    push_payload = {**payload, "image_url": original_image}
+                    delivered = send_user_push(user, push_payload, repo=repo, tag=entity_key) or delivered
             if delivered:
                 sends.insert_one({**key, "sent_at": datetime.now(timezone.utc), "channels": channels})
                 sent += 1

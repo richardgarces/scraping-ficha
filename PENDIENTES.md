@@ -23,7 +23,7 @@ Este documento reúne trabajo pendiente o que todavía requiere validación. Una
 - [ ] Validar el scraper de Tika Foods con toda la colección de ofertas y comprobar precios, stock, imágenes y enlaces.
 - [ ] Completar y validar la integración de Mercado Libre Chile mediante una alternativa permitida y estable, idealmente su API oficial.
 - [ ] Validar las fuentes de automóviles nuevos y usados, incluyendo todas las categorías autorizadas de cada sitio.
-- [ ] Definir retención, almacenamiento y actualización de capturas de pantalla de las páginas donde se detectan ofertas.
+- [x] Definir retención, almacenamiento y actualización de capturas de pantalla de las páginas donde se detectan ofertas (`retail/offer_screenshot.py`, `output/offer_screenshots/`, retención 7 días, `docs/offer_screenshots.md`).
 
 ## Alertas y notificaciones
 

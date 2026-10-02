@@ -63,6 +63,8 @@ CRON_TZ=America/Santiago
 
 El wrapper hace `docker exec precios-web retail batch --grupo <grupo> ...`. Cada deploy y `prod-menu` opción 8 reinstalan esas líneas según `programacion.json`. Si `enabled` es false, el wrapper omite la corrida. Los grupos viven en Mongo `store_categories` (bootstrap desde el registry).
 
+Capturas de oferta en Telegram/correo: opcionales (`OFFER_SCREENSHOTS=1`). La imagen slim no trae Chromium; usar `Dockerfile.screenshots` o instalar Playwright en el contenedor. Ver `docs/offer_screenshots.md`.
+
 La corrida de `retail` es deliberadamente completa: el wrapper fuerza
 `ADAPTIVE_SCRAPING=0` y no aplica un corte por tiempo. Si todavía sigue activa al
 horario del día siguiente, el lock omite ese disparo para no duplicar consultas.
