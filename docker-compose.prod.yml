@@ -64,7 +64,11 @@ services:
       qdrant:
         condition: service_started
     volumes:
-      - ./retail/batch:/app/retail/batch
+      # Solo JSON editables en el host. El .py del batch (p. ej. basic_scrape) va
+      # en la imagen con mongo.py: si se monta todo retail/batch, un push sin
+      # rebuild deja el caller con after_id y el ProductRepository viejo sin él.
+      - ./retail/batch/programacion.json:/app/retail/batch/programacion.json
+      - ./retail/batch/reglas_ofertas.json:/app/retail/batch/reglas_ofertas.json
       - ./output:/app/output
       - ./logs:/app/logs
     expose:

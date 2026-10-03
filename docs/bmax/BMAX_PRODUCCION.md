@@ -50,7 +50,7 @@ cd ~/precios && ./prod-menu.sh
 
 ## Cron diario del batch
 
-`precios-web` es una imagen slim: **no tiene `crontab`**. El horario se guarda en `retail/batch/programacion.json` (volumen del compose). El job lo dispara el **cron del usuario `richard`** en el host, **una línea por grupo** de tiendas:
+`precios-web` es una imagen slim: **no tiene `crontab`**. El horario se guarda en `retail/batch/programacion.json` (bind mount del JSON en compose; el resto de `retail/batch` va en la imagen). El job lo dispara el **cron del usuario `richard`** en el host, **una línea por grupo** de tiendas:
 
 ```
 # retail-ofertas-begin

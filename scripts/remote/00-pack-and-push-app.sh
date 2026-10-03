@@ -95,9 +95,8 @@ if [[ -f "\$REMOTE_DIR/.env" ]]; then
   cp -a "\$REMOTE_DIR/.env" "/tmp/${APP_SLUG}.env.preserve"
 fi
 unzip -qo "${REMOTE_ZIP}" -d "\$STAGE_DIR"
-# Sincronizar dentro de los directorios existentes preserva sus inodes. Esto
-# evita que el bind mount retail/batch de un contenedor activo quede apuntando
-# a un directorio eliminado y aparezca vacío hasta el siguiente deploy.
+# Sincronizar dentro de los directorios existentes preserva inodes de
+# programacion.json / reglas_ofertas.json (bind mounts de archivo en compose).
 rsync -a --delete \
   --exclude '.git' --exclude '.venv/' --exclude '.build/' \
   --exclude '.env' --exclude '.env.*' --exclude '.mongo_creds' \
