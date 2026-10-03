@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#258fdf">
   <title>Ficha de producto</title>
   <script>(function(){var m=localStorage.getItem("retail-theme");if(m==="day"||m==="night"){document.documentElement.dataset.theme=m;return;}var h=new Date().getHours();document.documentElement.dataset.theme=(h>=7&&h<19)?"day":"night";})();</script>
-  <link rel="stylesheet" href="/static/styles.css?v=79">
+  <link rel="stylesheet" href="/static/styles.css?v=80">
 </head>
 <body>
   <header class="top">
@@ -114,7 +114,10 @@
             <span class="others-title-main">
               <h2>Precios en otras tiendas</h2>
             </span>
-            <span class="others-toggle-label" aria-hidden="true"></span>
+            <span class="others-toggle" aria-hidden="true">
+              <span class="others-toggle-label"></span>
+              <span class="others-toggle-chevron"></span>
+            </span>
           </summary>
           <div class="others-body">
             <p class="muted product-panel-intro">Compara el mismo producto antes de comprar.</p>
@@ -197,6 +200,6 @@
     </section>
   </main>
   <script src="/static/prices.js?v=30"></script>
-  <script src="/static/producto.js?v=35"></script>
+  <script src="/static/producto.js?v=36"></script>
 </body>
 </html>

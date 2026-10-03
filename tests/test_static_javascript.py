@@ -81,18 +81,21 @@ def test_product_price_charts_show_every_calendar_day():
     assert ".price-chart-scroll .chart" in styles
     assert "max-width: none" in styles
     assert "overflow-x: auto" in styles
-    assert 'producto.js?v=35' in page
-    assert 'styles.css?v=79' in page
+    assert 'producto.js?v=36' in page
+    assert 'styles.css?v=80' in page
 
 
 def test_product_other_stores_panel_is_collapsible_and_open_by_default() -> None:
     page = Path("retail/web/static/producto.html").read_text(encoding="utf-8")
     styles = Path("retail/web/static/styles.css").read_text(encoding="utf-8")
     assert '<details class="panel others-panel" id="others-panel" open hidden>' in page
+    assert 'class="others-toggle"' in page
     assert 'class="others-toggle-label"' in page
+    assert 'class="others-toggle-chevron"' in page
     assert "Precios en otras tiendas" in page
     assert '.others-toggle-label::before { content: "Mostrar"; }' in styles
     assert '.others-panel[open] > summary .others-toggle-label::before { content: "Ocultar"; }' in styles
+    assert ".others-toggle {" in styles
     assert ".product-side-column > .panel:not([hidden])" in styles
 
 
