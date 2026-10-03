@@ -848,11 +848,16 @@ function renderForecast(summary, patterns = []) {
 async function loadForecast(store, id) {
   const panel = $("forecast-panel");
   if (!panel) return;
+  // Colapsado siempre; la visibilidad la controla solo data-admin + applySession.
   panel.open = false;
   try {
     const user = await ensureUser();
-    if (user?.role !== "admin") return;
-    panel.hidden = false;
+    const admin = Boolean(user && user.role === "admin");
+    if (!admin) {
+      panel.hidden = true;
+      return;
+    }
+    // No tocar panel.hidden: applySession ya reveló [data-admin] para admin.
     $("forecast-content").innerHTML = `<p class="muted">Buscando un pronóstico disponible…</p>`;
     const params = new URLSearchParams({ store });
     const response = await fetch(`/api/forecasts/${encodeURIComponent(id)}?${params}`);
@@ -864,6 +869,7 @@ async function loadForecast(store, id) {
     if (!response.ok) throw new Error(typeof data.detail === "string" ? data.detail : response.statusText);
     renderForecast(data.summary || null, data.patterns || []);
   } catch (_error) {
+    if (panel.hidden) return;
     panel.open = false;
     $("forecast-content").innerHTML = `<p class="muted">El pronóstico no está disponible temporalmente.</p>`;
   }

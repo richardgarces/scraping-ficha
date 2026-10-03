@@ -1,16 +1,18 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 
 from retail.forecast_presentation import forecast_summary
 from retail.search import connect_repo
+from retail.web.deps import current_user
 
 router = APIRouter()
 
 
 @router.get("/api/forecasts/{product_id}")
-def get_forecasts(product_id: str, store: str | None = Query(default=None)):
-    """Devuelve pronósticos guardados para un `product_id` (últimos 20)."""
+def get_forecasts(request: Request, product_id: str, store: str | None = Query(default=None)):
+    """Devuelve pronósticos guardados para un `product_id` (últimos 20). Solo admin."""
+    current_user(request, admin=True)
     repo = connect_repo()
     if repo is None:
         raise HTTPException(status_code=503, detail="Database unavailable")

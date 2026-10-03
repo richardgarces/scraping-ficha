@@ -151,9 +151,12 @@ def test_product_forecast_panel_is_admin_only_and_collapsed_by_default() -> None
     script = Path("retail/web/static/producto.js").read_text(encoding="utf-8")
     assert 'id="forecast-panel" data-admin hidden' in page
     assert '<details class="panel forecast-panel"' in page
-    assert 'user?.role !== "admin"' in script
+    assert 'user && user.role === "admin"' in script
+    assert "panel.hidden = true" in script
+    assert "panel.hidden = false" not in script.split("async function loadForecast")[1].split("$(\"windows\")")[0]
     assert "panel.open = false" in script
     assert "panel.open = true" not in script
+    assert "producto.js?v=37" in page
 
 
 def test_timesfm_offer_summary_is_admin_only() -> None:
