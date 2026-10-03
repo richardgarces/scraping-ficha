@@ -1,0 +1,28 @@
+# Override OPCIONAL: publica Mongo/Redis de precios solo en la IP VPN/LAN de BMAX.
+# NUNCA uses 0.0.0.0. No activar hasta tener Tailscale/WireGuard (o LAN confiable)
+# y BMAX_VPN_IP en .env. deploy-prod.sh solo aplica este archivo si BMAX_VPN_IP está definido.
+#
+# Conflicto histórico: platform-mongo/redis ya ocupan 127.0.0.1:27017 / :6379.
+# Por defecto publicamos 27018/6380 en la IP VPN (el contenedor sigue en 27017/6379 internos).
+#
+# Uso:
+#   BMAX_VPN_IP=100.x.x.x  (o IP Tailscale de BMAX) en .env del servidor
+#   docker compose -f docker-compose.prod.yml -f docker-compose.prod.platform.yml \
+#     -f docker-compose.prod.soyo-access.yml up -d
+#
+# En soyo (.env):
+#   MONGODB_URI=mongodb://USER:PASS@<BMAX_VPN_IP>:27018/?authSource=admin
+#   REDIS_URL=redis://:PASS@<BMAX_VPN_IP>:6380/0
+
+services:
+  mongo:
+    ports:
+      - "${BMAX_VPN_IP:?BMAX_VPN_IP requerido}:${PRECIOS_MONGO_HOST_PORT:-27018}:27017"
+
+  redis:
+    ports:
+      - "${BMAX_VPN_IP:?BMAX_VPN_IP requerido}:${PRECIOS_REDIS_HOST_PORT:-6380}:6379"
+
+  # qdrant:
+  #   ports:
+  #     - "${BMAX_VPN_IP}:${PRECIOS_QDRANT_HOST_PORT:-6333}:6333"

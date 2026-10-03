@@ -1,0 +1,31 @@
+# Worker slim en soyo: solo imagen app (sin mongo/redis/qdrant locales).
+# Preferido para cron: venv + scripts/ofertas-diarias-soyo.sh (sin Docker).
+# Este compose sirve para smoke/manual con la misma imagen de prod.
+#
+# Requisitos: .env en soyo con MONGODB_URI / REDIS_URL → BMAX (VPN).
+#
+# Ejemplo smoke:
+#   docker compose -f docker-compose.worker.soyo.yml run --rm worker \
+#     retail batch --grupo farmacias --source scrape --pausa 3 --presupuesto-minutos 15
+
+services:
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: precios-worker-soyo
+    env_file:
+      - .env
+    environment:
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONUNBUFFERED: "1"
+      # No pisar MONGODB_URI/REDIS_URL del .env (deben apuntar a BMAX).
+    volumes:
+      - ./retail/batch/programacion.json:/app/retail/batch/programacion.json
+      - ./retail/batch/reglas_ofertas.json:/app/retail/batch/reglas_ofertas.json
+      - ./output:/app/output
+      - ./logs:/app/logs
+    # Contenedor idle; el cron host llama al venv, o usa:
+    #   docker compose -f docker-compose.worker.soyo.yml run --rm worker retail …
+    command: ["sleep", "infinity"]
+    restart: unless-stopped

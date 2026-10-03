@@ -49,8 +49,16 @@ Anotar antes del cutover:
 
 | Máquina | IP LAN (ejemplo) | IP VPN (Tailscale/WG) | Rol |
 |---------|------------------|------------------------|-----|
-| BMAX | `192.168.1.198` | `100.x.x.x` / `10.x.x.x` | Mongo/Redis/Qdrant + web |
-| soyo | _(rellenar)_ | _(rellenar)_ | Solo worker + cron |
+| BMAX | `192.168.1.198` (SSH `:2222`) | **sin Tailscale/WG** (2026-03-02) | Mongo/Redis/Qdrant + web |
+| soyo | _(desconocida — pedir IP/usuario SSH)_ | _(rellenar)_ | Solo worker + cron |
+
+**Inventario BMAX (fase 0, verificado):**
+
+- SSH OK: `richard@192.168.1.198 -p 2222` (`richard-bmax`).
+- Tailscale / WireGuard: **no instalados**.
+- `precios-mongo` / `precios-redis` / `precios-qdrant`: **sin** `ports:` al host; auth Mongo **ausente**; Redis `requirepass` vacío.
+- Host ya tiene `127.0.0.1:27017` y `127.0.0.1:6379` (platform) → el override soyo usa **27018/6380** en la IP VPN.
+- Cron host activo: bloque `# retail-ofertas-begin` … 19× `ofertas-diarias-bmax.sh <grupo>` (00:00–13:30 stagger 45m) + `run_on_bmax.sh` 21:30.
 
 Comprobar desde soyo (sustituir IPs):
 
@@ -329,9 +337,14 @@ Mantener **misma revisión de código** (o al menos misma lógica de `retail/bat
 |---------|-----|
 | `docker-compose.prod.yml` | Servicios sin `ports:` host hoy |
 | `docker-compose.prod.platform.yml` | Solo `precios-web` → `platform-net` |
+| `docker-compose.prod.soyo-access.yml` | Bind Mongo/Redis solo si `BMAX_VPN_IP` (puertos 27018/6380) |
+| `docker-compose.worker.soyo.yml` | Imagen slim opcional en soyo (preferir venv+cron) |
 | `scripts/ofertas-diarias-bmax.sh` | Cron BMAX (`docker exec`) |
-| `scripts/ofertas-diarias.sh` | Base local (venv) a adaptar |
-| `scripts/install-host-cron.sh` | Genera crontab desde `programacion.json` |
+| `scripts/ofertas-diarias-soyo.sh` | Cron soyo (venv, sin `docker exec`) |
+| `scripts/install-host-cron.sh` | Crontab BMAX; respeta `HOST_BATCH_CRON=0` |
+| `scripts/install-host-cron-soyo.sh` | Crontab soyo (sin predictive) |
+| `scripts/bmax-prepare-soyo-db-auth.sh` | Prepara usuario Mongo + Redis pass (sin abrir puertos) |
+| `.env.soyo.example` | Plantilla `.env` del worker |
 | `retail/batch/programacion.json` | Hora, stagger, enabled, source, pause |
 | `docs/bmax/BMAX_PRODUCCION.md` | Deploy y cron actuales en BMAX |
 | `retail/web/jobs.py` | «Iniciar ahora» = thread en web |

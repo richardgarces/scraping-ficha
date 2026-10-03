@@ -93,7 +93,7 @@ show_menu() {
   5) Estado / health
   6) Logs web
   7) Reiniciar web
-  8) Instalar cron del batch (host)
+  8) Instalar cron del batch (host; respeta HOST_BATCH_CRON)
  10) TODO EN UN PASO
   0) Salir
 EOF

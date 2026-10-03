@@ -9,8 +9,20 @@ source "${ROOT_DIR}/scripts/lib-compose.sh"
 EDGE="${EDGE:-platform}"
 COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.prod.yml}"
 PLATFORM_OVERRIDE="${PLATFORM_OVERRIDE:-docker-compose.prod.platform.yml}"
+SOYO_ACCESS_OVERRIDE="${SOYO_ACCESS_OVERRIDE:-docker-compose.prod.soyo-access.yml}"
 
 COMPOSE_BIN="$(detect_compose)" || { echo "ERROR: falta docker compose"; exit 1; }
+
+# Cargar BMAX_VPN_IP / HOST_BATCH_CRON desde .env si existen (sin source completo).
+if [[ -f "${ROOT_DIR}/.env" ]]; then
+  _vip="$(grep -E '^BMAX_VPN_IP=' "${ROOT_DIR}/.env" 2>/dev/null | tail -1 | cut -d= -f2- | tr -d '\r' || true)"
+  [[ -z "${BMAX_VPN_IP:-}" && -n "${_vip}" ]] && BMAX_VPN_IP="${_vip}"
+  _hb="$(grep -E '^HOST_BATCH_CRON=' "${ROOT_DIR}/.env" 2>/dev/null | tail -1 | cut -d= -f2- | tr -d '\r' || true)"
+  [[ -z "${HOST_BATCH_CRON:-}" && -n "${_hb}" ]] && HOST_BATCH_CRON="${_hb}"
+  unset _vip _hb
+fi
+export BMAX_VPN_IP="${BMAX_VPN_IP:-}"
+export HOST_BATCH_CRON="${HOST_BATCH_CRON:-1}"
 
 use_platform=false
 case "$EDGE" in
@@ -31,6 +43,18 @@ if [[ "$use_platform" == true ]]; then
   echo "==> EDGE=platform  compose=${COMPOSE_BIN}"
 else
   echo "==> EDGE=builtin  compose=${COMPOSE_BIN}"
+fi
+
+# Override soyo-access: solo si el archivo existe Y BMAX_VPN_IP está definido
+# (evita publicar Mongo/Redis por error en un deploy normal).
+if [[ -f "${ROOT_DIR}/${SOYO_ACCESS_OVERRIDE}" ]]; then
+  if [[ -n "${BMAX_VPN_IP}" ]]; then
+    export BMAX_VPN_IP
+    SPEC="${SPEC}|-f|${SOYO_ACCESS_OVERRIDE}"
+    echo "==> soyo-access: bind Mongo/Redis en ${BMAX_VPN_IP} (puertos host 27018/6380 por defecto)"
+  else
+    echo "[!] ${SOYO_ACCESS_OVERRIDE} presente pero BMAX_VPN_IP vacío — override OMITIDO (seguro)"
+  fi
 fi
 
 mkdir -p "${ROOT_DIR}/logs" "${ROOT_DIR}/output"
