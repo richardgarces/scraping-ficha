@@ -47,18 +47,19 @@ Preferir **Tailscale** o **WireGuard** entre soyo y BMAX. Alternativa aceptable:
 
 Anotar antes del cutover:
 
-| Máquina | IP LAN (ejemplo) | IP VPN (Tailscale/WG) | Rol |
-|---------|------------------|------------------------|-----|
-| BMAX | `192.168.1.198` (SSH `:2222`) | **sin Tailscale/WG** (2026-03-02) | Mongo/Redis/Qdrant + web |
-| soyo | _(desconocida — pedir IP/usuario SSH)_ | _(rellenar)_ | Solo worker + cron |
+| Máquina | IP LAN | IP VPN (Tailscale/WG) | Rol |
+|---------|--------|------------------------|-----|
+| BMAX | `192.168.1.198` (SSH `:2222`) | **sin Tailscale/WG** | Mongo/Redis/Qdrant + web |
+| soyo | `192.168.1.197` (también `.111`/`.187`; SSH `richard@soyo`) | **sin Tailscale/WG** | Solo worker + cron |
 
-**Inventario BMAX (fase 0, verificado):**
+**Inventario (fase 0→1, verificado 2026-10-02):**
 
-- SSH OK: `richard@192.168.1.198 -p 2222` (`richard-bmax`).
-- Tailscale / WireGuard: **no instalados**.
-- `precios-mongo` / `precios-redis` / `precios-qdrant`: **sin** `ports:` al host; auth Mongo **ausente**; Redis `requirepass` vacío.
-- Host ya tiene `127.0.0.1:27017` y `127.0.0.1:6379` (platform) → el override soyo usa **27018/6380** en la IP VPN.
-- Cron host activo: bloque `# retail-ofertas-begin` … 19× `ofertas-diarias-bmax.sh <grupo>` (00:00–13:30 stagger 45m) + `run_on_bmax.sh` 21:30.
+- SSH OK: `richard@soyo` / `richard@192.168.1.197:22`; BMAX `richard@192.168.1.198 -p 2222`.
+- LAN soyo↔BMAX: ping OK (~9–230 ms). **Sin Tailscale/WireGuard** en ninguno (alternativa LAN del plan).
+- `precios-mongo` / `precios-redis` / `precios-qdrant`: **sin** `ports:` al host; auth Mongo **ausente**; Redis sin `requirepass` persistente.
+- Host BMAX ya tiene `127.0.0.1:27017` / `:6379` (platform) → override soyo usa **27018/6380** en `BMAX_VPN_IP` (usar `192.168.1.198` si se sigue por LAN).
+- Cron BMAX activo: `# retail-ofertas-begin` … 19× `ofertas-diarias-bmax.sh` + `run_on_bmax.sh` 21:30. **No desactivar** hasta smoke soyo.
+- soyo: código en `~/precios`, `.env` placeholder → `192.168.1.198:27018/6380`, imagen Docker worker build OK; host venv bloqueado (`apt install python3.12-venv` necesita sudo).
 
 Comprobar desde soyo (sustituir IPs):
 
@@ -272,17 +273,17 @@ Mantener **misma revisión de código** (o al menos misma lógica de `retail/bat
 
 ### Cutover
 
-1. [ ] VPN estable soyo ↔ BMAX; anotar IPs.
-2. [ ] Auth Mongo (y Redis); override compose con bind a IP VPN/LAN; firewall.
-3. [ ] Verificar desde soyo: ping + `mongosh` / `redis-cli` + auth.
-4. [ ] Clonar/sync repo en soyo; venv; `.env` con URIs BMAX.
-5. [ ] Adaptar wrapper `ofertas-diarias-soyo.sh` + instalador cron soyo.
-6. [ ] Smoke: un grupo corto (§9); `/cron` muestra `batch_runs`; búsqueda OK.
-7. [ ] Instalar crontab en soyo; validar `crontab -l`.
-8. [ ] **Desactivar** líneas `ofertas-diarias-bmax.sh` en BMAX; asegurar que deploy no las reinstale.
-9. [ ] Dejar en BMAX (si aplica) solo predictive `run_on_bmax.sh` u omitir a conciencia.
+1. [x] LAN estable soyo ↔ BMAX; IPs anotadas (sin Tailscale/WG).
+2. [x] Auth Mongo (`--auth`) + Redis `requirepass`; bind `192.168.1.198:27018/6380` (no `0.0.0.0`).
+3. [x] Desde soyo: `nc` 27018/6380 OK; auth bloquea ops sin credenciales.
+4. [x] Repo en soyo `~/precios`; `.env` con URIs BMAX; imagen Docker `precios-worker` (venv opcional).
+5. [x] Wrapper `ofertas-diarias-soyo.sh` (fallback Docker) + `install-host-cron-soyo.sh`.
+6. [x] Smoke `farmacias` 15m → `batch_runs.status=done` / `phase=budget_done`; web health OK.
+7. [x] Crontab soyo instalado (19 grupos, `CRON_TZ=America/Santiago`).
+8. [x] BMAX `HOST_BATCH_CRON=0` → sin `ofertas-diarias-bmax.sh`.
+9. [x] BMAX conserva solo predictive `run_on_bmax.sh` 21:30.
 10. [ ] Primer día completo: revisar logs en soyo (`logs/ofertas-diarias-*.log`) y `/cron`.
-11. [ ] Documentar IPs/puertos en el `.env` del servidor (sin commitear secretos).
+11. [x] Secretos en BMAX `~/precios/.env` + `~/precios/.soyo-db-secrets`; soyo `~/precios/.env` (chmod 600).
 
 ### Rollback
 

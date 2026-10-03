@@ -19,7 +19,11 @@ if ! command -v crontab >/dev/null 2>&1; then
 fi
 
 if [[ ! -f "${ROOT}/.venv/bin/activate" && ! -x "${ROOT}/.venv/bin/retail" ]]; then
-  warn "No hay .venv aún; el cron se instalará igual, pero fallará hasta crear el venv."
+  if docker image inspect precios-worker >/dev/null 2>&1; then
+    info "Sin .venv; ofertas-diarias-soyo.sh usará imagen Docker precios-worker"
+  else
+    warn "No hay .venv ni imagen precios-worker; el cron fallará hasta crear uno de los dos."
+  fi
 fi
 
 mkdir -p "${ROOT}/logs" "${ROOT}/output"

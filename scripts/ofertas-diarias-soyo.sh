@@ -16,13 +16,16 @@ if [[ -f "${ROOT}/.env" ]]; then
   set +a
 fi
 
+USE_DOCKER=0
 if [[ -f "${ROOT}/.venv/bin/activate" ]]; then
   # shellcheck disable=SC1091
   source "${ROOT}/.venv/bin/activate"
 elif [[ -x "${ROOT}/.venv/bin/retail" ]]; then
   export PATH="${ROOT}/.venv/bin:${PATH}"
+elif command -v docker >/dev/null 2>&1 && docker image inspect precios-worker >/dev/null 2>&1; then
+  USE_DOCKER=1
 else
-  echo "$(date '+%Y-%m-%dT%H:%M:%S%z') falta .venv; crea con: python3 -m venv .venv && .venv/bin/pip install -e ." >&2
+  echo "$(date '+%Y-%m-%dT%H:%M:%S%z') falta .venv o imagen precios-worker; venv: python3 -m venv .venv && .venv/bin/pip install -e .  |  docker: compose -f docker-compose.worker.soyo.yml build" >&2
   exit 1
 fi
 
@@ -31,6 +34,21 @@ export MONGODB_DB="${MONGODB_DB:-scraping}"
 export REDIS_URL="${REDIS_URL:-}"
 export PYTHONUNBUFFERED=1
 
+# venv: retail/python locales. Docker: misma imagen del smoke (env desde .env del compose).
+retail_run() {
+  if [[ "$USE_DOCKER" == 1 ]]; then
+    docker compose -f "${ROOT}/docker-compose.worker.soyo.yml" run --rm --no-deps -T worker retail "$@"
+  else
+    retail "$@"
+  fi
+}
+py_run() {
+  if [[ "$USE_DOCKER" == 1 ]]; then
+    docker compose -f "${ROOT}/docker-compose.worker.soyo.yml" run --rm --no-deps -T worker python "$@"
+  else
+    python "$@"
+  fi
+}
 GRUPO="${1:-}"
 LOCK="logs/ofertas-diarias.lock"
 LOG="logs/ofertas-diarias.log"
@@ -47,7 +65,7 @@ if ! flock -n 9; then
   exit 0
 fi
 
-read -r SOURCE PAUSE ENABLED PAUSED BUDGET < <(python -c '
+read -r SOURCE PAUSE ENABLED PAUSED BUDGET < <(py_run -c '
 from retail.batch.config import load_schedule
 data = load_schedule()
 print(
@@ -98,7 +116,7 @@ exec 6>"logs/indice-diario.lock"
 flock 6
 if [[ ! -f "$INDEX_STAMP" ]]; then
   echo "$(stamp) renovando índice de productos y categorías de tiendas"
-  if retail indice >> "$LOG" 2>&1; then
+  if retail_run indice >> "$LOG" 2>&1; then
     touch "$INDEX_STAMP"
     find logs -maxdepth 1 -name 'indice-*.done' -mtime +7 -delete 2>/dev/null || true
   fi
@@ -116,11 +134,21 @@ run_group() {
     env_prefix=(env ADAPTIVE_SCRAPING=0)
   fi
   echo "$(stamp) inicio batch grupo=${g} source=${SOURCE} pausa=${PAUSE} presupuesto=${budget}m modo=${mode}"
-  "${env_prefix[@]}" retail batch \
-    --grupo "$g" \
-    --source "$SOURCE" \
-    --pausa "$PAUSE" \
-    --presupuesto-minutos "$budget" >> "$LOG" 2>&1
+  if [[ "$USE_DOCKER" == 1 && "$g" == "retail" ]]; then
+    # compose run no hereda env_prefix fácilmente; pasar -e
+    docker compose -f "${ROOT}/docker-compose.worker.soyo.yml" run --rm --no-deps -T \
+      -e ADAPTIVE_SCRAPING=0 worker retail batch \
+      --grupo "$g" \
+      --source "$SOURCE" \
+      --pausa "$PAUSE" \
+      --presupuesto-minutos "$budget" >> "$LOG" 2>&1
+  else
+    "${env_prefix[@]}" retail_run batch \
+      --grupo "$g" \
+      --source "$SOURCE" \
+      --pausa "$PAUSE" \
+      --presupuesto-minutos "$budget" >> "$LOG" 2>&1
+  fi
   echo "$(stamp) fin batch grupo=${g}"
 }
 
@@ -129,14 +157,14 @@ if [[ -n "$GRUPO" ]]; then
   exit 0
 fi
 
-mapfile -t GROUPS < <(python -c '
+mapfile -t GROUPS < <(py_run -c '
 from retail.batch.config import load_schedule
 from retail.store_categories import enabled_group_ids
 print("\n".join(enabled_group_ids(load_schedule())))
 ')
 if [[ ${#GROUPS[@]} -eq 0 ]]; then
   echo "$(stamp) inicio batch (sin grupos) source=${SOURCE} pausa=${PAUSE}"
-  retail batch --source "$SOURCE" --pausa "$PAUSE" >> "$LOG" 2>&1
+  retail_run batch --source "$SOURCE" --pausa "$PAUSE" >> "$LOG" 2>&1
   echo "$(stamp) fin batch"
   exit 0
 fi

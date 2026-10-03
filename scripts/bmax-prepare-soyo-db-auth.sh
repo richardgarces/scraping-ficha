@@ -61,14 +61,19 @@ if (existing) {
 "
 
 warn "Mongo: el usuario existe, pero auth NO está forzada hasta arrancar mongod con --auth"
-warn "       o MONGO_INITDB_ROOT_* en un volumen nuevo. Ver docs/bmax/SOYO_WORKER.md §3.1"
-warn "Redis: apply requirepass en runtime (no persiste en conf del compose aún):"
+warn "       (docker-compose.prod.soyo-access.yml pone command: --auth). Ver SOYO_WORKER.md §3.1"
+
+# MONGO_ONLY=1: crear usuario sin tocar Redis (evita romper precios-web antes del recreate).
+if [[ "${MONGO_ONLY:-0}" =~ ^(1|true|yes)$ ]]; then
+  info "MONGO_ONLY=1 → Redis intacto; persiste requirepass vía soyo-access compose"
+  exit 0
+fi
+
+warn "Redis: apply requirepass en runtime (rompe web hasta recrear con REDIS_URL autenticada):"
 
 docker exec precios-redis redis-cli CONFIG SET requirepass "${REDIS_PASS}" >/dev/null
-docker exec precios-redis redis-cli -a "${REDIS_PASS}" PING
+docker exec precios-redis redis-cli --no-auth-warning -a "${REDIS_PASS}" PING
 
 info "Redis requirepass activo en el proceso actual"
-warn "Actualiza REDIS_URL del web a redis://:${REDIS_PASS}@precios-redis:6379/0 y recrea precios-web"
-warn "Para persistir Redis auth, añade al service redis en un override:"
-warn "  command: redis-server --save 60 1 --requirepass \"\${PRECIOS_REDIS_PASSWORD}\""
-warn "NO publiques soyo-access hasta VPN + auth + firewall."
+warn "Recrea redis+web con docker-compose.prod.soyo-access.yml (requirepass + REDIS_URL)."
+warn "NO publiques soyo-access sin BMAX_VPN_IP acotada (nunca 0.0.0.0)."

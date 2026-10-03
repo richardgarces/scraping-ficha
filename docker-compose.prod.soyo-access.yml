@@ -1,14 +1,18 @@
-# Override OPCIONAL: publica Mongo/Redis de precios solo en la IP VPN/LAN de BMAX.
-# NUNCA uses 0.0.0.0. No activar hasta tener Tailscale/WireGuard (o LAN confiable)
-# y BMAX_VPN_IP en .env. deploy-prod.sh solo aplica este archivo si BMAX_VPN_IP está definido.
+# Override OPCIONAL: auth + publica Mongo/Redis de precios solo en la IP VPN/LAN de BMAX.
+# NUNCA uses 0.0.0.0. No activar hasta tener secrets en .env y BMAX_VPN_IP definido.
+# deploy-prod.sh solo aplica este archivo si BMAX_VPN_IP está definido.
 #
 # Conflicto histórico: platform-mongo/redis ya ocupan 127.0.0.1:27017 / :6379.
-# Por defecto publicamos 27018/6380 en la IP VPN (el contenedor sigue en 27017/6379 internos).
+# Por defecto publicamos 27018/6380 en la IP VPN (contenedor sigue en 27017/6379 internos).
 #
-# Uso:
-#   BMAX_VPN_IP=100.x.x.x  (o IP Tailscale de BMAX) en .env del servidor
-#   docker compose -f docker-compose.prod.yml -f docker-compose.prod.platform.yml \
-#     -f docker-compose.prod.soyo-access.yml up -d
+# Requisitos en .env del servidor:
+#   BMAX_VPN_IP=192.168.1.198
+#   PRECIOS_MONGO_USER=precios_soyo
+#   PRECIOS_MONGO_PASSWORD=…
+#   PRECIOS_REDIS_PASSWORD=…
+#
+# Antes del primer up con --auth: crear el usuario Mongo (auth aún off):
+#   bash scripts/bmax-prepare-soyo-db-auth.sh
 #
 # En soyo (.env):
 #   MONGODB_URI=mongodb://USER:PASS@<BMAX_VPN_IP>:27018/?authSource=admin
@@ -16,12 +20,58 @@
 
 services:
   mongo:
+    command: ["--bind_ip_all", "--auth"]
+    environment:
+      PRECIOS_MONGO_USER: ${PRECIOS_MONGO_USER:?PRECIOS_MONGO_USER requerido}
+      PRECIOS_MONGO_PASSWORD: ${PRECIOS_MONGO_PASSWORD:?PRECIOS_MONGO_PASSWORD requerido}
     ports:
       - "${BMAX_VPN_IP:?BMAX_VPN_IP requerido}:${PRECIOS_MONGO_HOST_PORT:-27018}:27017"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "mongosh -u \"$$PRECIOS_MONGO_USER\" -p \"$$PRECIOS_MONGO_PASSWORD\" --authenticationDatabase admin --quiet --eval 'db.runCommand({ ping: 1 }).ok' | grep -q 1",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 25s
 
   redis:
+    environment:
+      PRECIOS_REDIS_PASSWORD: ${PRECIOS_REDIS_PASSWORD:?PRECIOS_REDIS_PASSWORD requerido}
+    command:
+      [
+        "redis-server",
+        "--save",
+        "60",
+        "1",
+        "--loglevel",
+        "warning",
+        "--requirepass",
+        "${PRECIOS_REDIS_PASSWORD:?PRECIOS_REDIS_PASSWORD requerido}",
+      ]
     ports:
       - "${BMAX_VPN_IP:?BMAX_VPN_IP requerido}:${PRECIOS_REDIS_HOST_PORT:-6380}:6379"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "redis-cli --no-auth-warning -a \"$$PRECIOS_REDIS_PASSWORD\" ping | grep -q PONG",
+        ]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+
+  # Override de URIs hardcodeadas en docker-compose.prod.yml (sin auth).
+  # Hostnames Docker internos; soyo usa la IP LAN/VPN vía su propio .env.
+  web:
+    environment:
+      MONGODB_URI: mongodb://${PRECIOS_MONGO_USER}:${PRECIOS_MONGO_PASSWORD}@precios-mongo:27017/?authSource=admin
+      MONGODB_DB: ${MONGODB_DB:-scraping}
+      QDRANT_URL: http://precios-qdrant:6333
+      QDRANT_COLLECTION: ${QDRANT_COLLECTION:-products}
+      REDIS_URL: redis://:${PRECIOS_REDIS_PASSWORD}@precios-redis:6379/0
 
   # qdrant:
   #   ports:
