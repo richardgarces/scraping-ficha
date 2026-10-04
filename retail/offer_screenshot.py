@@ -190,6 +190,37 @@ def is_local_image(value: Any) -> bool:
     return path.is_file() and path.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp"}
 
 
+# Solo el archivo de una captura, nunca el listado del directorio.
+OFFER_SHOT_PREFIX = "/offer-shots"
+_SHOT_FILE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,160}\.(?:png|jpe?g|webp)$")
+_SHOT_MIME = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".webp": "image/webp",
+}
+
+
+def offer_shot_path(name: str) -> Path | None:
+    """Ruta de una captura guardada, si el nombre es un archivo de ese directorio."""
+    text = str(name or "")
+    if text != Path(text).name or ".." in text or not _SHOT_FILE.fullmatch(text):
+        return None
+    root = storage_dir().resolve()
+    candidate = (root / text).resolve()
+    try:
+        candidate.relative_to(root)
+    except ValueError:
+        return None
+    if candidate.parent != root or not candidate.is_file():
+        return None
+    return candidate
+
+
+def offer_shot_media_type(path: Path) -> str:
+    return _SHOT_MIME.get(path.suffix.lower(), "application/octet-stream")
+
+
 def page_url_for_offer(payload: dict[str, Any] | None = None, **fields: Any) -> str:
     """Prefiere la URL de la tienda; si falta, la ficha pública."""
     data = {**(payload or {}), **fields}
@@ -233,7 +264,11 @@ def resolve_alert_image(
 
 
 def apply_offer_screenshot(payload: dict[str, Any]) -> dict[str, Any]:
-    """Si hay captura, reemplaza `image_url` por la ruta local. No altera push."""
+    """Si hay captura válida, reemplaza `image_url` por la ruta local.
+
+    Una comprobación antibot no se guarda: queda el `image_url` del producto.
+    El push no usa la ruta local; publica la captura solo si el sitio la sirve.
+    """
     if not isinstance(payload, dict):
         return payload
     resolved = resolve_alert_image(payload)

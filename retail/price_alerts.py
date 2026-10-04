@@ -204,7 +204,7 @@ def notify_price_changes(repo: Any, changes: list[dict[str, Any]]) -> int:
 
                 user = repo.find_user_by_id(user_id) or {}
                 prefs = user.get("notification_preferences") or {}
-                push_payload = {**payload, "image_url": original_image}
+                push_payload = {**payload, "product_image_url": original_image}
                 if (
                     "push" in (prefs.get("channels") or [])
                     and user.get("push_subscriptions")

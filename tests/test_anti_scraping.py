@@ -45,5 +45,6 @@ def test_health_static_and_authenticated_operations_are_exempt():
     bot = {"user-agent": "curl/8.0"}
     assert anti_scraping.inspect_request("/api/health", "GET", bot, {}, None) is None
     assert anti_scraping.inspect_request("/static/app.js", "GET", bot, {}, None) is None
+    assert anti_scraping.inspect_request("/offer-shots/lider_1.png", "GET", {"user-agent": ""}, {}, None) is None
     assert anti_scraping.inspect_request("/api/admin/stats", "GET", bot, {}, None) is None
     assert anti_scraping.inspect_request("/api/price-alert", "GET", bot, {}, None) is None

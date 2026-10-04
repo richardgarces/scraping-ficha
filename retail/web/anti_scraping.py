@@ -55,6 +55,7 @@ _EXEMPT_PREFIXES = (
     "/api/watches",
     "/static/",
     "/o/",
+    "/offer-shots/",
 )
 
 

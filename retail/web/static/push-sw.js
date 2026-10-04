@@ -1,3 +1,26 @@
+self.addEventListener("install", (event) => {
+  event.waitUntil(self.skipWaiting());
+});
+
+self.addEventListener("activate", (event) => {
+  event.waitUntil(self.clients.claim());
+});
+
+function notificationImage(value) {
+  if (typeof value !== "string" || !value || value.length > 2000) return "";
+  try {
+    const url = new URL(value, self.location.origin);
+    if (url.protocol !== "https:" || url.username || url.password) return "";
+    const host = url.hostname.toLowerCase();
+    const path = url.pathname.toLowerCase();
+    if (host === "challenges.cloudflare.com" || host.endsWith(".challenges.cloudflare.com")) return "";
+    if (path.includes("/cdn-cgi/challenge") || path.includes("cf-challenge")) return "";
+    return url.href;
+  } catch (_) {
+    return "";
+  }
+}
+
 self.addEventListener("push", (event) => {
   let data = {};
   try {
@@ -5,14 +28,17 @@ self.addEventListener("push", (event) => {
   } catch (_) {
     data = { body: event.data ? event.data.text() : "Nueva alerta de precio" };
   }
-  event.waitUntil(self.registration.showNotification(data.title || "Precios", {
+  const options = {
     body: data.body || "Hay una nueva alerta de precio.",
     icon: data.icon || "/static/brand/icon-192.png",
     badge: data.badge || "/static/brand/icon-192.png",
     tag: data.tag || "precio-alerta",
     renotify: false,
     data: { url: data.url || "/siguiendo" },
-  }));
+  };
+  const image = notificationImage(data.image);
+  if (image) options.image = image;
+  event.waitUntil(self.registration.showNotification(data.title || "Precios", options));
 });
 
 self.addEventListener("notificationclick", (event) => {

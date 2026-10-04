@@ -355,7 +355,7 @@ def dispatch_predictive_alerts(repo: Any) -> dict[str, Any]:
                     user_id, "push", entity_key, product.get("price"),
                 )
                 if claimed:
-                    push_payload = {**payload, "image_url": original_image}
+                    push_payload = {**payload, "product_image_url": original_image}
                     delivered = send_user_push(user, push_payload, repo=repo, tag=entity_key) or delivered
             if delivered:
                 sends.insert_one({**key, "sent_at": datetime.now(timezone.utc), "channels": channels})

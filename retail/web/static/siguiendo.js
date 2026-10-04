@@ -120,6 +120,7 @@ function renderTelegramStatus(connected, telegram = "") {
 let pushRegistration = null;
 let pushSubscription = null;
 let pushPublicKey = "";
+const PUSH_SW_URL = "/push-sw-v2.js";
 
 function pushKeyBytes(value) {
   const padding = "=".repeat((4 - value.length % 4) % 4);
@@ -156,7 +157,7 @@ async function loadPushState() {
   }
   const config = await json("/api/account/push");
   pushPublicKey = config.public_key || "";
-  pushRegistration = await navigator.serviceWorker.register("/push-sw-v1.js", { scope: "/" });
+  pushRegistration = await navigator.serviceWorker.register(PUSH_SW_URL, { scope: "/" });
   pushSubscription = await pushRegistration.pushManager.getSubscription();
   renderPushStatus();
 }
@@ -181,7 +182,7 @@ async function togglePush() {
     renderPushStatus();
     throw new Error("El navegador no autorizó las notificaciones.");
   }
-  if (!pushRegistration) pushRegistration = await navigator.serviceWorker.register("/push-sw-v1.js", { scope: "/" });
+  if (!pushRegistration) pushRegistration = await navigator.serviceWorker.register(PUSH_SW_URL, { scope: "/" });
   pushSubscription = await pushRegistration.pushManager.subscribe({
     userVisibleOnly: true,
     applicationServerKey: pushKeyBytes(pushPublicKey),

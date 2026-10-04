@@ -636,8 +636,8 @@ def dispatch_user_alerts(
             payload = media_cache[key]
             text = _notification_text(payload)
             image_url = payload.get("image_url") or alert.image_url
-            # Push usa el payload original de producto; la captura es solo Telegram/correo.
-            push_payload = {**payload, "image_url": alert.image_url}
+            # La captura local no viaja en el push: web_push publica la URL o usa la foto.
+            push_payload = {**payload, "product_image_url": alert.image_url}
             user_id = str(user.get("_id") or user.get("id") or user.get("email") or "")
             if (
                 "telegram" in channels

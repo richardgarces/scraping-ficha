@@ -5,12 +5,24 @@ from __future__ import annotations
 import base64
 import json
 import os
+import socket
+import threading
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
 VAPID_SETTING = "web_push_vapid"
 MAX_SUBSCRIPTIONS = 10
+_CHALLENGE_MARKERS = (
+    "/cdn-cgi/challenge",
+    "cf-browser-verification",
+    "cf-challenge",
+    "challenges.cloudflare.com",
+)
+_public_lock = threading.Lock()
+_public_known = False
+_public_value = False
 
 
 def _b64url(value: bytes) -> str:
@@ -96,6 +108,99 @@ def subscription_payload(subscription: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def public_site_origin() -> str:
+    """Origen HTTPS del sitio. El celular baja la foto desde aquí, no desde un path local."""
+    raw = os.environ.get("PUBLIC_SITE_URL", "https://precios.meincart.cl").strip()
+    parsed = urlparse(raw)
+    if parsed.scheme == "https" and parsed.hostname:
+        host = parsed.hostname
+        if parsed.port and parsed.port != 443:
+            host = f"{host}:{parsed.port}"
+        return f"https://{host}"
+    return "https://precios.meincart.cl"
+
+
+def is_challenge_image_url(value: Any) -> bool:
+    """True si la URL es una intersticial de comprobación, no una foto de producto."""
+    text = str(value or "").strip().lower()
+    if not text:
+        return False
+    return any(marker in text for marker in _CHALLENGE_MARKERS)
+
+
+def _https_image(value: Any) -> str | None:
+    text = str(value or "").strip()
+    if not text or len(text) > 2000 or is_challenge_image_url(text):
+        return None
+    parsed = urlparse(text)
+    if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password:
+        return None
+    return text
+
+
+def clear_screenshot_public_cache() -> None:
+    global _public_known, _public_value
+    with _public_lock:
+        _public_known = False
+        _public_value = False
+
+
+def _local_web_listens() -> bool:
+    """El batch dentro de precios-web comparte el directorio que sirve /offer-shots."""
+    try:
+        with socket.create_connection(("127.0.0.1", 8080), timeout=0.3):
+            return True
+    except OSError:
+        return False
+
+
+def screenshots_are_public() -> bool:
+    """La captura local se puede publicar solo si este proceso es el sitio público.
+
+    En soyo el PNG queda en disco y el celular no puede bajarlo: el push usa
+    entonces la foto del producto. `OFFER_SCREENSHOT_PUBLIC=1` fuerza la URL
+    pública; `0` la apaga.
+    """
+    flag = os.environ.get("OFFER_SCREENSHOT_PUBLIC", "").strip().lower()
+    if flag in {"1", "true", "yes", "on"}:
+        return True
+    if flag in {"0", "false", "no", "off"}:
+        return False
+    if os.environ.get("PYTEST_CURRENT_TEST"):
+        return False
+    global _public_known, _public_value
+    with _public_lock:
+        if not _public_known:
+            _public_value = _local_web_listens()
+            _public_known = True
+        return _public_value
+
+
+def push_image_url(payload: dict[str, Any]) -> str | None:
+    """URL HTTPS de la misma foto de la oferta, o None si no hay una usable.
+
+    Captura válida y servible por el sitio → `https://precios.meincart.cl/offer-shots/…`.
+    Archivo solo local, o pantalla de comprobación → `image_url` del producto.
+    """
+    from retail.offer_screenshot import OFFER_SHOT_PREFIX, offer_shot_path
+
+    chosen = payload.get("image_url")
+    product = _https_image(payload.get("product_image_url"))
+    if is_challenge_image_url(chosen):
+        return product
+    text = str(chosen or "").strip()
+    if text and not text.startswith(("http://", "https://", "cid:", "data:")):
+        served = offer_shot_path(Path(text).name) if screenshots_are_public() else None
+        try:
+            same_file = served is not None and served == Path(text).resolve()
+        except OSError:
+            same_file = False
+        if same_file and served is not None:
+            return f"{public_site_origin()}{OFFER_SHOT_PREFIX}/{served.name}"
+        return product
+    return _https_image(text) or product
+
+
 def push_message(payload: dict[str, Any], *, tag: str = "") -> dict[str, Any]:
     extra = payload.get("extra") if isinstance(payload.get("extra"), dict) else {}
     name = str(payload.get("name") or payload.get("query") or "Producto")
@@ -106,10 +211,10 @@ def push_message(payload: dict[str, Any], *, tag: str = "") -> dict[str, Any]:
     except (TypeError, ValueError):
         money = ""
     detail = " · ".join(part for part in (store, money) if part)
-    message = str(payload.get("message") or "Cambio de precio detectado").strip()
-    body = f"{detail} — {message}" if detail else message
+    notice = str(payload.get("message") or "Cambio de precio detectado").strip()
+    body = f"{detail} — {notice}" if detail else notice
     url = str(payload.get("short_url") or "").strip() or "/siguiendo"
-    return {
+    message = {
         "title": name[:90],
         "body": body[:220],
         "url": url,
@@ -117,6 +222,10 @@ def push_message(payload: dict[str, Any], *, tag: str = "") -> dict[str, Any]:
         "icon": "/static/brand/icon-192.png",
         "badge": "/static/brand/icon-192.png",
     }
+    image = push_image_url(payload)
+    if image:
+        message["image"] = image
+    return message
 
 
 def send_user_push(

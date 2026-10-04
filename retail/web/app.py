@@ -32,6 +32,7 @@ from retail.web.forecasts_api import router as forecasts_router
 from retail.web.admin_analysis_api import router as admin_analysis_router
 from retail.web.push_api import router as push_router
 from retail.web.reviews_api import router as reviews_router
+from retail.offer_screenshot import offer_shot_media_type, offer_shot_path
 from retail.web.anti_scraping import (
     VISITOR_COOKIE,
     VISITOR_MAX_AGE,
@@ -73,9 +74,26 @@ def push_service_worker() -> FileResponse:
 
 
 @app.get("/push-sw-v1.js", include_in_schema=False)
+@app.get("/push-sw-v2.js", include_in_schema=False)
 def versioned_push_service_worker() -> FileResponse:
-    """Ruta versionada para evitar que un 404 previo quede retenido por el CDN."""
+    """v2 evita el JS cacheado. v1 sigue sirviendo el mismo script para no dejar suscripciones viejas sin la foto."""
     return push_service_worker()
+
+
+@app.get("/offer-shots/{name}", include_in_schema=False)
+def offer_shot(name: str) -> FileResponse:
+    """Sirve una captura ya guardada. No lista el directorio ni acepta otras rutas."""
+    path = offer_shot_path(name)
+    if path is None:
+        raise HTTPException(status_code=404, detail="Captura no disponible.")
+    return FileResponse(
+        path,
+        media_type=offer_shot_media_type(path),
+        headers={
+            "Cache-Control": "public, max-age=86400",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
 
 
 @app.get("/robots.txt", include_in_schema=False)
