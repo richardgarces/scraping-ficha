@@ -73,6 +73,11 @@ services:
       QDRANT_COLLECTION: ${QDRANT_COLLECTION:-products}
       REDIS_URL: redis://:${PRECIOS_REDIS_PASSWORD}@precios-redis:6379/0
 
+  real-offer-worker:
+    environment:
+      MONGODB_URI: mongodb://${PRECIOS_MONGO_USER}:${PRECIOS_MONGO_PASSWORD}@precios-mongo:27017/?authSource=admin
+      MONGODB_DB: ${MONGODB_DB:-scraping}
+
   # qdrant:
   #   ports:
   #     - "${BMAX_VPN_IP}:${PRECIOS_QDRANT_HOST_PORT:-6333}:6333"

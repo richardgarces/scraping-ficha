@@ -73,6 +73,35 @@ def test_price_drop_and_cross_store_rules():
     assert any("price_drop" in rule for rule in rules_hit)
     assert "cross_store_gap" in rules_hit
     assert alerts[0].price == 500000
+    drop = next(item for item in alerts if "price_drop" in item.rule)
+    gap = next(item for item in alerts if item.rule == "cross_store_gap")
+    assert (drop.reference_price, drop.saving, drop.discount) == (1000000, 500000, 50.0)
+    assert (gap.reference_price, gap.saving, gap.discount) == (950000, 450000, 47.4)
+
+
+def test_below_median_and_common_discount_store_reference():
+    from retail.batch.rules import notification_offers
+
+    row = {
+        "name": "Puma",
+        "store": "maxservice",
+        "price": 95192,
+        "price_normal": 118990,
+        "previous_price": 118990,
+        "price_delta": 0,
+        "price_stats": {
+            "median": 190990,
+            "percent_vs_median": -50.2,
+            "points": 5,
+        },
+    }
+    result = {"groups": [{"comparable": False, "offers": [row]}]}
+    alerts = notification_offers(result, {"id": "puma", "query": "puma"})
+    median = next(item for item in alerts if item.rule == "below_median")
+    common = next(item for item in alerts if item.rule == "common_discount")
+    assert (median.reference_price, median.saving, median.discount) == (118990, 23798, 20.0)
+    assert median.analysis_reference_price == 190990
+    assert (common.reference_price, common.saving, common.discount) == (118990, 23798, 20.0)
 
 
 def test_rules_ignore_small_moves():

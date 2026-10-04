@@ -5,7 +5,6 @@ from __future__ import annotations
 import base64
 import json
 import os
-import socket
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
@@ -145,21 +144,33 @@ def clear_screenshot_public_cache() -> None:
         _public_value = False
 
 
-def _local_web_listens() -> bool:
-    """El batch dentro de precios-web comparte el directorio que sirve /offer-shots."""
+def _local_web_serves_push() -> bool:
+    """True solo si en este host responde el service worker de Precios.
+
+    Un puerto 8080 de otra app (soyo tiene uno) no cuenta: la captura de ese
+    disco no está en precios.meincart.cl.
+    """
+    from urllib.request import Request, urlopen
+
     try:
-        with socket.create_connection(("127.0.0.1", 8080), timeout=0.3):
-            return True
-    except OSError:
+        request = Request(
+            "http://127.0.0.1:8080/push-sw-v2.js",
+            headers={"User-Agent": "precios-push"},
+        )
+        with urlopen(request, timeout=0.8) as response:
+            if getattr(response, "status", 200) != 200:
+                return False
+            chunk = response.read(4096)
+    except Exception:
         return False
+    return b"notificationImage" in chunk and b"showNotification" in chunk
 
 
 def screenshots_are_public() -> bool:
-    """La captura local se puede publicar solo si este proceso es el sitio público.
+    """La captura local se publica solo si este host sirve el push de Precios.
 
     En soyo el PNG queda en disco y el celular no puede bajarlo: el push usa
-    entonces la foto del producto. `OFFER_SCREENSHOT_PUBLIC=1` fuerza la URL
-    pública; `0` la apaga.
+    la foto del producto. `OFFER_SCREENSHOT_PUBLIC=1` fuerza la URL pública; `0` la apaga.
     """
     flag = os.environ.get("OFFER_SCREENSHOT_PUBLIC", "").strip().lower()
     if flag in {"1", "true", "yes", "on"}:
@@ -171,7 +182,7 @@ def screenshots_are_public() -> bool:
     global _public_known, _public_value
     with _public_lock:
         if not _public_known:
-            _public_value = _local_web_listens()
+            _public_value = _local_web_serves_push()
             _public_known = True
         return _public_value
 

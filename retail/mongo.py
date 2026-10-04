@@ -3,8 +3,10 @@ from __future__ import annotations
 import os
 import re
 import threading
+from hashlib import sha256
 from datetime import datetime, timedelta, timezone
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
 from retail.models import Product
 
@@ -58,6 +60,26 @@ def _json_time(value: Any) -> str | None:
 
 def _day(value: Any) -> str:
     return str(value or "")[:10]
+
+
+def stable_product_id(item: dict[str, Any]) -> str:
+    """Prefiere ID/SKU de tienda y usa una URL canónica solo como respaldo."""
+    for field in ("product_id", "sku_id"):
+        value = str(item.get(field) or "").strip()
+        if value:
+            return value
+    raw_url = str(item.get("url") or "").strip()
+    if not raw_url:
+        return ""
+    parsed = urlsplit(raw_url)
+    canonical = urlunsplit((
+        parsed.scheme.lower() or "https",
+        parsed.netloc.lower(),
+        re.sub(r"/+", "/", parsed.path).rstrip("/") or "/",
+        "",
+        "",
+    ))
+    return f"url:{sha256(canonical.encode('utf-8')).hexdigest()[:24]}"
 
 
 _ALERT_RULE_LABELS = {
@@ -176,6 +198,9 @@ class ProductRepository:
         self.store_categories = self.db["store_categories"]
         self.product_index_seed = self.db["product_index_seed"]
         self.product_index_queries = self.db["product_index_queries"]
+        self.search_results = self.db["search_results"]
+        self.real_offer_jobs = self.db["real_offer_jobs"]
+        self.daily_real_offers = self.db["daily_real_offers"]
         self.app_requests = self.db[APP_REQUESTS_COLLECTION]
         self.short_links = self.db["short_links"]
         # Validar los mismos índices para cada producto agrega muchas idas a
@@ -217,6 +242,58 @@ class ProductRepository:
         try:
             self.searches.create_index([("query", ASCENDING), ("created_at", DESCENDING)])
             self.searches.create_index([("created_at", DESCENDING)], name="search_created_at")
+            self.search_results.create_index(
+                [("search_id", ASCENDING), ("product_id", ASCENDING)],
+                unique=True,
+                name="search_product_unique",
+            )
+            self.search_results.create_index(
+                [("search_id", ASCENDING), ("position", ASCENDING)],
+                name="search_result_order",
+            )
+            self.search_results.create_index(
+                [("product_id", ASCENDING), ("created_at", DESCENDING)],
+                name="product_search_history",
+            )
+        except OperationFailure:
+            pass
+        try:
+            # Colecciones nuevas: remover únicamente duplicados de ellas antes
+            # de activar la garantía única (útil si quedaron de una prueba).
+            for target, key_fields in (
+                (self.real_offer_jobs, ("product_id", "day", "price_signature")),
+                (self.daily_real_offers, ("product_id", "day")),
+            ):
+                groups = target.aggregate([
+                    {
+                        "$group": {
+                            "_id": {field: f"${field}" for field in key_fields},
+                            "ids": {"$push": "$_id"},
+                            "count": {"$sum": 1},
+                        }
+                    },
+                    {"$match": {"count": {"$gt": 1}}},
+                ])
+                for duplicate in groups:
+                    target.delete_many({"_id": {"$in": duplicate["ids"][1:]}})
+            self.real_offer_jobs.create_index(
+                [("product_id", ASCENDING), ("day", ASCENDING), ("price_signature", ASCENDING)],
+                unique=True,
+                name="real_offer_job_dedupe",
+            )
+            self.real_offer_jobs.create_index(
+                [("status", ASCENDING), ("available_at", ASCENDING)],
+                name="real_offer_job_claim",
+            )
+            self.daily_real_offers.create_index(
+                [("product_id", ASCENDING), ("day", ASCENDING)],
+                unique=True,
+                name="daily_real_offer_product",
+            )
+            self.daily_real_offers.create_index(
+                [("day", ASCENDING), ("is_real", ASCENDING), ("evaluated_at", DESCENDING)],
+                name="daily_real_offer_listing",
+            )
         except OperationFailure:
             pass
         try:
@@ -571,7 +648,9 @@ class ProductRepository:
         extras: dict[tuple[str, str], dict[str, Any]] = {}
         shared = {key: value for key, value in (extra or {}).items() if value is not None}
         for offer in offers:
-            product = Product.from_dict(offer)
+            payload = dict(offer)
+            payload["product_id"] = stable_product_id(payload)
+            product = Product.from_dict(payload)
             if not product.product_id:
                 continue
             products.append(product)
@@ -597,32 +676,169 @@ class ProductRepository:
         store_errors: list[dict[str, str]],
         extra: dict[str, Any] | None = None,
     ) -> str:
+        from retail.relevance import fold
+
         now = _now()
         offers = [offer for group in groups for offer in group.get("offers") or []]
         document = {
             "query": query,
+            "query_normalized": fold(query),
             "source": source,
             "created_at": now,
             "offer_count": len(offers),
             "group_count": len(groups),
             "comparable_count": sum(1 for group in groups if group.get("comparable")),
             "store_errors": store_errors,
-            "cheapest": [
-                {
-                    "compare_code": group["compare_code"],
-                    "name": group["name"],
-                    "price": group["lowest_price"],
-                    "stores": group["lowest_stores"],
-                }
-                for group in groups
-                if group.get("comparable") and group.get("lowest_price") is not None
-            ],
-            "groups": groups,
+            "schema_version": 2,
+            "relation_status": "pending",
         }
         if extra:
-            document.update({key: value for key, value in extra.items() if value is not None})
+            forbidden = {"groups", "rows", "offers", "products", "cheapest"}
+            document.update({
+                key: value
+                for key, value in extra.items()
+                if value is not None and key not in forbidden
+            })
         result = self.searches.insert_one(document)
+        try:
+            relation_metrics = self._save_search_results(result.inserted_id, groups, created_at=now)
+            self.searches.update_one(
+                {"_id": result.inserted_id},
+                {
+                    "$set": {
+                        "relation_status": "complete",
+                        "result_count": relation_metrics["relations"],
+                    }
+                },
+            )
+        except Exception:
+            self.searches.update_one(
+                {"_id": result.inserted_id},
+                {"$set": {"relation_status": "failed"}},
+            )
+            raise
         return str(result.inserted_id)
+
+    def _save_search_results(
+        self,
+        search_id: Any,
+        groups: list[dict[str, Any]],
+        *,
+        created_at: datetime | None = None,
+    ) -> dict[str, int]:
+        """Relaciona una búsqueda con productos canónicos, sin copiar su payload."""
+        from pymongo import UpdateOne
+
+        positioned: list[tuple[int, int, int, dict[str, Any], dict[str, Any]]] = []
+        keys: list[tuple[str, str]] = []
+        seen: set[tuple[str, str]] = set()
+        position = 0
+        duplicates = 0
+        invalid = 0
+        for group_position, group in enumerate(groups):
+            for offer_position, offer in enumerate(group.get("offers") or []):
+                store = str(offer.get("store") or "").strip()
+                external_id = stable_product_id(offer)
+                key = (store, external_id)
+                if not store or not external_id:
+                    invalid += 1
+                    continue
+                if key in seen:
+                    duplicates += 1
+                    continue
+                seen.add(key)
+                keys.append(key)
+                positioned.append((position, group_position, offer_position, group, offer))
+                position += 1
+
+        canonical: dict[tuple[str, str], Any] = {}
+        for start in range(0, len(keys), 500):
+            wanted = keys[start : start + 500]
+            for row in self.collection.find(
+                {"$or": [{"store": store, "product_id": product_id} for store, product_id in wanted]},
+                {"store": 1, "product_id": 1},
+            ):
+                canonical[(str(row.get("store") or ""), str(row.get("product_id") or ""))] = row["_id"]
+
+        now = created_at or _now()
+        operations = []
+        for position, group_position, offer_position, group, offer in positioned:
+            store = str(offer.get("store") or "").strip()
+            external_id = stable_product_id(offer)
+            canonical_id = canonical.get((store, external_id))
+            if canonical_id is None:
+                continue
+            relation = {
+                "search_id": search_id,
+                "product_id": canonical_id,
+                "product_key": f"{store}:{external_id}",
+                "position": position,
+                "group_position": group_position,
+                "offer_position": offer_position,
+                "created_at": now,
+            }
+            group_key = group.get("compare_code") or offer.get("compare_code")
+            if group_key:
+                relation["group_key"] = str(group_key)
+            operations.append(
+                UpdateOne(
+                    {"search_id": search_id, "product_id": canonical_id},
+                    {"$set": relation},
+                    upsert=True,
+                )
+            )
+        if operations:
+            self.search_results.bulk_write(operations, ordered=False)
+        return {
+            "relations": len(operations),
+            "missing_products": len(keys) - len(canonical),
+            "duplicates": duplicates,
+            "invalid": invalid,
+        }
+
+    def search_with_results(self, search_id: Any) -> dict[str, Any] | None:
+        """Lee evento + productos en un único lookup, ordenado y sin N+1."""
+        from bson import ObjectId
+        from bson.errors import InvalidId
+
+        try:
+            ident = search_id if isinstance(search_id, ObjectId) else ObjectId(str(search_id))
+        except (InvalidId, TypeError):
+            return None
+        rows = list(self.searches.aggregate([
+            {"$match": {"_id": ident}},
+            {
+                "$lookup": {
+                    "from": self.search_results.name,
+                    "let": {"search_id": "$_id"},
+                    "pipeline": [
+                        {"$match": {"$expr": {"$eq": ["$search_id", "$$search_id"]}}},
+                        {"$sort": {"position": 1}},
+                        {
+                            "$lookup": {
+                                "from": self.collection.name,
+                                "localField": "product_id",
+                                "foreignField": "_id",
+                                "as": "product",
+                            }
+                        },
+                        {"$set": {"product": {"$first": "$product"}}},
+                    ],
+                    "as": "results",
+                }
+            },
+        ]))
+        if not rows:
+            return None
+        event = rows[0]
+        event["id"] = str(event.pop("_id"))
+        for relation in event.get("results") or []:
+            relation.pop("_id", None)
+            relation["search_id"] = str(relation.get("search_id") or "")
+            relation["product_id"] = str(relation.get("product_id") or "")
+            if isinstance(relation.get("product"), dict):
+                relation["product"].pop("_id", None)
+        return event
 
     def product_index_seed_empty(self) -> bool:
         return self.product_index_seed.find_one({}, {"_id": 1}) is None
@@ -826,7 +1042,165 @@ class ProductRepository:
         search_id = self.save_search(
             query, groups, source=source, store_errors=store_errors, extra=extra
         )
-        return {"search_id": search_id, **saved}
+        try:
+            queue = self.enqueue_real_offer_candidates(offers)
+        except Exception as exc:
+            print(f"Ofertas reales: no se pudo encolar candidatos ({exc}).")
+            self.record_real_offer_stats({"enqueue_errors": 1})
+            queue = {"candidates": 0, "enqueued": 0, "deduplicated": 0, "errors": 1}
+        return {"search_id": search_id, **saved, "real_offer_queue": queue}
+
+    def enqueue_real_offer_candidates(
+        self,
+        offers: list[dict[str, Any]],
+        *,
+        day: str | None = None,
+    ) -> dict[str, int]:
+        """Encola descuentos publicados por producto canónico, día y precio."""
+        from pymongo.errors import DuplicateKeyError
+        from retail.real_offer_worker import chile_day, price_signature, valid_discount
+
+        unique: dict[tuple[str, str], dict[str, Any]] = {}
+        for offer in offers:
+            if not valid_discount(offer):
+                continue
+            store = str(offer.get("store") or "").strip()
+            external_id = stable_product_id(offer)
+            if store and external_id:
+                unique[(store, external_id)] = offer
+        if not unique:
+            return {"candidates": 0, "enqueued": 0, "deduplicated": 0, "errors": 0}
+
+        canonical: dict[tuple[str, str], dict[str, Any]] = {}
+        keys = list(unique)
+        for start in range(0, len(keys), 500):
+            wanted = keys[start : start + 500]
+            for row in self.collection.find(
+                {"$or": [{"store": store, "product_id": product_id} for store, product_id in wanted]},
+                {"store": 1, "product_id": 1, "price": 1, "price_normal": 1},
+            ):
+                canonical[(str(row.get("store") or ""), str(row.get("product_id") or ""))] = row
+
+        now = _now()
+        local_day = day or chile_day(now)
+        enqueued = deduplicated = errors = 0
+        for key, offered in unique.items():
+            product = canonical.get(key)
+            if not product:
+                errors += 1
+                continue
+            signature = price_signature(product)
+            document = {
+                "product_id": product["_id"],
+                "day": local_day,
+                "price_signature": signature,
+                "price": int(product.get("price") or offered.get("price") or 0),
+                "price_normal": int(product.get("price_normal") or offered.get("price_normal") or 0),
+                "status": "queued",
+                "attempts": 0,
+                "available_at": now,
+                "created_at": now,
+                "updated_at": now,
+            }
+            try:
+                result = self.real_offer_jobs.update_one(
+                    {
+                        "product_id": product["_id"],
+                        "day": local_day,
+                        "price_signature": signature,
+                    },
+                    {"$setOnInsert": document},
+                    upsert=True,
+                )
+                if result.upserted_id is None:
+                    deduplicated += 1
+                else:
+                    enqueued += 1
+            except DuplicateKeyError:
+                deduplicated += 1
+            except Exception:
+                errors += 1
+        self.record_real_offer_stats({
+            "enqueued": enqueued,
+            "deduplicated": deduplicated,
+            "enqueue_errors": errors,
+        })
+        print(
+            f"Ofertas reales: candidatos={len(unique)} encoladas={enqueued} "
+            f"deduplicadas={deduplicated} errores={errors} día={local_day}."
+        )
+        return {
+            "candidates": len(unique),
+            "enqueued": enqueued,
+            "deduplicated": deduplicated,
+            "errors": errors,
+        }
+
+    def enqueue_today_real_offer_candidates(self, day: str | None = None) -> dict[str, int]:
+        """Backfill idempotente de descuentos presentes en búsquedas del día Chile."""
+        from retail.real_offer_worker import chile_day, chile_day_bounds
+
+        local_day = day or chile_day()
+        start, end = chile_day_bounds(local_day)
+        product_ids = self.search_results.distinct(
+            "product_id", {"created_at": {"$gte": start, "$lt": end}}
+        )
+        candidates = list(self.collection.find(
+            {
+                "_id": {"$in": product_ids},
+                "price": {"$gt": 0},
+                "$expr": {"$gt": ["$price_normal", "$price"]},
+            },
+            {
+                "_id": 0, "store": 1, "product_id": 1, "price": 1,
+                "price_normal": 1, "url": 1,
+            },
+        ))
+        result = self.enqueue_real_offer_candidates(candidates, day=local_day)
+        result["found_today"] = len(product_ids)
+        return result
+
+    def record_real_offer_stats(self, counters: dict[str, int]) -> None:
+        increments = {
+            f"counters.{key}": int(value)
+            for key, value in counters.items()
+            if value
+        }
+        update: dict[str, Any] = {"$set": {"updated_at": _now()}}
+        if increments:
+            update["$inc"] = increments
+        self.app_settings.update_one(
+            {"_id": "real_offer_worker_stats"},
+            update,
+            upsert=True,
+        )
+
+    def touch_real_offer_worker(self) -> None:
+        self.app_settings.update_one(
+            {"_id": "real_offer_worker_status"},
+            {
+                "$set": {
+                    "heartbeat_at": _now(),
+                    "host": os.environ.get("HOSTNAME") or "unknown",
+                    "criterion_version": "real-offer-v1",
+                }
+            },
+            upsert=True,
+        )
+
+    def real_offer_worker_status(self) -> dict[str, Any]:
+        status = self.app_settings.find_one({"_id": "real_offer_worker_status"}) or {}
+        stats = self.app_settings.find_one({"_id": "real_offer_worker_stats"}) or {}
+        heartbeat = _as_utc(status.get("heartbeat_at"))
+        healthy = bool(heartbeat and heartbeat >= _now() - timedelta(minutes=3))
+        return {
+            "healthy": healthy,
+            "heartbeat_at": _json_time(heartbeat),
+            "criterion_version": status.get("criterion_version"),
+            "counters": stats.get("counters") or {},
+            "queued": self.real_offer_jobs.count_documents({"status": {"$in": ["queued", "retry"]}}),
+            "failed": self.real_offer_jobs.count_documents({"status": "failed"}),
+        }
 
     def start_batch_run(self, data: dict[str, Any]) -> str:
         document = {
@@ -1396,7 +1770,7 @@ class ProductRepository:
             "items": rows,
         }
 
-    def real_offers(
+    def _legacy_real_offers(
         self,
         *,
         comparacion: bool = True,
@@ -1573,6 +1947,144 @@ class ProductRepository:
             "size": size,
             "stores": store_options,
             "categories": category_options,
+            "items": page_items,
+            "timesfm_signal_status": {**timesfm_status, "visible_signals": signals},
+        }
+
+    def real_offers(
+        self,
+        *,
+        comparacion: bool = True,
+        historial: bool = True,
+        iguales: bool = False,
+        text: str | None = None,
+        store: str | None = None,
+        category: str | None = None,
+        min_gap: float = 0,
+        min_super: float = 0,
+        page: int = 1,
+        size: int = 40,
+    ) -> dict[str, Any]:
+        """Lee exclusivamente marcas reales del día Chile; no clasifica en request."""
+        from retail.offer_forecast_signal import attach_offer_forecast_signals
+        from retail.predictive_alerts import predictive_validation_status
+        from retail.real_offer_worker import chile_day
+        from retail.reales import is_super_offer
+
+        timesfm_status = predictive_validation_status(self)
+        selected_kinds = {
+            kind for kind, enabled in (
+                ("comparacion", comparacion),
+                ("historial", historial),
+                ("iguales", iguales),
+            )
+            if enabled
+        }
+        if not selected_kinds:
+            return {
+                "total": 0, "page": page, "size": size, "items": [],
+                "stores": [], "categories": [], "day": chile_day(),
+                "timesfm_signal_status": timesfm_status,
+            }
+
+        today = chile_day()
+        rows = list(self.daily_real_offers.aggregate([
+            {"$match": {"day": today, "is_real": True}},
+            {
+                "$lookup": {
+                    "from": self.collection.name,
+                    "localField": "product_id",
+                    "foreignField": "_id",
+                    "as": "product",
+                }
+            },
+            {"$set": {"product": {"$first": "$product"}}},
+            {
+                "$match": {
+                    "product": {"$ne": None},
+                    "$expr": {"$eq": ["$evaluated_price", "$product.price"]},
+                }
+            },
+            {
+                "$project": {
+                    "_id": 0, "analysis": 1, "evaluated_at": 1,
+                    "evaluated_price": 1, "criterion_version": 1,
+                    "product.store": 1, "product.product_id": 1,
+                    "product.name": 1, "product.brand": 1,
+                    "product.catalog_category": 1, "product.category": 1,
+                    "product.url": 1, "product.updated_at": 1,
+                    "product.image_url": 1, "product.thumbnail.mime": 1,
+                }
+            },
+        ]))
+        found: list[dict[str, Any]] = []
+        needle = str(text or "").strip().casefold()
+        wanted_store = str(store or "").strip().casefold()
+        wanted_category = str(category or "").strip().casefold()
+        all_stores: set[str] = set()
+        all_categories: set[str] = set()
+        for row in rows:
+            product = row.get("product") or {}
+            card = {
+                **(row.get("analysis") or {}),
+                "store": product.get("store"),
+                "product_id": product.get("product_id"),
+                "name": product.get("name"),
+                "brand": product.get("brand"),
+                "category": product.get("catalog_category") or product.get("category"),
+                "url": product.get("url"),
+                "updated_at": _json_time(product.get("updated_at")),
+                "evaluated_at": _json_time(row.get("evaluated_at")),
+                "evaluated_price": row.get("evaluated_price"),
+                "criterion_version": row.get("criterion_version"),
+                "has_thumb": bool(product.get("image_url") or product.get("thumbnail")),
+            }
+            kinds = set(card.get("kinds") or [])
+            if not kinds.intersection(selected_kinds):
+                continue
+            if card.get("store"):
+                all_stores.add(str(card["store"]))
+            if card.get("category"):
+                all_categories.add(str(card["category"]))
+            if needle:
+                blob = " ".join(
+                    str(card.get(key) or "")
+                    for key in ("name", "brand", "store", "compare_code", "category")
+                ).casefold()
+                if needle not in blob:
+                    continue
+            if wanted_store and str(card.get("store") or "").casefold() != wanted_store:
+                continue
+            if wanted_category and str(card.get("category") or "").casefold() != wanted_category:
+                continue
+            if float(min_gap or 0) > float(card.get("gap_percent") or 0):
+                continue
+            if float(min_super or 0) > 0 and not is_super_offer(card, float(min_super)):
+                continue
+            found.append(card)
+
+        found.sort(key=lambda item: (
+            -float(item.get("gap_percent") or 0),
+            -float(item.get("offer_score") or 0),
+            str(item.get("name") or ""),
+        ))
+        skip = max(0, (page - 1) * size)
+        page_items = found[skip : skip + size]
+        signals = 0
+        if timesfm_status["enabled"] and page_items:
+            keys = [
+                f"{str(item.get('store') or '').strip().lower()}:{str(item.get('product_id') or '').strip()}"
+                for item in page_items
+            ]
+            forecasts = list(self.forecasts.find(
+                {"forecast_key": {"$in": keys}, "model": "timesfm"},
+                {"_id": 0, "forecast_key": 1, "model": 1, "horizon": 1,
+                 "point_forecast": 1, "quantiles": 1, "metadata": 1, "generated_at": 1},
+            ).sort("generated_at", -1))
+            signals = attach_offer_forecast_signals(page_items, forecasts)
+        return {
+            "total": len(found), "page": page, "size": size, "day": today,
+            "stores": sorted(all_stores), "categories": sorted(all_categories, key=str.casefold),
             "items": page_items,
             "timesfm_signal_status": {**timesfm_status, "visible_signals": signals},
         }
@@ -1920,6 +2432,9 @@ class ProductRepository:
                     "url": getattr(alert, "url", None),
                     "compare_code": getattr(alert, "compare_code", None),
                     "saving": int(getattr(alert, "saving", 0) or 0),
+                    "reference_price": getattr(alert, "reference_price", None),
+                    "analysis_reference_price": getattr(alert, "analysis_reference_price", None),
+                    "discount": float(getattr(alert, "discount", 0) or 0),
                     "category": getattr(alert, "category", None),
                     "extra": getattr(alert, "extra", None),
                 }
@@ -1928,17 +2443,58 @@ class ProductRepository:
         return len(documents)
 
     @staticmethod
-    def _deal_discount(item: dict[str, Any]) -> float:
+    def _deal_reference(item: dict[str, Any]) -> tuple[int | None, int | None]:
         extra = item.get("extra") or {}
-        if extra.get("gap_percent"):
-            return round(float(extra["gap_percent"]), 1)
-        saving = int(item.get("saving") or 0)
-        before = item.get("previous_price")
-        if before and before > 0 and saving:
-            return round(100 * saving / before, 1)
-        price = item.get("price") or 0
-        if price and saving:
-            return round(100 * saving / (price + saving), 1)
+        rule = str(item.get("rule") or "")
+        current = item.get("price")
+        reference = item.get("reference_price")
+        if "below_median" in rule:
+            reference = item.get("price_normal") or reference
+        elif "cross_store_gap" in rule:
+            reference = extra.get("second_total") or extra.get("second_price") or reference
+            current = extra.get("comparison_price") or current
+            if extra.get("comparison_basis") == "landed_price" and not extra.get("comparison_price"):
+                current = int(current or 0) + int(extra.get("shipping_cost") or 0)
+        elif "price_drop" in rule:
+            reference = item.get("previous_price") or extra.get("previous_price") or reference
+        elif "common_discount" in rule:
+            reference = item.get("price_normal") or extra.get("previous_price") or reference
+        try:
+            return int(reference) if reference is not None else None, int(current) if current is not None else None
+        except (TypeError, ValueError):
+            return None, None
+
+    @classmethod
+    def _deal_saving(cls, item: dict[str, Any]) -> int:
+        reference, current = cls._deal_reference(item)
+        if reference and reference > 0 and current and current > 0:
+            return max(reference - current, 0)
+        if "below_median" in str(item.get("rule") or ""):
+            return 0
+        if "reference_price" in item:
+            return 0
+        return max(0, int(item.get("saving") or 0))
+
+    @classmethod
+    def _deal_discount(cls, item: dict[str, Any]) -> float:
+        extra = item.get("extra") or {}
+        rule = str(item.get("rule") or "")
+        if extra.get("gap_percent") is not None:
+            percent = float(extra["gap_percent"])
+            return round(percent, 1) if percent > 0 else 0.0
+        reference, current = cls._deal_reference(item)
+        if reference and reference > 0 and current and 0 < current < reference:
+            saving = reference - current
+            return round(100 * saving / reference, 1)
+        if "below_median" in rule:
+            return 0.0
+        if reference is not None or "reference_price" in item:
+            return 0.0
+        saving = max(0, int(item.get("saving") or 0))
+        price = int(item.get("price") or 0)
+        fallback_reference = price + saving
+        if price > 0 and saving > 0 and fallback_reference > 0:
+            return round(100 * saving / fallback_reference, 1)
         return 0.0
 
     @staticmethod
@@ -2001,6 +2557,7 @@ class ProductRepository:
             seen.add(key)
             extra = item.get("extra") or {}
             gap = extra.get("gap_percent")
+            reference, _comparison_price = self._deal_reference(item)
             row = {
                 "id": str(item["_id"]),
                 "day": item.get("day"),
@@ -2012,7 +2569,18 @@ class ProductRepository:
                 "store": item.get("store"),
                 "price": item.get("price"),
                 "previous_price": item.get("previous_price") or extra.get("previous_price"),
-                "saving": item.get("saving") or 0,
+                "reference_price": reference,
+                "analysis_reference_price": item.get("analysis_reference_price") or (
+                    extra.get("median") if "below_median" in str(item.get("rule") or "") else None
+                ),
+                "analysis_discount_pct": (
+                    round(abs(float(extra["percent_vs_median"])), 1)
+                    if "below_median" in str(item.get("rule") or "")
+                    and extra.get("percent_vs_median") is not None
+                    and float(extra["percent_vs_median"]) < 0
+                    else 0
+                ),
+                "saving": self._deal_saving(item),
                 "discount": self._deal_discount(item),
                 "gap_percent": round(float(gap), 1) if gap else 0,
                 "message": item.get("message"),

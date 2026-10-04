@@ -342,10 +342,12 @@ def health() -> dict:
     repo = connect_repo()
     mongo = False
     products = 0
+    real_offer_worker = {"healthy": False}
     if repo is not None:
         mongo = True
         try:
             products = repo.count()
+            real_offer_worker = repo.real_offer_worker_status()
         except Exception:
             products = 0
         repo.close()
@@ -362,6 +364,7 @@ def health() -> dict:
         "mongo": mongo,
         "qdrant": qdrant is not None,
         "redis": redis_ok,
+        "real_offer_worker": real_offer_worker,
         "stores": len(list_stores()),
         "products": products,
     }

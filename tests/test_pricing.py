@@ -137,7 +137,10 @@ def test_below_median_rule_and_saving():
     result = {"groups": [{"comparable": False, "offers": [_offer(80000, 100000, stats)]}]}
     alerts = detect_offers(result, {"id": "s25", "query": "galaxy s25", "category": "smartphones"}, rules)
     assert [alert.rule for alert in alerts] == ["below_median"]
-    assert alerts[0].saving == 20000
+    assert alerts[0].saving == 0
+    assert alerts[0].discount == 0
+    assert alerts[0].reference_price is None
+    assert alerts[0].analysis_reference_price == 100000
     assert alerts[0].category == "smartphones"
 
 
@@ -257,7 +260,9 @@ def test_new_pages_and_apis_are_wired():
     assert "% vs otra tienda" in reales
     assert 'id="min-gap"' in reales
     assert "Super ofertas: descuento superior al 50%" in reales
-    assert "reales.js?v=16" in reales
+    assert "reales.js?v=18" in reales
+    hoy_js = Path("retail/web/static/hoy.js").read_text()
+    assert "esta referencia histórica no es el precio normal publicado" in hoy_js
 
 
 def test_deal_sort_orders_price_name_and_gap():
@@ -282,6 +287,59 @@ def test_deal_sort_orders_price_name_and_gap():
     assert ProductRepository._deal_discount(drop) == 20.0
     gap = {"saving": 50000, "price": 50000, "extra": {"gap_percent": 95.2}}
     assert ProductRepository._deal_discount(gap) == 95.2
+
+
+def test_deal_discount_uses_semantic_reference_and_safe_invalid_values():
+    from retail.mongo import ProductRepository
+
+    below_median = {
+        "rule": "below_median",
+        "price": 95192,
+        "price_normal": 118990,
+        "reference_price": 118990,
+        "analysis_reference_price": 190990,
+        "previous_price": 118990,
+        "saving": 23798,
+        "extra": {"median": 190990, "percent_vs_median": -50.2},
+    }
+    assert ProductRepository._deal_discount(below_median) == 20.0
+    assert ProductRepository._deal_saving(below_median) == 23798
+    without_normal = {
+        "rule": "below_median",
+        "price": 95192,
+        "saving": 95798,
+        "extra": {"median": 190990, "percent_vs_median": -50.2},
+    }
+    assert ProductRepository._deal_discount(without_normal) == 0.0
+    assert ProductRepository._deal_saving(without_normal) == 0
+    assert ProductRepository._deal_discount({
+        "rule": "price_drop_percent",
+        "price": 80000,
+        "previous_price": 100000,
+        "reference_price": 100000,
+        "saving": 20000,
+        "extra": {},
+    }) == 20.0
+    assert ProductRepository._deal_discount({
+        "rule": "common_discount",
+        "price": 70000,
+        "price_normal": 100000,
+        "reference_price": 100000,
+        "extra": {},
+    }) == 30.0
+    assert ProductRepository._deal_discount({
+        "rule": "cross_store_gap",
+        "price": 60000,
+        "reference_price": 100000,
+        "extra": {"comparison_price": 60000},
+    }) == 40.0
+    for reference in (None, 0):
+        assert ProductRepository._deal_discount({
+            "price": 80000, "saving": 20000, "reference_price": reference, "extra": {},
+        }) == 0.0
+    assert ProductRepository._deal_discount({
+        "price": 100000, "reference_price": 90000, "saving": 99999, "extra": {},
+    }) == 0.0
 
 
 def test_thumbnail_shrinks_and_roundtrips():

@@ -136,3 +136,33 @@ def test_alert_exists_looks_beyond_today():
     assert repo.alert_exists(Alert()) is True
     repo.alerts = _Alerts([])
     assert repo.alert_exists(Alert()) is False
+
+
+def test_deals_corrects_legacy_below_median_discount():
+    repo = ProductRepository.__new__(ProductRepository)
+    repo.alerts = _Alerts([{
+        "_id": "legacy-puma",
+        "day": "2026-10-02",
+        "store": "maxservice",
+        "name": "Puma",
+        "price": 95192,
+        "price_normal": 118990,
+        "reference_price": 118990,
+        "analysis_reference_price": 190990,
+        "previous_price": 118990,
+        "saving": 23798,
+        "discount": 20.0,
+        "rule": "below_median",
+        "extra": {
+            "product_id": "300000671",
+            "median": 190990,
+            "percent_vs_median": -50.2,
+        },
+    }])
+
+    found = repo.deals(day="2026-10-02")
+    assert found["items"][0]["discount"] == 20.0
+    assert found["items"][0]["saving"] == 23798
+    assert found["items"][0]["reference_price"] == 118990
+    assert found["items"][0]["analysis_reference_price"] == 190990
+    assert found["items"][0]["analysis_discount_pct"] == 50.2

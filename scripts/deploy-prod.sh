@@ -61,7 +61,7 @@ mkdir -p "${ROOT_DIR}/logs" "${ROOT_DIR}/output"
 
 IFS='|' read -r -a build_cmd <<<"${SPEC}"
 "${build_cmd[@]}" build
-compose_up_safe "$SPEC" precios-web precios-mongo precios-qdrant precios-redis
+compose_up_safe "$SPEC" precios-web precios-real-offer-worker precios-mongo precios-qdrant precios-redis
 
 # Caddy conserva durante un tiempo la IP resuelta del contenedor anterior.
 # Recargarlo después de recrear `precios-web` evita servir la release vieja.

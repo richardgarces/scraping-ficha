@@ -41,9 +41,8 @@ services:
   web:
     build:
       context: .
-      # Slim por defecto. Para capturas en alertas: dockerfile: Dockerfile.screenshots
-      # y OFFER_SCREENSHOTS=1 en .env (ver docs/offer_screenshots.md).
-      dockerfile: Dockerfile
+      # Producción incluye Playwright/Chromium para OFFER_SCREENSHOTS=1.
+      dockerfile: Dockerfile.screenshots
     container_name: precios-web
     restart: unless-stopped
     env_file:
@@ -79,6 +78,31 @@ services:
       timeout: 5s
       retries: 8
       start_period: 25s
+
+  real-offer-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: precios-real-offer-worker
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      MONGODB_URI: mongodb://precios-mongo:27017
+      MONGODB_DB: ${MONGODB_DB:-scraping}
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONUNBUFFERED: "1"
+    command: ["python", "-m", "retail.real_offer_worker"]
+    depends_on:
+      mongo:
+        condition: service_healthy
+    mem_limit: 768m
+    healthcheck:
+      test: ["CMD", "python", "-m", "retail.real_offer_worker", "--healthcheck"]
+      interval: 30s
+      timeout: 8s
+      retries: 4
+      start_period: 30s
 
 volumes:
   mongo_data:

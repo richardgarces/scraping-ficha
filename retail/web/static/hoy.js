@@ -208,6 +208,9 @@ function dealCard(item) {
     : item.url
       ? `<a class="deal-cta" href="${attr(item.url)}" target="_blank" rel="noreferrer">Ver oferta</a>`
       : "";
+  const analysis = item.analysis_discount_pct
+    ? `<p class="muted">${Number(item.analysis_discount_pct).toLocaleString("es-CL")}% bajo su precio habitual (${money(item.analysis_reference_price)}); esta referencia histórica no es el precio normal publicado.</p>`
+    : "";
   return `
     <article class="panel deal">
       ${image}
@@ -229,6 +232,7 @@ function dealCard(item) {
           </div>
         </div>
         <p class="deal-reason"><span>Motivo</span> ${attr(ruleLabel(item.rule))}</p>
+        ${analysis}
       </div>
     </article>`;
 }

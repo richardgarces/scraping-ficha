@@ -23,6 +23,9 @@ class Alert:
     category: str | None = None
     image_url: str | None = None
     price_normal: int | None = None
+    reference_price: int | None = None
+    analysis_reference_price: int | None = None
+    discount: float = 0.0
 
 
 def load_rules(path=None) -> dict[str, Any]:
@@ -80,7 +83,7 @@ def notification_offers(result: dict[str, Any], catalog_item: dict[str, Any]) ->
                 row,
                 f"{percent:.1f}% de descuento en {row.get('store_title') or row.get('store')}",
                 {"previous_price": normal, "percent": round(percent, 2)},
-                saving=normal - price,
+                reference_price=normal,
             ))
     return alerts
 
@@ -125,7 +128,7 @@ def _drop_alerts(
                 row,
                 f"Bajó {percent:.1f}% (${drop:,}) en {row.get('store_title') or row.get('store')}".replace(",", "."),
                 {"previous_price": previous, "drop": drop, "percent": round(percent, 2), "fake_discount": fake},
-                saving=drop,
+                reference_price=int(previous),
             )
         )
     return found
@@ -161,7 +164,7 @@ def _median_alerts(
                     f"{abs(percent):.0f}% bajo su precio habitual (${int(median):,})"
                 ).replace(",", "."),
                 {"median": int(median), "percent_vs_median": percent, "window_days": 90},
-                saving=saving,
+                analysis_reference_price=int(median),
             )
         )
     return found
@@ -224,8 +227,10 @@ def _gap_alerts(
                 "entity_confidence": confidence,
                 "entity_match_method": group.get("entity_match_method"),
                 "gap_percent": round(percent, 2),
+                "comparison_price": lowest_value,
             },
-            saving=gap,
+            reference_price=second_value,
+            comparison_price=lowest_value,
         )
     ]
 
@@ -262,7 +267,7 @@ def watch_alerts(result: dict[str, Any], watch: dict[str, Any]) -> list[Alert]:
                     f"en {best.get('store_title') or best.get('store')}"
                 ).replace(",", "."),
                 {"previous_price": previous, "direction": direction},
-                saving=max(0, previous - price),
+                reference_price=previous,
             )
         ]
     if target and price <= int(target):
@@ -277,7 +282,7 @@ def watch_alerts(result: dict[str, Any], watch: dict[str, Any]) -> list[Alert]:
                     f"en {best.get('store_title') or best.get('store')}, bajo tu objetivo de ${int(target):,}"
                 ).replace(",", "."),
                 {"target_price": int(target)},
-                saving=saving,
+                reference_price=int(target),
             )
         ]
     if drop_percent:
@@ -295,7 +300,7 @@ def watch_alerts(result: dict[str, Any], watch: dict[str, Any]) -> list[Alert]:
                         f"respecto de su precio habitual (${int(median):,})"
                     ).replace(",", "."),
                     {"drop_percent": float(drop_percent), "median": int(median)},
-                    saving=max(0, int(median) - price),
+                    analysis_reference_price=int(median),
                 )
             ]
     return []
@@ -308,8 +313,20 @@ def _alert(
     message: str,
     extra: dict[str, Any],
     saving: int = 0,
+    reference_price: int | None = None,
+    analysis_reference_price: int | None = None,
+    comparison_price: int | None = None,
 ) -> Alert:
     stats = _stats(row)
+    current = int(comparison_price if comparison_price is not None else row.get("price") or 0)
+    published_normal = row.get("price_normal")
+    reference = int(reference_price) if reference_price not in (None, "") else (
+        int(published_normal)
+        if published_normal not in (None, "") and int(published_normal) > current
+        else None
+    )
+    semantic_saving = max(reference - current, 0) if reference and reference > 0 and current > 0 else 0
+    discount = round(100 * semantic_saving / reference, 1) if reference and semantic_saving else 0.0
     return Alert(
         catalog_id=str(catalog_item.get("id") or ""),
         query=str(catalog_item.get("query") or ""),
@@ -345,8 +362,11 @@ def _alert(
             "shipping_region": row.get("shipping_region"),
             "pickup_available": row.get("pickup_available"),
         },
-        saving=max(0, int(saving)),
+        saving=semantic_saving if reference is not None else max(0, int(saving)),
         category=catalog_item.get("category"),
         image_url=str(row.get("image_url") or "").strip() or None,
+        reference_price=reference,
+        analysis_reference_price=analysis_reference_price,
+        discount=discount,
         price_normal=row.get("price_normal"),
     )
