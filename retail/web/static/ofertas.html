@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#258fdf">
   <title>Ofertas y alertas</title>
   <script>(function(){var m=localStorage.getItem("retail-theme");if(m==="day"||m==="night"){document.documentElement.dataset.theme=m;return;}var h=new Date().getHours();document.documentElement.dataset.theme=(h>=7&&h<19)?"day":"night";})();</script>
-  <link rel="stylesheet" href="/static/styles.css?v=77">
+  <link rel="stylesheet" href="/static/styles.css?v=82">
 </head>
 <body>
   <header class="top">
@@ -52,7 +52,7 @@
     </div>
   </header>
   <main class="settings">
-    <p id="flash" class="summary" hidden></p>
+    <p id="flash" class="summary" hidden role="status" aria-live="polite"></p>
 
     <div class="settings-grid">
     <section class="panel">
@@ -98,6 +98,19 @@
       </form>
     </section>
     </div>
+
+    <section class="panel" id="capturas-oferta">
+      <h2>Capturas de oferta</h2>
+      <form id="screenshots-form" class="form-grid">
+        <label class="check span">
+          <input type="checkbox" id="offer_screenshots_enabled">
+          Adjuntar captura de la página en Telegram y correo
+        </label>
+        <p id="offer-screenshots-hint" class="muted span"></p>
+        <p class="muted span">Si lo apagas, los avisos usan la foto del producto aunque el servidor tenga <code>OFFER_SCREENSHOTS</code> activo. Si lo prendes y no hay Playwright, se mantiene esa misma foto. El push al celular no lleva captura.</p>
+        <button type="submit">Guardar capturas</button>
+      </form>
+    </section>
 
     <section class="panel" id="pruebas-aviso">
       <h2>Pruebas de aviso</h2>
@@ -174,6 +187,6 @@
     </section>
   </main>
   <script src="/static/prices.js?v=30"></script>
-  <script src="/static/settings.js?v=12"></script>
+  <script src="/static/settings.js?v=14"></script>
 </body>
 </html>

@@ -29,6 +29,8 @@ OFFER_SCREENSHOT_RETENTION_DAYS=7
 
 Si `OFFER_SCREENSHOTS` no está en `1`/`true`, o falta Playwright/Chromium, el envío usa el `image_url` del producto como hasta ahora. Un fallo de captura **nunca** tumba el aviso.
 
+El admin puede apagar o prender las capturas en **Configurar** (`/ofertas`), sección «Capturas de oferta». Ese valor se guarda en Mongo `app_settings` con `_id` `offer_screenshots` (`enabled`: true/false) y lo leen tanto `precios-web` como el batch de soyo. Si no hay documento, sigue valiendo `OFFER_SCREENSHOTS`. Si el admin lo apaga, no se captura aunque el env esté en `1`. Si lo prende, se captura solo cuando Playwright/Chromium están disponibles; si no, se usa la foto del producto.
+
 ## Almacenamiento y limpieza
 
 - Archivos PNG en `output/offer_screenshots/` (volumen `./output` del compose).

@@ -21,6 +21,7 @@ from retail.registry import list_stores
 from retail.search import connect_repo
 from retail.batch.basic_scrape import BasicScrapeBusy
 from retail.batch.store_scope import normalize_store
+from retail.offer_screenshot import offer_screenshot_status, save_offer_screenshots_enabled
 from retail.web.jobs import (
     batch_status,
     start_basic_scrape,
@@ -47,6 +48,7 @@ def get_settings(request: Request) -> dict:
             "channels": mask_channels(load_channels()),
             "schedule": schedule_status(repo),
             "catalog": load_catalog(),
+            "offer_screenshots": offer_screenshot_status(repo),
         }
     finally:
         repo.close()
@@ -88,6 +90,24 @@ def get_schedule(request: Request) -> dict:
     try:
         current_user(request, repo, admin=True)
         return schedule_status(repo)
+    finally:
+        repo.close()
+
+
+@router.put("/api/settings/offer-screenshots")
+async def put_offer_screenshots(request: Request) -> dict:
+    """Activa o apaga las capturas de oferta. El valor queda en Mongo `app_settings`."""
+    repo = connect_repo()
+    if repo is None:
+        raise HTTPException(status_code=503, detail="MongoDB no está disponible.")
+    try:
+        current_user(request, repo, admin=True)
+        body = await request.json()
+        if not isinstance(body, dict) or not isinstance(body.get("enabled"), bool):
+            raise HTTPException(status_code=400, detail="Indica si las capturas quedan activadas.")
+        return save_offer_screenshots_enabled(body["enabled"], repo)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail="No se pudo guardar el ajuste de capturas.") from exc
     finally:
         repo.close()
 

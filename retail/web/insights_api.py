@@ -20,6 +20,11 @@ from retail.ficha_extra import (
 from retail.ficha_sweep import iter_ficha_sweep
 from retail.models import normalize_product_url
 from retail.pricing import buy_or_wait, chart_history, classified_drop_events, parse_moment, price_stats, series
+from retail.offer_screenshot import (
+    annotate_store_bot_checks,
+    bot_check_api_rows,
+    list_store_bot_checks,
+)
 from retail.registry import list_stores
 from retail.search import connect_repo
 from retail.web.deps import current_user
@@ -626,6 +631,8 @@ def stores_report(
             row["display_store"], row["store_title"] = display_store(row)
             rows.append(row)
         rows.sort(key=lambda item: (item["fake_percent"] is None, -(item["fake_percent"] or 0)))
+        checks = list_store_bot_checks(repo)
+        annotate_store_bot_checks(rows, checks)
         seguidos = max((row["days_tracked"] for row in rows), default=0)
         return {
             "stores": rows,
@@ -633,6 +640,7 @@ def stores_report(
             # Con pocas semanas encima el ranking dice más del azar que de la tienda.
             "ready": seguidos >= REPORT_MIN_DAYS,
             "min_days": REPORT_MIN_DAYS,
+            "bot_checks": bot_check_api_rows(checks),
         }
     finally:
         repo.close()

@@ -8,6 +8,30 @@ import pytest
 from pymongo import MongoClient
 from pymongo.errors import ConnectionFailure
 
+import retail.offer_screenshot as offer_screenshot
+
+_REAL_LOAD_STORED_SCREENSHOTS = offer_screenshot.load_stored_screenshots_enabled
+
+
+@pytest.fixture(autouse=True)
+def _offer_screenshots_follow_env_unless_overridden(monkeypatch):
+    """Sin repo inyectado, las pruebas no consultan el Mongo del desarrollador.
+
+    `screenshots_enabled()` sigue `OFFER_SCREENSHOTS` salvo que la prueba pase
+    un repo o guarde el ajuste. Así el cron y el admin comparten la misma
+    decisión, y la suite no depende de un documento real.
+    """
+
+    def _load(repo=None):
+        if repo is None:
+            return None
+        return _REAL_LOAD_STORED_SCREENSHOTS(repo)
+
+    offer_screenshot.clear_screenshots_setting_cache()
+    monkeypatch.setattr(offer_screenshot, "load_stored_screenshots_enabled", _load)
+    yield
+    offer_screenshot.clear_screenshots_setting_cache()
+
 
 @pytest.fixture
 def anonymous_repo(monkeypatch):

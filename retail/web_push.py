@@ -49,6 +49,25 @@ def vapid_keys(repo: Any) -> dict[str, str]:
     return generated
 
 
+def vapid_for_webpush(private_key: str) -> Any:
+    """Adapta la clave privada al formato que pywebpush 2 sí acepta.
+
+    ``webpush()`` pasa el string a ``Vapid.from_string``. Esa función solo
+    entiende 32 bytes crudos o DER en base64url. Un PEM PKCS8 (el formato que
+    guardamos) se decodifica mal y cryptography responde
+    «ASN.1 parsing error: invalid length», así que el aviso nunca sale.
+    Un objeto ``Vapid`` ya cargado sí lo acepta.
+    """
+    text = (private_key or "").strip().replace("\\n", "\n")
+    if "BEGIN" not in text:
+        return text
+    from cryptography.hazmat.primitives import serialization
+    from py_vapid import Vapid
+
+    key = serialization.load_pem_private_key(text.encode("ascii"), password=None)
+    return Vapid(key)
+
+
 def normalize_subscription(raw: Any) -> dict[str, Any]:
     data = raw if isinstance(raw, dict) else {}
     endpoint = str(data.get("endpoint") or "").strip()
@@ -110,7 +129,7 @@ def send_user_push(
     try:
         from pywebpush import WebPushException, webpush
 
-        private_key = vapid_keys(repo)["private_key"]
+        private_key = vapid_for_webpush(vapid_keys(repo)["private_key"])
     except Exception as exc:
         print(f"Web Push no disponible: {exc}")
         return False
@@ -135,6 +154,7 @@ def send_user_push(
             )
             active.append(subscription)
             sent = True
+            print("Web Push enviado.")
         except WebPushException as exc:
             status = getattr(getattr(exc, "response", None), "status_code", None)
             if status in {404, 410}:

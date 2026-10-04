@@ -127,6 +127,12 @@ def test_email_filters_have_compact_responsive_controls():
     assert 'src="/static/siguiendo.js?v=' in html
     assert 'href="/static/styles.css?v=' in html
     assert "Celular (push)" in html
+    assert "Verificando…" in js
+    assert "Verificando la conexión con Telegram…" in js
+    assert "Tus preferencias de notificación quedaron guardadas." in js
+    assert "No se pudo verificar la conexión." in js
+    assert 'id="telegram-status"' in html
+    assert 'aria-live="polite"' in html
 
 
 def test_catalog_editor_limits_rows_without_dropping_hidden_products():
@@ -137,6 +143,10 @@ def test_catalog_editor_limits_rows_without_dropping_hidden_products():
     assert "products.filter((_item, index) => !removedCatalogIndexes.has(index)).concat(added)" in js
     assert 'id="catalog-limit-note"' in html
     assert 'src="/static/settings.js?v=' in html
+    assert "Reglas guardadas." in js
+    assert "Canales guardados." in js
+    assert "Catálogo guardado." in js
+    assert "data-action-status" in js
 
 
 def test_telegram_test_reports_missing_token_without_secrets(monkeypatch):

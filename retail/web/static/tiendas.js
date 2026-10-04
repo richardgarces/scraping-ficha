@@ -195,6 +195,35 @@ async function openDrops(button) {
   paintDrops();
 }
 
+function botCheckBadge(row) {
+  if (!row || !row.bot_check) return "";
+  const when = formatWhen(row.bot_check_last_seen_at);
+  const hint = when
+    ? `Comprobación antibot vista el ${when}. Esa captura no se adjunta.`
+    : "Comprobación antibot. Esa captura no se adjunta.";
+  return ` <span class="badge" title="${attr(hint)}">comprobación antibot</span>`;
+}
+
+function renderBotChecks(checks) {
+  const box = $("bot-checks");
+  const list = checks || [];
+  if (!list.length) {
+    box.hidden = true;
+    box.textContent = "";
+    return;
+  }
+  const text = list
+    .map((item) => {
+      const name = publicStoreLabel(item.store, item.store_title);
+      const when = formatWhen(item.last_seen_at);
+      return when ? `${name} (${when})` : name;
+    })
+    .join(", ");
+  box.hidden = false;
+  box.textContent =
+    `Comprobación antibot: ${text}. Esas capturas no se adjuntan; el aviso usa la foto del producto.`;
+}
+
 function renderRows(stores) {
   if (!stores.length) {
     $("rows").innerHTML = `<tr><td colspan="4" class="muted">Todavía no hay historial guardado.</td></tr>`;
@@ -211,7 +240,7 @@ function renderRows(stores) {
           <td>
             <a class="store-link" href="/catalogo?store=${encodeURIComponent(row.store)}" title="Ver productos de ${attr(publicStoreLabel(row.store, row.store_title))}">
               ${storeLogo(row.display_store || row.store, row.store_title)}
-            </a>
+            </a>${botCheckBadge(row)}
           </td>
           <td>${dropsButton(row)}</td>
           <td>${cell}</td>
@@ -263,6 +292,7 @@ async function load() {
     );
   }
   renderRows(data.stores || []);
+  renderBotChecks(data.bot_checks);
 }
 
 load().catch((error) => flash(error.message));

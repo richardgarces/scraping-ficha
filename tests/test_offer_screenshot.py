@@ -7,6 +7,24 @@ from pathlib import Path
 import retail.offer_screenshot as shots
 
 
+class _SettingsRepo:
+    def __init__(self, document=None):
+        self.document = document
+        self.saved_key = None
+
+    def get_app_setting(self, key):
+        assert key == shots.SETTING_KEY
+        return self.document
+
+    def save_app_setting(self, key, value):
+        self.saved_key = key
+        self.document = dict(value)
+        return self.document
+
+    def close(self):
+        pass
+
+
 def test_disabled_returns_fallback_image(monkeypatch, tmp_path):
     monkeypatch.delenv("OFFER_SCREENSHOTS", raising=False)
     monkeypatch.setattr(shots, "storage_dir", lambda: tmp_path)
@@ -136,6 +154,103 @@ def test_cleanup_removes_old_files(monkeypatch, tmp_path):
     assert shots.cleanup_old_screenshots() == 1
     assert not old.exists()
     assert new.exists()
+
+
+def test_missing_setting_follows_env(monkeypatch):
+    monkeypatch.delenv("OFFER_SCREENSHOTS", raising=False)
+    shots.clear_screenshots_setting_cache()
+    assert shots.screenshots_enabled() is False
+    monkeypatch.setenv("OFFER_SCREENSHOTS", "1")
+    shots.clear_screenshots_setting_cache()
+    assert shots.screenshots_enabled() is True
+    assert shots.load_stored_screenshots_enabled(_SettingsRepo(None)) is None
+    assert shots.load_stored_screenshots_enabled(_SettingsRepo({"updated_at": "x"})) is None
+
+
+def test_database_off_overrides_env_on(monkeypatch, tmp_path):
+    monkeypatch.setenv("OFFER_SCREENSHOTS", "1")
+    shots.clear_screenshots_setting_cache()
+    monkeypatch.setattr(shots, "storage_dir", lambda: tmp_path)
+    repo = _SettingsRepo({"enabled": False})
+    assert shots.stored_screenshots_enabled(repo) is False
+    assert shots.screenshots_enabled() is False
+    assert shots.resolve_alert_image(
+        {"url": "https://tienda.cl/p/1", "image_url": "https://cdn.example/a.jpg"},
+    ) == "https://cdn.example/a.jpg"
+
+
+def test_database_on_overrides_env_off(monkeypatch):
+    monkeypatch.delenv("OFFER_SCREENSHOTS", raising=False)
+    shots.clear_screenshots_setting_cache()
+    assert shots.stored_screenshots_enabled(_SettingsRepo({"enabled": True})) is True
+    assert shots.screenshots_enabled() is True
+    assert shots.offer_screenshot_status() == {"enabled": True, "source": "database"}
+
+
+def test_string_false_in_database_stays_off():
+    shots.clear_screenshots_setting_cache()
+    assert shots.load_stored_screenshots_enabled(_SettingsRepo({"enabled": "false"})) is False
+    assert shots.load_stored_screenshots_enabled(_SettingsRepo({"enabled": "off"})) is False
+    assert shots.load_stored_screenshots_enabled(_SettingsRepo({"enabled": "yes"})) is True
+
+
+def test_save_offer_screenshots_persists_boolean():
+    shots.clear_screenshots_setting_cache()
+    repo = _SettingsRepo()
+    saved = shots.save_offer_screenshots_enabled(False, repo)
+    assert saved == {"enabled": False, "source": "database"}
+    assert repo.saved_key == "offer_screenshots"
+    assert repo.document["enabled"] is False
+    assert shots.screenshots_enabled() is False
+    turned_on = shots.save_offer_screenshots_enabled(True, repo)
+    assert turned_on["enabled"] is True
+    assert shots.load_stored_screenshots_enabled(repo) is True
+    assert shots.screenshots_enabled() is True
+
+
+def test_unreadable_database_keeps_env(monkeypatch):
+    monkeypatch.setenv("OFFER_SCREENSHOTS", "1")
+    shots.clear_screenshots_setting_cache()
+
+    class Down:
+        def get_app_setting(self, key):
+            raise RuntimeError("mongo down")
+
+        def close(self):
+            pass
+
+    assert shots.stored_screenshots_enabled(Down()) is None
+    assert shots.screenshots_enabled() is True
+
+
+def test_offer_screenshots_api_and_page(monkeypatch, anonymous_repo):
+    from fastapi.testclient import TestClient
+
+    from retail.web.app import app
+
+    client = TestClient(app)
+    denied = client.put("/api/settings/offer-screenshots", json={"enabled": False})
+    assert denied.status_code == 401
+
+    repo = _SettingsRepo()
+    monkeypatch.setattr(
+        "retail.web.settings_api.current_user",
+        lambda *args, **kwargs: {"role": "admin"},
+    )
+    monkeypatch.setattr("retail.web.settings_api.connect_repo", lambda: repo)
+    invalid = client.put("/api/settings/offer-screenshots", json={"enabled": "no"})
+    assert invalid.status_code == 400
+    saved = client.put("/api/settings/offer-screenshots", json={"enabled": False})
+    assert saved.status_code == 200
+    assert saved.json() == {"enabled": False, "source": "database"}
+    assert repo.document["enabled"] is False
+    html = (Path("retail/web/static/ofertas.html")).read_text()
+    js = (Path("retail/web/static/settings.js")).read_text()
+    assert 'id="capturas-oferta"' in html
+    assert "Adjuntar captura de la página en Telegram y correo" in html
+    assert "settings.js?v=14" in html
+    assert "/api/settings/offer-screenshots" in js
+    assert "offer_screenshots" in js
 
 
 def test_apply_offer_screenshot_updates_payload(monkeypatch):

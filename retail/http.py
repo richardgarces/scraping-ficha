@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import os
 from typing import Any
+
+from retail.flaresolverr import is_challenge, solve
 
 DEFAULT_HEADERS = {
     "Accept": "application/json, text/html;q=0.9, */*;q=0.8",
@@ -22,7 +25,9 @@ class HttpError(RuntimeError):
 class HttpSession:
     """HTTP/2 session with optional Chrome TLS impersonation."""
 
-    def __init__(self, timeout: float = 30.0, headers: dict[str, str] | None = None) -> None:
+    def __init__(
+        self, timeout: float = 30.0, headers: dict[str, str] | None = None
+    ) -> None:
         self.timeout = timeout
         self.headers = {**DEFAULT_HEADERS, **(headers or {})}
         self._backend, self._client = self._build()
@@ -52,7 +57,9 @@ class HttpSession:
             )
             return "httpx", client
 
-    def get(self, url: str, params: dict[str, Any] | None = None) -> tuple[int, str, str]:
+    def get(
+        self, url: str, params: dict[str, Any] | None = None
+    ) -> tuple[int, str, str]:
         return self._send("GET", url, params=params)
 
     def post(
@@ -74,6 +81,40 @@ class HttpSession:
         if json_body is not None:
             kwargs["json"] = json_body
         response = self._client.request(method, url, **kwargs)
+        endpoint = os.environ.get("FLARESOLVERR_URL")
+        if (
+            method == "GET"
+            and endpoint
+            and is_challenge(response.status_code, response.headers, response.text)
+        ):
+            try:
+                solution = solve(str(response.url), endpoint)
+                # Reuse the browser identity and clearance cookies for API requests.
+                if solution.get("userAgent"):
+                    self._client.headers["User-Agent"] = solution["userAgent"]
+                for cookie in solution.get("cookies", []):
+                    self._client.cookies.set(
+                        cookie["name"],
+                        cookie["value"],
+                        domain=cookie.get("domain", ""),
+                        path=cookie.get("path", "/"),
+                    )
+                replay = self._client.request(method, url, **kwargs)
+                if (
+                    not is_challenge(replay.status_code, replay.headers, replay.text)
+                    and replay.status_code < 400
+                ):
+                    response = replay
+                else:
+                    return (
+                        int(solution.get("status", 200)),
+                        "text/html; charset=utf-8",
+                        solution["response"],
+                    )
+            except Exception as exc:
+                raise HttpError(
+                    f"Falló el respaldo FlareSolverr: {exc}", response.status_code
+                ) from exc
         content_type = response.headers.get("content-type", "")
         return response.status_code, content_type, response.text
 

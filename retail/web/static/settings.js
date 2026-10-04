@@ -45,10 +45,34 @@ async function json(url, options) {
   return payload;
 }
 
-function flash(text, ok = true) {
-  $("flash").hidden = false;
-  $("flash").className = ok ? "summary" : "err";
-  $("flash").textContent = text;
+function flash(text, ok = true, near) {
+  const box = $("flash");
+  if (box) {
+    box.hidden = false;
+    box.className = ok ? "summary notice-banner" : "err notice-banner";
+    box.setAttribute("role", "status");
+    box.textContent = text;
+  }
+  const anchor = near instanceof Element ? near : null;
+  if (!anchor) {
+    box?.scrollIntoView({ block: "nearest" });
+    return;
+  }
+  const host = anchor.closest("form, section") || anchor.parentElement;
+  let status = host.querySelector("[data-action-status]");
+  if (!status) {
+    status = document.createElement("p");
+    status.dataset.actionStatus = "1";
+    status.setAttribute("role", "status");
+    status.setAttribute("aria-live", "polite");
+  }
+  const button = anchor.matches("button") ? anchor : host.querySelector('button[type="submit"]');
+  if (button) button.insertAdjacentElement("afterend", status);
+  else host.append(status);
+  status.hidden = false;
+  status.className = `action-status ${ok ? "summary" : "err"}`;
+  status.textContent = text;
+  status.scrollIntoView({ block: "nearest" });
 }
 
 function checkedValues(name) {
@@ -82,6 +106,23 @@ function fillChannels(rules, channels) {
   $("smtp_password").value = channels.smtp_password || "";
   $("smtp_from").value = channels.smtp_from || "";
   $("alert_email_to").value = channels.alert_email_to || "";
+}
+
+function fillScreenshots(setting) {
+  const enabled = Boolean(setting && setting.enabled);
+  const box = $("offer_screenshots_enabled");
+  const hint = $("offer-screenshots-hint");
+  if (box) box.checked = enabled;
+  if (!hint) return;
+  if (setting && setting.source === "database") {
+    hint.textContent = enabled
+      ? "Ajuste guardado en la base: las alertas intentan capturar la página cuando hay Playwright."
+      : "Ajuste guardado en la base: las alertas usan la foto del producto, aunque OFFER_SCREENSHOTS esté activo.";
+    return;
+  }
+  hint.textContent = enabled
+    ? "Sin ajuste guardado: se usa OFFER_SCREENSHOTS del servidor, que está activo."
+    : "Sin ajuste guardado: se usa OFFER_SCREENSHOTS del servidor, que está apagado.";
 }
 
 function fillSchedule(schedule) {
@@ -266,6 +307,7 @@ async function refresh() {
   ]);
   fillRules(settings.rules);
   fillChannels(settings.rules, settings.channels);
+  fillScreenshots(settings.offer_screenshots);
   fillSchedule(settings.schedule);
   fillCatalog(settings.catalog, stores);
   fillAlerts(alerts);
@@ -309,19 +351,22 @@ async function saveRules() {
 
 $("rules-form").addEventListener("submit", async (event) => {
   event.preventDefault();
+  const form = event.currentTarget;
   try {
-    const saved = await saving(event.currentTarget, saveRules);
+    const saved = await saving(form, saveRules);
+    if (saved === undefined) return;
     fillRules(saved);
-    flash("Reglas guardadas.");
+    flash("Reglas guardadas.", true, form);
   } catch (error) {
-    flash(error.message, false);
+    flash(error.message, false, form);
   }
 });
 
 $("channels-form").addEventListener("submit", async (event) => {
   event.preventDefault();
+  const form = event.currentTarget;
   try {
-    const saved = await saving(event.currentTarget, async () => {
+    const saved = await saving(form, async () => {
       const rules = await saveRules();
       const channels = await json("/api/settings/channels", {
         method: "PUT",
@@ -339,17 +384,36 @@ $("channels-form").addEventListener("submit", async (event) => {
       });
       return { rules, channels };
     });
+    if (saved === undefined) return;
     fillChannels(saved.rules, saved.channels);
-    flash("Canales guardados.");
+    flash("Canales guardados.", true, form);
   } catch (error) {
-    flash(error.message, false);
+    flash(error.message, false, form);
+  }
+});
+
+$("screenshots-form")?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  try {
+    const saved = await saving(form, () => json("/api/settings/offer-screenshots", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: $("offer_screenshots_enabled").checked }),
+    }));
+    if (saved === undefined) return;
+    fillScreenshots(saved);
+    flash(saved.enabled ? "Capturas de oferta activadas." : "Capturas de oferta desactivadas.", true, form);
+  } catch (error) {
+    flash(error.message, false, form);
   }
 });
 
 $("schedule-form").addEventListener("submit", async (event) => {
   event.preventDefault();
+  const form = event.currentTarget;
   try {
-  const schedule = await saving(event.currentTarget, () => json("/api/settings/schedule", {
+  const schedule = await saving(form, () => json("/api/settings/schedule", {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -360,16 +424,17 @@ $("schedule-form").addEventListener("submit", async (event) => {
       pause: $("cron_pause").value,
     }),
   }));
+  if (schedule === undefined) return;
   fillSchedule(schedule);
   if (schedule.cron_error) {
-    flash(`Horario guardado, pero el cron no se instaló: ${schedule.cron_error}`, false);
+    flash(`Horario guardado, pero el cron no se instaló: ${schedule.cron_error}`, false, form);
   } else if (schedule.hint) {
-    flash(`Valores guardados en la base de datos. ${schedule.hint}`);
+    flash(`Valores guardados en la base de datos. ${schedule.hint}`, true, form);
   } else {
-    flash(schedule.enabled ? "Cron instalado." : "Cron desactivado.");
+    flash(schedule.enabled ? "Cron instalado." : "Cron desactivado.", true, form);
   }
   } catch (error) {
-    flash(error.message, false);
+    flash(error.message, false, form);
   }
 });
 
@@ -383,9 +448,9 @@ $("save-catalog").addEventListener("click", async () => {
   catalogProducts = (saved.products || []).map((item) => ({ ...item }));
   removedCatalogIndexes.clear();
   renderCatalogProducts();
-  flash("Catálogo.");
+  flash("Catálogo guardado.", true, $("save-catalog"));
   } catch (error) {
-    flash(error.message, false);
+    flash(error.message, false, $("save-catalog"));
   }
 });
 
@@ -407,7 +472,7 @@ async function runBatch(dryRun) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ dry_run: dryRun, limit: dryRun ? null : 2 }),
   });
-  flash(status.message);
+  flash(status.message, true, dryRun ? $("run-dry") : $("run-batch"));
   pollBatch();
 }
 
@@ -443,9 +508,9 @@ async function sendNoticeTest(url, button, body) {
       options.body = JSON.stringify(body);
     }
     const payload = await json(url, options);
-    flash(payload.message || "Enviado.");
+    flash(payload.message || "Enviado.", true, button);
   } catch (error) {
-    flash(error.message, false);
+    flash(error.message, false, button);
   } finally {
     button.disabled = false;
   }
@@ -462,7 +527,7 @@ $("test-push")?.addEventListener("click", () => {
   sendNoticeTest("/api/admin/test-push", $("test-push"));
 });
 
-$("run-dry").addEventListener("click", () => runBatch(true).catch((error) => flash(error.message, false)));
-$("run-batch").addEventListener("click", () => runBatch(false).catch((error) => flash(error.message, false)));
+$("run-dry").addEventListener("click", () => runBatch(true).catch((error) => flash(error.message, false, $("run-dry"))));
+$("run-batch").addEventListener("click", () => runBatch(false).catch((error) => flash(error.message, false, $("run-batch"))));
 
 refresh().catch((error) => flash(error.message, false));

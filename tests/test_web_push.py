@@ -1,4 +1,4 @@
-from retail.web_push import normalize_subscription, push_message, vapid_keys
+from retail.web_push import normalize_subscription, push_message, vapid_for_webpush, vapid_keys
 
 
 class SettingsRepo:
@@ -20,6 +20,27 @@ def test_vapid_keys_are_generated_once_and_have_browser_public_format():
     assert first == second
     assert first["private_key"].startswith("-----BEGIN PRIVATE KEY-----")
     assert len(first["public_key"]) == 87
+
+
+def test_pem_private_key_loads_for_pywebpush_without_asn1_error():
+    """pywebpush 2 rechaza el PEM que guardamos; hay que entregarle un Vapid."""
+    from py_vapid import Vapid
+
+    repo = SettingsRepo()
+    keys = vapid_keys(repo)
+    signer = vapid_for_webpush(keys["private_key"])
+    assert isinstance(signer, Vapid)
+    numbers = signer.public_key.public_numbers()
+    raw = b"\x04" + numbers.x.to_bytes(32, "big") + numbers.y.to_bytes(32, "big")
+    import base64
+    public = base64.urlsafe_b64encode(raw).rstrip(b"=").decode("ascii")
+    assert public == keys["public_key"]
+    # El PEM tal cual no es una clave que from_string pueda abrir.
+    try:
+        Vapid.from_string(keys["private_key"])
+    except Exception:
+        return
+    raise AssertionError("from_string aceptó un PEM; el adaptador ya no haría falta")
 
 
 def test_subscription_requires_https_and_keeps_only_web_push_fields():

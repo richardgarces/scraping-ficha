@@ -1021,8 +1021,88 @@ a.btn.secondary {
   border-radius: 12px;
   background: color-mix(in srgb, var(--accent) 7%, var(--panel-2));
 }
+.telegram-connection.summary,
+.telegram-connection.err,
+.telegram-connection.is-checking {
+  color: var(--text);
+  font-size: inherit;
+  font-weight: 600;
+}
+.telegram-connection.err {
+  border-color: color-mix(in srgb, var(--danger) 55%, var(--line));
+  background: color-mix(in srgb, var(--danger) 14%, var(--panel-2));
+}
+.telegram-connection.is-checking {
+  border-color: color-mix(in srgb, var(--warn) 45%, var(--line));
+  background: color-mix(in srgb, var(--warn) 12%, var(--panel-2));
+}
+#flash.notice-banner,
+.action-status {
+  margin: 0 0 16px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  font-weight: 600;
+  line-height: 1.45;
+  color: var(--text);
+}
+#flash.notice-banner.summary,
+.action-status.summary {
+  color: var(--text);
+  border: 1px solid color-mix(in srgb, var(--ok) 45%, var(--line));
+  background: color-mix(in srgb, var(--ok) 12%, var(--panel-2));
+}
+#flash.notice-banner.err,
+.action-status.err {
+  color: var(--text);
+  font-size: inherit;
+  border: 1px solid color-mix(in srgb, var(--danger) 55%, var(--line));
+  background: color-mix(in srgb, var(--danger) 14%, var(--panel-2));
+}
+.form-grid .action-status,
+.password-change-form .action-status { grid-column: 1 / -1; margin: 0; }
+.toolbar .action-status,
+.store-preference-footer .action-status,
+.push-preference .action-status { flex: 1 0 100%; margin: 8px 0 0; }
+.form-grid button .spinner,
+.password-change-form button .spinner,
+.store-preference-footer button .spinner {
+  display: inline-block;
+  vertical-align: middle;
+  margin-right: 8px;
+}
+button[aria-busy="true"] { cursor: progress; }
+.telegram-guide:not([hidden]) {
+  display: grid;
+  gap: 10px;
+}
+.telegram-guide-title {
+  margin: 0;
+  color: var(--text);
+  font-weight: 700;
+}
+.telegram-steps {
+  margin: 0;
+  padding: 12px 14px 12px 32px;
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--line));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--accent) 7%, var(--panel-2));
+  color: var(--text);
+  line-height: 1.45;
+}
+.telegram-steps li + li { margin-top: 6px; }
+.telegram-warning {
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--danger) 55%, var(--line));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--danger) 14%, var(--panel-2));
+  color: var(--text);
+  font-weight: 600;
+  line-height: 1.45;
+}
 .push-preference {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 16px;

@@ -1,9 +1,60 @@
 // $, money, attr, discountOf, priceLadder, ensureUser y loginHref vienen de prices.js
 
-function flash(text, ok = true) {
-  $("flash").hidden = false;
-  $("flash").className = ok ? "summary" : "err";
-  $("flash").textContent = text;
+function flash(text, ok = true, near) {
+  const box = $("flash");
+  if (box) {
+    box.hidden = false;
+    box.className = ok ? "summary notice-banner" : "err notice-banner";
+    box.setAttribute("role", "status");
+    box.textContent = text;
+  }
+  const anchor = near instanceof Element ? near : null;
+  if (!anchor) {
+    box?.scrollIntoView({ block: "nearest" });
+    return;
+  }
+  if (anchor.id === "telegram-status") {
+    anchor.hidden = false;
+    anchor.textContent = text;
+    anchor.className = `span telegram-connection ${ok ? "summary" : "err"}`;
+    anchor.scrollIntoView({ block: "nearest" });
+    return;
+  }
+  const host = anchor.closest("form, section") || anchor.parentElement;
+  let status = host.querySelector("[data-action-status]");
+  if (!status) {
+    status = document.createElement("p");
+    status.dataset.actionStatus = "1";
+    status.setAttribute("role", "status");
+    status.setAttribute("aria-live", "polite");
+  }
+  const button = anchor.matches("button") ? anchor : host.querySelector('button[type="submit"]');
+  if (button) button.insertAdjacentElement("afterend", status);
+  else host.append(status);
+  status.hidden = false;
+  status.className = `action-status ${ok ? "summary" : "err"}`;
+  status.textContent = text;
+  status.scrollIntoView({ block: "nearest" });
+}
+
+async function saving(form, action) {
+  const button = form.querySelector('button[type="submit"]');
+  if (button?.disabled) return undefined;
+  const label = button?.textContent || "Guardar";
+  if (button) {
+    button.disabled = true;
+    button.setAttribute("aria-busy", "true");
+    button.innerHTML = '<span class="spinner" aria-hidden="true"></span>Guardando…';
+  }
+  try {
+    return await action();
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.removeAttribute("aria-busy");
+      button.textContent = label;
+    }
+  }
 }
 
 async function json(url, options) {
@@ -58,10 +109,12 @@ function setChecked(name, values) {
 
 function renderTelegramStatus(connected, telegram = "") {
   const status = $("telegram-status");
+  const guide = $("telegram-guide");
+  if (guide) guide.hidden = connected;
   status.textContent = connected
     ? `Telegram conectado${telegram ? ` como ${telegram}` : ""}. Las alertas llegarán a este chat.`
-    : "Telegram aún no está conectado. Abre el bot, presiona Iniciar y luego verifica la conexión.";
-  status.className = connected ? "summary span" : "muted span";
+    : "Telegram aún no está conectado.";
+  status.className = connected ? "summary span telegram-connection" : "muted span telegram-connection";
 }
 
 let pushRegistration = null;
@@ -120,7 +173,7 @@ async function togglePush() {
     const pushChannel = document.querySelector('input[name="notice-channel"][value="push"]');
     if (pushChannel) pushChannel.checked = false;
     renderPushStatus();
-    flash("Las notificaciones push se desactivaron en este dispositivo.");
+    flash("Las notificaciones push se desactivaron en este dispositivo.", true, $("push-toggle"));
     return;
   }
   const permission = await Notification.requestPermission();
@@ -141,7 +194,7 @@ async function togglePush() {
   const pushChannel = document.querySelector('input[name="notice-channel"][value="push"]');
   if (pushChannel) pushChannel.checked = true;
   renderPushStatus();
-  flash("Este dispositivo ya recibirá tus alertas push.");
+  flash("Este dispositivo ya recibirá tus alertas push.", true, $("push-toggle"));
 }
 
 function renderEmailCategories(categories, selected) {
@@ -284,47 +337,52 @@ $("store-preference-list").addEventListener("click", (event) => {
 
 $("store-preferences-form").addEventListener("submit", async (event) => {
   event.preventDefault();
+  const form = event.currentTarget;
   try {
-    const data = await json("/api/account/store-preferences", {
+    const data = await saving(form, () => json("/api/account/store-preferences", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         favorites: storePreferenceData.favorites || [],
         excluded: storePreferenceData.excluded || [],
       }),
-    });
+    }));
+    if (data === undefined) return;
     storePreferenceData = data;
     renderStorePreferences($("store-preference-filter").value);
-    flash("Tus tiendas preferidas y excluidas quedaron guardadas.");
+    flash("Tus tiendas preferidas y excluidas quedaron guardadas.", true, form);
   } catch (error) {
-    flash(error.message, false);
+    flash(error.message, false, form);
   }
 });
 
 $("password-form").addEventListener("submit", async (event) => {
   event.preventDefault();
+  const form = event.currentTarget;
   const newPassword = $("new-password").value;
   if (newPassword !== $("new-password2").value) {
-    flash("Las claves nuevas no coinciden.", false);
+    flash("Las claves nuevas no coinciden.", false, form);
     return;
   }
   try {
-    await json("/api/account/password", {
+    const saved = await saving(form, () => json("/api/account/password", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ current_password: $("current-password").value, new_password: newPassword }),
-    });
-    $("password-form").reset();
-    flash("Tu clave quedó actualizada.");
+    }));
+    if (saved === undefined) return;
+    form.reset();
+    flash("Tu clave quedó actualizada.", true, form);
   } catch (error) {
-    flash(error.message, false);
+    flash(error.message, false, form);
   }
 });
 
 $("notification-form").addEventListener("submit", async (event) => {
   event.preventDefault();
+  const form = event.currentTarget;
   try {
-    const data = await json("/api/account/notifications", {
+    const data = await saving(form, () => json("/api/account/notifications", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -338,11 +396,12 @@ $("notification-form").addEventListener("submit", async (event) => {
           email_min_real_discount: $("email-min-real-discount").value,
         },
       }),
-    });
+    }));
+    if (data === undefined) return;
     renderTelegramStatus(Boolean(data.telegram_connected), data.telegram || "");
-    flash("Tus preferencias de notificación quedaron guardadas.");
+    flash("Tus preferencias de notificación quedaron guardadas.", true, form);
   } catch (error) {
-    flash(error.message, false);
+    flash(error.message, false, form);
   }
 });
 
@@ -358,26 +417,45 @@ $("telegram-connect").addEventListener("click", async () => {
     if (telegramWindow) telegramWindow.location = data.url;
     else location.href = data.url;
     renderTelegramStatus(false, $("notice-telegram").value.trim());
-    flash(`Se abrió ${data.bot_username}. Presiona Iniciar y vuelve aquí para verificar.`);
+    flash(`Se abrió ${data.bot_username}. Presiona Iniciar y vuelve aquí para presionar Verificar conexión.`, true, $("telegram-status"));
   } catch (error) {
     if (telegramWindow) telegramWindow.close();
-    flash(error.message, false);
+    flash(error.message || "No se pudo abrir Telegram.", false, $("telegram-status"));
   }
 });
 
 $("push-toggle").addEventListener("click", () => {
-  togglePush().catch((error) => flash(error.message, false));
+  togglePush().catch((error) => flash(error.message, false, $("push-toggle")));
 });
 
 $("telegram-verify").addEventListener("click", async () => {
+  const button = $("telegram-verify");
+  if (button.disabled) return;
+  const label = button.textContent;
+  button.disabled = true;
+  button.setAttribute("aria-busy", "true");
+  button.textContent = "Verificando…";
+  const status = $("telegram-status");
+  status.hidden = false;
+  status.textContent = "Verificando la conexión con Telegram…";
+  status.className = "span telegram-connection is-checking";
+  status.scrollIntoView({ block: "nearest" });
   try {
     const data = await json("/api/account/telegram/verify", { method: "POST" });
-    $("notice-telegram").value = data.telegram || $("notice-telegram").value;
-    renderTelegramStatus(true, data.telegram || "");
-    flash("Telegram quedó conectado. Ya puedes recibir alertas en ese chat.");
+    const telegram = data.telegram || "";
+    $("notice-telegram").value = telegram || $("notice-telegram").value;
+    const who = telegram ? ` como ${telegram}` : "";
+    const guide = $("telegram-guide");
+    if (guide) guide.hidden = true;
+    flash(`Telegram conectado${who}. Las alertas llegarán a este chat.`, true, status);
   } catch (error) {
-    renderTelegramStatus(false, $("notice-telegram").value.trim());
-    flash(error.message, false);
+    const guide = $("telegram-guide");
+    if (guide) guide.hidden = false;
+    flash(error.message || "No se pudo verificar la conexión.", false, status);
+  } finally {
+    button.disabled = false;
+    button.removeAttribute("aria-busy");
+    button.textContent = label;
   }
 });
 
@@ -400,7 +478,7 @@ $("watches").addEventListener("click", async (event) => {
     await json(`/api/watches/${button.dataset.id}`, { method: "DELETE" });
     await load();
   } catch (error) {
-    flash(error.message, false);
+    flash(error.message, false, button);
   }
 });
 
