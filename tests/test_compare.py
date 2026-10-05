@@ -452,6 +452,53 @@ def test_attach_cheaper_hints_on_each_offer():
     assert cheap["cheaper_before"] is None
 
 
+def test_partybox_encore_generations_are_separate_but_second_generation_groups():
+    groups = compare_products(
+        [
+            _product(
+                store="ebest", product_id="32672", sku_id="32672",
+                name="JBL Partybox Encore 2 Essential", brand=None, price=199990,
+            ),
+            _product(
+                store="entel", product_id="prod2380057", sku_id="PO_B_17949",
+                name="Partybox Encore Essential", brand="JBL", price=264990,
+            ),
+            _product(
+                store="pcfactory", product_id="57197", sku_id="57197",
+                name="JBL PartyBox Encore Essential 2", brand="JBL", price=249990,
+            ),
+            _product(
+                store="entel", product_id="prod2660044", sku_id="PO_B_20490",
+                name="PartyBox Encore Essential 2", brand="JBL", price=279990,
+            ),
+        ]
+    )
+
+    second_generation = next(group for group in groups if group["lowest_price"] == 199990)
+    first_generation = next(
+        group for group in groups
+        if any(offer["product_id"] == "prod2380057" for offer in group["offers"])
+    )
+    assert {offer["product_id"] for offer in second_generation["offers"]} == {
+        "32672", "57197", "prod2660044",
+    }
+    assert second_generation["lowest_stores"] == ["ebest"]
+    assert [offer["product_id"] for offer in first_generation["offers"]] == ["prod2380057"]
+    assert first_generation["comparable"] is False
+
+    attach_cheaper_hints(groups)
+    offers = {offer["product_id"]: offer for offer in second_generation["offers"]}
+    assert offers["32672"]["cheaper_elsewhere"] is None
+    assert offers["prod2660044"]["cheaper_elsewhere"] == {
+        "store": "ebest",
+        "store_title": "ebest",
+        "price": 199990,
+        "gap": 80000,
+        "gap_percent": 28.6,
+    }
+    assert first_generation["offers"][0]["cheaper_elsewhere"] is None
+
+
 def test_pack_count_splits_tablets_of_the_same_name():
     """16 comprimidos y 20 no son el mismo producto, aunque el resto coincida."""
     groups = compare_products(

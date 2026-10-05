@@ -76,6 +76,10 @@ def _alias_models(text: str) -> str:
     text = re.sub(r"\bs(\d{2})\s*(ultra|plus|fe)\b", r"s\1\2", text)
     text = re.sub(r"\b(ultra|plus|fe)\s+s(\d{2})\b", r"s\2\1", text)
     text = re.sub(r"\biphone\s*(\d+)", r"iphone\1", text)
+    # JBL usa ambos órdenes para la segunda generación. El número suelto se
+    # descartaba como ruido y mezclaba "Encore Essential" (1ª gen) con
+    # "Encore 2 Essential" / "Encore Essential 2".
+    text = re.sub(r"\bencore\s+(?:2\s+essential|essential\s+2)\b", "encore2 essential", text)
     return text
 
 
@@ -569,6 +573,12 @@ def identity_match_confidence(left: Product, right: Product) -> tuple[float, str
         )
         if not compatible_model:
             return 0.0, "model_mismatch"
+        if bool(one.brand) != bool(two.brand):
+            known_brand = one.brand or two.brand
+            missing_brand_product = right if one.brand else left
+            words = set(re.findall(r"[a-z0-9]+", _fold(missing_brand_product.name or "")))
+            if known_brand in words:
+                return 0.91, "model_brand_in_name"
     if not one.brand or not two.brand:
         return 0.0, "insufficient_identity"
 
@@ -816,6 +826,29 @@ def _cluster(products: list[Product]) -> list[list[int]]:
         for position, left in enumerate(bucket):
             for right in bucket[position + 1 :]:
                 if find(left) != find(right) and same_model_family(idents[left], idents[right]):
+                    union(left, right)
+
+    # Algunas tiendas omiten `brand` aunque el título sí la escriba (EBEST:
+    # "JBL Partybox..."). Un modelo exacto puede incorporarse al único grupo
+    # de marca compatible de su forma; si compiten marcas, se deja separado.
+    by_model_shape: dict[tuple[Any, ...], list[int]] = defaultdict(list)
+    for index, ident in enumerate(idents):
+        if ident.models and not products[index].entity_override:
+            shape = (
+                ident.models, ident.inches, ident.storage, ident.ram,
+                ident.pack, ident.condition, ident.bundle,
+            )
+            by_model_shape[shape].append(index)
+    for indexes in by_model_shape.values():
+        brands = {idents[index].brand for index in indexes if idents[index].brand}
+        if len(brands) != 1:
+            continue
+        for left in [index for index in indexes if not idents[index].brand]:
+            for right in [index for index in indexes if idents[index].brand]:
+                if products[left].store == products[right].store or find(left) == find(right):
+                    continue
+                confidence, _method = identity_match_confidence(products[left], products[right])
+                if confidence >= 0.84:
                     union(left, right)
 
     # Respaldo semántico acotado: solo cruza tiendas de la misma marca y nunca

@@ -305,19 +305,38 @@ def cheaper_elsewhere(
     min_ratio: float = MIN_CHEAPER_RATIO,
 ) -> dict[str, Any] | None:
     """Si otra tienda cobra menos el mismo producto, la más barata."""
-    price = offer.get("price")
+    price = _offer_price(offer)
     if not price:
         return None
+
+    def available(peer: dict[str, Any]) -> bool:
+        if peer.get("stale") is True or peer.get("available") is False:
+            return False
+        stock = peer.get("stock")
+        if isinstance(stock, (int, float)) and stock <= 0:
+            return False
+        raw = peer.get("availability") or peer.get("stock_status") or peer.get("status") or ""
+        if isinstance(raw, dict):
+            raw = " ".join(str(value) for value in raw.values())
+        text = str(raw).casefold()
+        unavailable = (
+            "sin stock", "agotado", "no disponible", "out of stock",
+            "unavailable", "sold out",
+        )
+        return not any(label in text for label in unavailable)
+
     others = [
         peer
         for peer in peers
-        if peer.get("store") != offer.get("store") and peer.get("price") not in (None, 0)
+        if peer.get("store") != offer.get("store")
+        and _offer_price(peer) is not None
+        and available(peer)
     ]
     if not others:
         return None
-    rival = min(others, key=lambda row: (row["price"], row.get("store") or ""))
-    rival_price = int(rival["price"])
-    gap = int(price) - rival_price
+    rival = min(others, key=lambda row: (_offer_price(row) or 10**15, row.get("store") or ""))
+    rival_price = _offer_price(rival) or 0
+    gap = price - rival_price
     if gap <= 0 or gap / price < min_ratio:
         return None
     return {

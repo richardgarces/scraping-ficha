@@ -208,6 +208,36 @@ def test_cheaper_elsewhere_picks_the_other_store():
     assert cheaper_elsewhere(dear, [dear, {"store": "paris", "price": 99000}]) is None
 
 
+def test_cheaper_elsewhere_uses_global_minimum_regardless_of_order():
+    current = {"store": "entel", "product_id": "e2", "price": 279990}
+    peers = [
+        {"store": "pcfactory", "product_id": "pc", "price": 249990},
+        current,
+        {"store": "ebest", "product_id": "eb", "price": 199990},
+    ]
+    hint = cheaper_elsewhere(current, peers)
+    assert hint is not None
+    assert hint["store"] == "ebest"
+    assert hint["price"] == 199990
+    assert hint["gap_percent"] == 28.6
+    assert cheaper_elsewhere(peers[-1], peers) is None
+
+
+def test_cheaper_elsewhere_ignores_invalid_stale_and_unavailable_offers():
+    current = {"store": "entel", "price": 279990}
+    peers = [
+        current,
+        {"store": "stale", "price": 100000, "stale": True},
+        {"store": "sold", "price": 120000, "availability": "Sin stock"},
+        {"store": "zero", "price": 0},
+        {"store": "valid", "price": "249990", "availability": "En stock"},
+    ]
+    hint = cheaper_elsewhere(current, peers)
+    assert hint is not None
+    assert hint["store"] == "valid"
+    assert hint["price"] == 249990
+
+
 def test_stats_track_age_and_lowest_ever():
     history = points((30, 100000), (20, 90000), (5, 90000))
     stats = price_stats(history, current=90000, now=NOW)
