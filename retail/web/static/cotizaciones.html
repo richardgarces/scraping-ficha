@@ -41,8 +41,8 @@
             </select>
           </label>
           <label class="span">Archivo CSV <input id="shopping-file" type="file" accept=".csv"></label>
-          <label class="span">Lista CSV <textarea id="shopping-csv" rows="5" placeholder="nombre;cantidad;marca&#10;Azúcar 1 kg;1;&#10;Café molido 500 g;1;Juan Valdez&#10;Papel higiénico 12 un;1;"></textarea></label>
-          <p class="muted span">Columnas: <code>nombre</code> (obligatorio); opcionales: <code>cantidad</code>, <code>marca</code>, <code>ean</code>, <code>unidad</code>, <code>precio_unitario</code> (solo referencia). Máximo 100 productos. No scrapea en vivo: usa el catálogo.</p>
+          <label class="span">Lista CSV <textarea id="shopping-csv" rows="5" placeholder="nombre,cantidad,marca&#10;azúcar,1 kg,Iansa&#10;Café molido,500 g,Juan Valdez&#10;Papel higiénico,1,&#10;&#10;nombre;cantidad;unidad;marca&#10;Azúcar;1;kg;Iansa"></textarea></label>
+          <p class="muted span">Columnas: <code>nombre</code> (obligatorio); opcionales: <code>cantidad</code>, <code>marca</code>, <code>ean</code>, <code>unidad</code>, <code>precio_unitario</code> (solo referencia). En <code>cantidad</code> puedes poner <code>1 kg</code>, <code>0.5 kg</code>, <code>500 g</code> o <code>2 L</code> (separa número y unidad); también <code>cantidad=1</code> + columna <code>unidad=kg</code>. CSV con coma o punto y coma. Máximo 100 productos. No scrapea en vivo: usa el catálogo.</p>
           <button type="submit">Importar y comparar tiendas</button>
         </form>
       </div>
@@ -95,6 +95,6 @@
       <p class="auth-actions"><a id="quote-export" class="btn secondary">Exportar CSV</a><button type="button" data-feedback="useful">Me resultó útil</button><button type="button" data-feedback="needs_correction" class="secondary">Necesita corrección</button></p>
     </section>
   </main>
-  <script src="/static/prices.js?v=31"></script><script src="/static/cotizaciones.js?v=3"></script>
+  <script src="/static/prices.js?v=31"></script><script src="/static/cotizaciones.js?v=4"></script>
 </body>
 </html>

@@ -42,6 +42,13 @@ def test_shopping_list_csv_allows_optional_price_and_quantity():
     assert lines[2].name.startswith("Papel")
 
 
+def test_shopping_list_csv_parses_combined_quantity_unit_comma():
+    lines = parse_csv_quote("nombre,cantidad,marca\nazúcar,1 kg,lanza\n")
+    assert lines[0].quantity == 1
+    assert lines[0].unit == "kg"
+    assert lines[0].brand == "lanza"
+
+
 def test_matrix_three_items_three_stores_and_basket_total():
     quote = {
         "mode": "shopping_list",

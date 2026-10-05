@@ -28,12 +28,45 @@ def test_csv_chilean_prices_and_original_evidence():
     assert "$700.000" in lines[0].evidence.text
 
 
+def test_csv_quantity_with_unit_and_comma_delimiter():
+    lines = parse_csv_quote("nombre,cantidad,marca\nazúcar,1 kg,lanza\n")
+    assert len(lines) == 1
+    assert lines[0].name == "azúcar"
+    assert lines[0].quantity == 1
+    assert lines[0].unit == "kg"
+    assert lines[0].brand == "lanza"
+
+
+def test_csv_quantity_decimals_and_gram_conversion():
+    lines = parse_csv_quote(
+        "nombre;cantidad;marca\n"
+        "Harina;0.5 kg;Lucchetti\n"
+        "Azúcar;500 g;Iansa\n"
+        "Aceite;250 ml;Chef\n"
+        "Leche;2 L;Soprole\n"
+    )
+    assert lines[0].quantity == 0.5 and lines[0].unit == "kg"
+    assert lines[1].quantity == 0.5 and lines[1].unit == "kg"
+    assert lines[2].quantity == 0.25 and lines[2].unit == "litro"
+    assert lines[3].quantity == 2 and lines[3].unit == "litro"
+
+
 def test_csv_rejects_ambiguous_prices_and_invalid_quantities():
     for value in ("10,50", "-10", "NaN", "100.5"):
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="Precio CLP|precio"):
             parse_csv_quote(f"nombre;cantidad;precio_unitario\nSamsung Galaxy S25;1;{value}")
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="[Cc]antidad"):
         parse_csv_quote("nombre;cantidad\nSamsung Galaxy S25;0")
+    with pytest.raises(ValueError, match="[Cc]antidad"):
+        parse_csv_quote("nombre;cantidad\nSamsung Galaxy S25;1 kgx")
+    err = None
+    try:
+        parse_csv_quote("nombre;cantidad\nazúcar;abc\n")
+    except ValueError as exc:
+        err = str(exc)
+    assert err
+    assert "Precio CLP" not in err
+    assert "Cantidad" in err or "cantidad" in err.lower()
 
 
 def test_reference_requires_review_and_does_not_assume_shipping():

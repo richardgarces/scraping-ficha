@@ -10,7 +10,7 @@ import unicodedata
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 from retail.compare import identity_match_confidence
 from retail.models import Product
@@ -46,7 +46,7 @@ class Evidence(BaseModel):
 class QuoteLine(BaseModel):
     model_config = ConfigDict(extra="forbid")
     name: str = Field(min_length=3, max_length=300)
-    quantity: int = Field(default=1, ge=1, le=10_000, strict=True)
+    quantity: float = Field(default=1, gt=0, le=10_000)
     unit_price: int | None = Field(default=None, ge=1, le=1_000_000_000, strict=True)
     unit: Literal["unidad", "pack", "kg", "litro", "metro"] = "unidad"
     brand: str = Field(default="", max_length=100)
@@ -58,6 +58,25 @@ class QuoteLine(BaseModel):
     @classmethod
     def trim_text(cls, value):
         return str(value or "").strip()
+
+    @field_validator("quantity", mode="before")
+    @classmethod
+    def coerce_quantity(cls, value):
+        if value is None or value == "":
+            return 1
+        if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+            raise ValueError("Cantidad inválida; usa un número (ej. 1 o 0.5).")
+        if isinstance(value, str):
+            text = value.strip().replace(",", ".")
+            if not re.fullmatch(r"\d+(?:\.\d+)?", text):
+                raise ValueError("Cantidad inválida; usa un número (ej. 1 o 0.5).")
+            value = float(text)
+        amount = float(value)
+        if not math.isfinite(amount) or amount <= 0 or amount > 10_000:
+            raise ValueError("La cantidad debe ser mayor que 0 y como máximo 10000.")
+        if amount.is_integer():
+            return int(amount)
+        return round(amount, 6)
 
     @field_validator("gtin")
     @classmethod
@@ -71,6 +90,19 @@ class QuoteLine(BaseModel):
         if (10 - checksum % 10) % 10 != digits[-1]:
             raise ValueError("El dígito verificador EAN/GTIN no es válido.")
         return value
+
+    @field_validator("unit", mode="before")
+    @classmethod
+    def normalize_unit_field(cls, value):
+        if value is None or value == "":
+            return "unidad"
+        return normalize_unit_token(value)
+
+    @model_validator(mode="after")
+    def count_units_require_whole_quantity(self):
+        if self.unit in {"unidad", "pack"} and not float(self.quantity).is_integer():
+            raise ValueError("Para unidad/pack la cantidad debe ser un entero entre 1 y 10000.")
+        return self
 
 
 class QuoteInput(BaseModel):
@@ -115,8 +147,75 @@ ALIASES = {
     "unit_price": {"unitprice", "preciounitario", "precio", "valorunitario"},
     "brand": {"brand", "marca"},
     "gtin": {"gtin", "ean", "codigobarras"},
-    "unit": {"unit", "unidad"},
+    "unit": {"unit", "unidad", "ud", "uom"},
 }
+
+QUANTITY_WITH_UNIT_RE = re.compile(
+    r"^\s*(\d+(?:[.,]\d+)?)\s*"
+    r"(kg|kilos?|g|grs?\.?|gramos?|l|lts?\.?|litros?|ml|cc|"
+    r"un|und|u|unidad(?:es)?|pack|packs|m|mts?\.?|metros?)?\s*\.?\s*$",
+    re.I,
+)
+
+UNIT_TOKEN_MAP = {
+    "kg": "kg", "kilo": "kg", "kilos": "kg",
+    "g": "g", "gr": "g", "grs": "g", "gramo": "g", "gramos": "g",
+    "l": "litro", "lt": "litro", "lts": "litro", "litro": "litro", "litros": "litro",
+    "ml": "ml", "cc": "ml",
+    "un": "unidad", "und": "unidad", "u": "unidad", "unidad": "unidad", "unidades": "unidad",
+    "pack": "pack", "packs": "pack",
+    "m": "metro", "mt": "metro", "mts": "metro", "metro": "metro", "metros": "metro",
+}
+
+
+def _unit_token(value: Any) -> str | None:
+    text = str(value or "").strip().lower().rstrip(".")
+    if not text:
+        return None
+    key = column_key(text)
+    for candidate in (text, key, text.replace(" ", "")):
+        if candidate in UNIT_TOKEN_MAP:
+            return UNIT_TOKEN_MAP[candidate]
+        if candidate in {"unidad", "pack", "kg", "litro", "metro"}:
+            return candidate
+    return None
+
+
+def normalize_unit_token(value: Any) -> str:
+    """Map free-text unit tokens to QuoteLine.unit literals (g→kg, ml→litro)."""
+    token = _unit_token(value)
+    if token == "g":
+        return "kg"
+    if token == "ml":
+        return "litro"
+    if token:
+        return token
+    raise ValueError("Unidad inválida; usa unidad, pack, kg, litro o metro (también g/ml/un/L).")
+
+
+def _coerce_amount(amount: float) -> float | int:
+    if not math.isfinite(amount) or amount <= 0 or amount > 10_000:
+        raise ValueError("La cantidad debe ser mayor que 0 y como máximo 10000.")
+    if float(amount).is_integer():
+        return int(amount)
+    return round(amount, 6)
+
+
+def apply_unit_to_amount(amount: float | int, unit_raw: Any) -> tuple[float | int, str]:
+    """Apply an explicit unit token, converting g/ml into kg/litro."""
+    token = _unit_token(unit_raw)
+    if token is None:
+        raise ValueError("Unidad inválida; usa unidad, pack, kg, litro o metro (también g/ml/un/L).")
+    value = float(amount)
+    if token == "g":
+        return _coerce_amount(value / 1000.0), "kg"
+    if token == "ml":
+        return _coerce_amount(value / 1000.0), "litro"
+    if token in {"unidad", "pack"}:
+        if not float(value).is_integer() or value < 1:
+            raise ValueError("Para unidad/pack la cantidad debe ser un entero entre 1 y 10000.")
+        return int(value), token
+    return _coerce_amount(value), token
 
 
 def mapped_columns(headers: list[Any]) -> dict[str, Any]:
@@ -132,37 +231,115 @@ def mapped_columns(headers: list[Any]) -> dict[str, Any]:
     return result
 
 
-def integer_cell(value: Any, *, money: bool = False) -> int:
+def money_cell(value: Any) -> int:
     text = str(value).strip()
-    if money:
-        text = re.sub(r"^(?:CLP\s*|\$\s*)", "", text, flags=re.I)
-        if re.fullmatch(r"\d{1,3}(?:\.\d{3})+", text):
-            text = text.replace(".", "")
+    text = re.sub(r"^(?:CLP\s*|\$\s*)", "", text, flags=re.I)
+    if re.fullmatch(r"\d{1,3}(?:\.\d{3})+", text):
+        text = text.replace(".", "")
     if not re.fullmatch(r"\d+", text):
-        raise ValueError("Usa enteros; precios CLP como 10990 o $10.990.")
-    return int(text)
+        raise ValueError("Precio CLP inválido; usa enteros como 10990 o $10.990.")
+    amount = int(text)
+    if amount < 1:
+        raise ValueError("El precio unitario debe ser un entero CLP ≥ 1.")
+    return amount
+
+
+def integer_cell(value: Any, *, money: bool = False) -> int:
+    """Compatibilidad: precios CLP o enteros genéricos."""
+    if money:
+        return money_cell(value)
+    amount, _unit = parse_quantity_cell(value)
+    if not float(amount).is_integer():
+        raise ValueError("Cantidad inválida; sin unidad decimal usa un entero (ej. 1 o 2).")
+    return int(amount)
+
+
+def parse_quantity_cell(value: Any) -> tuple[float | int, str | None]:
+    """Parse ``1``, ``0.5``, ``1 kg``, ``500 g``, ``2 L`` → (amount, unit|None).
+
+    ``g``/``ml`` se convierten a ``kg``/``litro`` (500 g → 0.5 kg).
+    """
+    text = str(value).strip()
+    match = QUANTITY_WITH_UNIT_RE.fullmatch(text)
+    if not match:
+        raise ValueError(
+            "Cantidad inválida; usa un número (ej. 1 o 2) o número con unidad "
+            "(1 kg, 0.5 kg, 500 g, 2 L, 250 ml)."
+        )
+    amount = float(match.group(1).replace(",", "."))
+    raw_unit = (match.group(2) or "").lower().rstrip(".")
+    if not raw_unit:
+        if not amount.is_integer():
+            raise ValueError(
+                "Sin unidad, la cantidad debe ser un entero ≥ 1 (o indica unidad: 0.5 kg)."
+            )
+        if amount < 1 or amount > 10_000:
+            raise ValueError("La cantidad debe ser un entero entre 1 y 10000.")
+        return int(amount), None
+
+    return apply_unit_to_amount(amount, raw_unit)
 
 
 def line_from_cells(cells: dict, columns: dict, evidence: Evidence) -> QuoteLine:
     values = {field: str(cells.get(header, "") or "").strip() for field, header in columns.items()}
-    for field in ("quantity", "unit_price"):
-        if values.get(field):
-            values[field] = integer_cell(values[field], money=field == "unit_price")
+    explicit_unit = values.pop("unit", None) or None
+    qty_raw = values.pop("quantity", None) or None
+    price_raw = values.pop("unit_price", None) or None
+
+    parsed_unit = None
+    if qty_raw:
+        amount, parsed_unit = parse_quantity_cell(qty_raw)
+        values["quantity"] = amount
+    if price_raw:
+        values["unit_price"] = money_cell(price_raw)
+
+    if explicit_unit:
+        amount = values.get("quantity", 1)
+        # If quantity already carried a unit (e.g. "1 kg"), only check consistency.
+        if parsed_unit:
+            normalized = normalize_unit_token(explicit_unit)
+            if normalized != parsed_unit:
+                raise ValueError(
+                    f"Unidad inconsistente: cantidad indica «{parsed_unit}» "
+                    f"y la columna unidad «{normalized}»."
+                )
+            values["unit"] = parsed_unit
         else:
-            values.pop(field, None)
-    if not values.get("unit"):
-        values.pop("unit", None)
-    return QuoteLine(**values, evidence=evidence)
+            converted_amount, unit = apply_unit_to_amount(amount, explicit_unit)
+            values["quantity"] = converted_amount
+            values["unit"] = unit
+    elif parsed_unit:
+        values["unit"] = parsed_unit
+
+    try:
+        return QuoteLine(**values, evidence=evidence)
+    except ValidationError as exc:
+        first = exc.errors()[0] if exc.errors() else {}
+        message = str(first.get("msg") or exc)
+        if message.lower().startswith("value error, "):
+            message = message[13:]
+        raise ValueError(message) from exc
+
+
+class _SemicolonExcel(csv.excel):
+    delimiter = ";"
+
+
+def _csv_dialect(sample: str):
+    header = sample.splitlines()[0] if sample.splitlines() else sample
+    try:
+        return csv.Sniffer().sniff(sample[:4096], delimiters=";,\t")
+    except csv.Error:
+        if header.count(";") >= header.count(",") and ";" in header:
+            return _SemicolonExcel
+        return csv.excel
 
 
 def parse_csv_quote(text: str, source: str = "lista.csv") -> list[QuoteLine]:
     if len(text.encode("utf-8")) > MAX_SOURCE_BYTES:
         raise ValueError("El archivo supera 512 KB.")
     clean = text.lstrip("\ufeff")
-    try:
-        dialect = csv.Sniffer().sniff(clean[:4096], delimiters=";,\t")
-    except csv.Error:
-        dialect = csv.excel
+    dialect = _csv_dialect(clean)
     reader = csv.DictReader(io.StringIO(clean), dialect=dialect)
     columns = mapped_columns(reader.fieldnames or [])
     lines = []
