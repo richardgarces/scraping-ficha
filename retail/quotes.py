@@ -15,6 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from retail.compare import identity_match_confidence
 from retail.models import Product
 from retail.pricing import buy_or_wait, parse_moment
+from retail.quote_units import unit_price_for_quote
 from zoneinfo import ZoneInfo
 
 MAX_ITEMS = 100
@@ -204,27 +205,27 @@ def candidate_for(line: QuoteLine, doc: dict, now: datetime | None = None) -> di
     unavailable = product.stock == 0 or availability in {"agotado", "sinstock", "outofstock", "unavailable", "nodisponible"}
     verified_stock = isinstance(product.stock, int) and not isinstance(product.stock, bool) and product.stock >= line.quantity
     available = verified_stock or (line.quantity == 1 and availability in {"disponible", "available", "instock", "enstock"})
-    # A retail listing denotes a sellable unit/pack; weight and length require
-    # explicit conversion that this pilot does not invent.
-    unit_compatible = line.unit in {"unidad", "pack"}
-    issues = []
+    unit_ok, unit_price, unit_issues = unit_price_for_quote(line.unit, int(price), product)
+    issues = list(unit_issues)
     if not fresh:
         issues.append("Precio sin fecha reciente (máximo 48 horas).")
     if unavailable:
         issues.append("Producto sin stock.")
     elif not available:
         issues.append("Cantidad disponible por confirmar.")
-    if not unit_compatible:
-        issues.append("La unidad requiere una conversión revisada.")
     if product.currency != "CLP":
         issues.append("La moneda del catálogo no es CLP.")
+    comparable_price = unit_price if unit_ok and unit_price else int(price)
     return {
         "store": product.store, "product_id": product.product_id, "name": product.name,
-        "price": int(price), "currency": product.currency, "confidence": round(confidence, 3),
+        "price": comparable_price, "currency": product.currency, "confidence": round(confidence, 3),
         "match_method": method, "observed_at": observed.isoformat() if observed else None,
         "shipping_cost": product.shipping_cost, "shipping_region": product.shipping_region,
         "stock": product.stock, "issues": issues, "usable": not issues and product.currency == "CLP",
         "advice": buy_or_wait(doc.get("price_history"), int(price), now=now),
+        "unit": line.unit,
+        "unit_compatible": unit_ok,
+        "catalog_pack_price": int(price),
     }
 
 

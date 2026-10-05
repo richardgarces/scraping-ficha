@@ -15,11 +15,10 @@ El listado histórico más amplio sigue en [`PENDIENTES.md`](../PENDIENTES.md) e
 - [x] Acceso solo administrador (UI + API + menú Cuenta), como `/ofertas`.
 - [ ] Prueba funcional en producción con cuenta admin: import CSV, confirmar match, exportar CSV.
 - [ ] Smoke de navegador en CI (`tests/browser/purchasing_smoke.py` con Playwright).
-- [ ] Job async Docling (conversión PDF fuera de la petición HTTP, cola/worker dedicado).
+- [x] Job async Docling (conversión PDF fuera de la petición HTTP, cola/worker dedicado).
 - [ ] Export XLSX / informe con marca (post-MVP).
 - [ ] Despacho incluido en totales de comparación (hoy solo producto, sin inventar costos).
-- [ ] Unidades kg/l y conversiones de peso/volumen/longitud con reglas explícitas.
-- [ ] Ventana de precio de catálogo configurable (piloto fijo 48 h; evaluar categoría + SLA por vertical).
+- [x] Unidades kg/l y conversiones de peso/volumen/longitud con reglas explícitas.- [ ] Ventana de precio de catálogo configurable (piloto fijo 48 h; evaluar categoría + SLA por vertical).
 - [ ] TimesFM, Scrapling masivo, multi-tenant comercial (fuera de este piloto).
 
 Rutas clave:

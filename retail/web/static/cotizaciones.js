@@ -185,3 +185,61 @@ ensureUser().then(user => {
   }).catch(showQuoteError);
   return listQuotes().then(() => quoteMessage("Importa una lista o abre una cotización guardada."));
 }).catch(showQuoteError);
+
+let doclingJobId = null;
+
+function showDoclingStatus(job) {
+  const labels = {
+    queued: "En cola",
+    processing: "Convirtiendo…",
+    done: "Listo",
+    failed: "Falló",
+    needs_docling: "Requiere Docling (Soyo/scraping)",
+    retry: "Reintento",
+  };
+  $("quote-docling-status").textContent = `${labels[job.status] || job.status}${job.last_error ? ` · ${job.last_error}` : ""}`;
+  $("quote-docling-actions").hidden = false;
+  $("quote-docling-import").disabled = job.status !== "done";
+}
+
+$("quote-docling")?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const file = $("quote-pdf").files[0];
+  if (!file) return;
+  const body = new FormData();
+  body.append("file", file);
+  body.append("title", $("quote-title").value.trim() || file.name);
+  body.append("supplier", $("quote-supplier").value.trim());
+  if ($("quote-tax").checked) body.append("tax_included", "true");
+  try {
+    const response = await fetch("/api/quotes/convert-jobs", { method: "POST", body });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(typeof data.detail === "string" ? data.detail : "No se pudo encolar.");
+    doclingJobId = data.id;
+    showDoclingStatus(data);
+    quoteMessage("Conversión encolada. Actualiza el estado o corre el worker Docling en Soyo.");
+  } catch (error) {
+    showQuoteError(error);
+  }
+});
+
+$("quote-docling-refresh")?.addEventListener("click", async () => {
+  if (!doclingJobId) return;
+  try {
+    showDoclingStatus(await quoteRequest(`/api/quotes/convert-jobs/${encodeURIComponent(doclingJobId)}`));
+  } catch (error) {
+    showQuoteError(error);
+  }
+});
+
+$("quote-docling-import")?.addEventListener("click", async () => {
+  if (!doclingJobId) return;
+  try {
+    const created = await quoteRequest(`/api/quotes/convert-jobs/${encodeURIComponent(doclingJobId)}/import`, "POST");
+    await openQuote(created.id);
+    await listQuotes();
+    quoteMessage("JSON Docling cargado como cotización revisable.");
+  } catch (error) {
+    showQuoteError(error);
+  }
+});

@@ -183,6 +183,81 @@ def list_quotes(request: Request):
         repo.close()
 
 
+@router.post("/api/quotes/convert-jobs", status_code=201)
+async def enqueue_docling_job(request: Request):
+    """Encola conversión PDF/imagen fuera de la petición (worker Docling)."""
+    from retail.quote_docling_jobs import enqueue_conversion
+
+    repo = _repository()
+    try:
+        user = current_user(request, repo, admin=True)
+        form = await request.form()
+        upload = form.get("file")
+        if upload is None or not hasattr(upload, "read"):
+            raise HTTPException(status_code=400, detail="Adjunta un PDF, imagen o JSON Docling.")
+        raw = await upload.read()
+        title = str(form.get("title") or getattr(upload, "filename", None) or "Cotización")
+        supplier = str(form.get("supplier") or "")
+        tax_raw = form.get("tax_included")
+        tax_included = True if str(tax_raw).lower() in {"1", "true", "on", "yes"} else None
+        valid_until = str(form.get("valid_until") or "") or None
+        try:
+            job = enqueue_conversion(
+                repo,
+                owner_id=user["id"],
+                title=title,
+                supplier=supplier,
+                source_name=str(getattr(upload, "filename", None) or "documento.pdf"),
+                raw_bytes=raw,
+                tax_included=tax_included,
+                valid_until=valid_until,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        _record_event(repo, kind="docling_enqueue", user=user, detail={"job_id": job["id"], "status": job["status"]})
+        return job
+    finally:
+        repo.close()
+
+
+@router.get("/api/quotes/convert-jobs/{job_id}")
+def docling_job_status(request: Request, job_id: str):
+    from retail.quote_docling_jobs import get_job
+
+    repo = _repository()
+    try:
+        user = current_user(request, repo, admin=True)
+        job = get_job(repo, job_id, owner_id=user["id"])
+        if not job:
+            raise HTTPException(status_code=404, detail="Conversión no encontrada.")
+        return job
+    finally:
+        repo.close()
+
+
+@router.post("/api/quotes/convert-jobs/{job_id}/import", status_code=201)
+def import_docling_job_result(request: Request, job_id: str):
+    """Carga el JSON resultante del job en una cotización revisable."""
+    from retail.quote_docling_jobs import load_result_json
+    from retail.quotes import QuoteInput
+
+    repo = _repository()
+    try:
+        user = current_user(request, repo, admin=True)
+        try:
+            payload = load_result_json(repo, job_id, owner_id=user["id"])
+            quote = QuoteInput.model_validate(payload)
+            created = _create(repo, user, quote, event_kind="import")
+            _record_event(repo, kind="docling_import", user=user, quote_id=created["id"], detail={"job_id": job_id})
+            return created
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+    finally:
+        repo.close()
+
+
 @router.get("/api/quotes/{quote_id}")
 def get_quote(request: Request, quote_id: str):
     repo = _repository()

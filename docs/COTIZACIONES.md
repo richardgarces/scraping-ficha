@@ -77,11 +77,29 @@ extraen precios mediante un LLM ni se inventan filas a partir del texto.
 - Cantidad disponible suficiente. Una señal general de disponibilidad solo
   permite comparar una unidad; pedidos múltiples requieren cantidad observada.
 - IVA de la referencia confirmado y cotización vigente.
-- Unidades de peso, volumen o longitud quedan pendientes; no se inventan factores
-  de conversión. Packs se distinguen por el nombre y las reglas de identidad.
+- Unidades de peso, volumen o longitud: con factores documentados
+  (`retail/quote_units.py`: 1 L = 1000 ml, 1 kg = 1000 g, 1 m = 100 cm/1000 mm).
+  Si el catálogo declara el envase, se compara precio por kg/l/m; si no, la fila
+  queda pendiente.
 - La comparación es por productos, sin agregar ni multiplicar costos de despacho.
 - Si varias filas usan el mismo SKU, se verifica la cantidad combinada.
 - Cambios concurrentes se rechazan con 409 para evitar sobrescribir revisiones.
+
+## Job async Docling
+
+`POST /api/quotes/convert-jobs` (multipart: `file`, `title`, `supplier`) encola la
+conversión en Mongo (`quote_docling_jobs`). El worker
+`python -m retail.quote_docling_jobs --once` (idealmente en Soyo con Docling)
+produce `result.json`. Estados: `queued` → `processing` → `done` |
+`needs_docling` | `failed`.
+
+- Sin Docling en BMAX el job queda `needs_docling` (stub); usar entorno
+  `scraping`/Soyo o `scripts/convert_quote_document.py`.
+- `GET /api/quotes/convert-jobs/{id}` consulta el estado.
+- `POST /api/quotes/convert-jobs/{id}/import` carga el JSON revisable como cotización.
+
+La UI `/cotizaciones` muestra el panel de conversión y permite actualizar estado
+e importar el resultado.
 
 ## Estados del piloto
 

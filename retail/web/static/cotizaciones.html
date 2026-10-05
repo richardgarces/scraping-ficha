@@ -32,9 +32,22 @@
         <label class="span">Archivo CSV o cotización convertida <input id="quote-file" type="file" accept=".csv,.json"></label>
         <label class="span">Lista CSV <textarea id="quote-csv" rows="5" placeholder="nombre;cantidad;precio_unitario;marca&#10;Samsung Galaxy S25 256GB;1;799990;Samsung"></textarea></label>
         <label class="span"><input id="quote-tax" type="checkbox"> Confirmo que los precios de referencia incluyen IVA</label>
-        <p class="muted span">Precios en pesos chilenos enteros. Columnas: nombre, cantidad, precio_unitario; opcionales: marca, ean, unidad. Máximo 100 productos. Para PDFs, importa el JSON generado por la conversión documental.</p>
+        <p class="muted span">Precios en pesos chilenos enteros. Columnas: nombre, cantidad, precio_unitario; opcionales: marca, ean, unidad (unidad/pack/kg/litro/metro). Máximo 100 productos.</p>
         <button type="submit">Importar y revisar</button>
       </form>
+    </section>
+    <section class="panel">
+      <h2>Conversión PDF (Docling async)</h2>
+      <p class="muted">El PDF se convierte fuera de la petición web. En BMAX sin Docling el job queda en <code>needs_docling</code>; ejecuta el worker en Soyo/scraping o <code>scripts/convert_quote_document.py</code> y luego carga el JSON.</p>
+      <form id="quote-docling" class="form-grid">
+        <label class="span">PDF o imagen <input id="quote-pdf" type="file" accept=".pdf,.png,.jpg,.jpeg,.json" required></label>
+        <button type="submit">Encolar conversión</button>
+      </form>
+      <p id="quote-docling-status" class="summary" aria-live="polite"></p>
+      <p class="auth-actions" id="quote-docling-actions" hidden>
+        <button type="button" id="quote-docling-refresh" class="secondary">Actualizar estado</button>
+        <button type="button" id="quote-docling-import">Cargar JSON resultante</button>
+      </p>
     </section>
     <section class="panel"><h2>Mis cotizaciones</h2><div id="quote-list" class="quote-list"></div></section>
     <section class="panel" id="quote-detail" hidden>
@@ -52,6 +65,6 @@
       <p class="auth-actions"><a id="quote-export" class="btn secondary">Exportar comparación CSV</a><button type="button" data-feedback="useful">Me resultó útil</button><button type="button" data-feedback="needs_correction" class="secondary">Necesita corrección</button></p>
     </section>
   </main>
-  <script src="/static/prices.js?v=31"></script><script src="/static/cotizaciones.js?v=1"></script>
+  <script src="/static/prices.js?v=31"></script><script src="/static/cotizaciones.js?v=2"></script>
 </body>
 </html>

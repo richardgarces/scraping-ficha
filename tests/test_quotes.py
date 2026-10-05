@@ -78,7 +78,60 @@ def test_unknown_tax_expired_quote_and_unit_conversion_are_pending():
         assert comparison_report(data, selection, {("lider", "s25"): document()}, NOW)["summary"]["compared_items"] == 0
     data = quote()
     data["items"][0]["unit"] = "kg"
+    # Sin masa en el nombre del catálogo: pendiente.
     assert comparison_report(data, selection, {("lider", "s25"): document()}, NOW)["summary"]["compared_items"] == 0
+
+
+def test_kg_litro_metro_convert_when_catalog_declares_measure():
+    selection = {"0": {"store": "lider", "product_id": "paint"}}
+    data = quote()
+    data["items"][0] = {
+        **data["items"][0],
+        "name": "Pintura látex blanca 4 L",
+        "brand": "",
+        "unit": "litro",
+        "quantity": 2,
+        "unit_price": 5000,
+    }
+    catalog = document(
+        product_id="paint",
+        name="Pintura látex blanca 4 L",
+        brand="",
+        price=16000,
+        price_all_payment=16000,
+        stock=10,
+    )
+    report = comparison_report(data, selection, {("lider", "paint"): catalog}, NOW)
+    assert report["summary"]["compared_items"] == 1
+    # 16000 / 4 L = 4000 CLP/L → 2 L × 4000 = 8000 vs 2 × 5000 = 10000
+    assert report["rows"][0]["market_subtotal"] == 8000
+    assert report["rows"][0]["potential_saving"] == 2000
+
+    data["items"][0]["unit"] = "kg"
+    data["items"][0]["name"] = "Arroz grado 1 2 kg"
+    catalog_kg = document(
+        product_id="paint",
+        name="Arroz grado 1 2 kg",
+        brand="",
+        price=3000,
+        price_all_payment=3000,
+        stock=10,
+    )
+    report_kg = comparison_report(data, selection, {("lider", "paint"): catalog_kg}, NOW)
+    assert report_kg["rows"][0]["selected"]["price"] == 1500  # 3000/2kg
+
+    data["items"][0]["unit"] = "metro"
+    data["items"][0]["name"] = "Cable UTP 100 m"
+    catalog_m = document(
+        product_id="paint",
+        name="Cable UTP 100 m",
+        brand="",
+        price=50000,
+        price_all_payment=50000,
+        stock=10,
+    )
+    report_m = comparison_report(data, selection, {("lider", "paint"): catalog_m}, NOW)
+    assert report_m["rows"][0]["selected"]["price"] == 500  # 50000/100m
 
 
 def test_docling_tables_keep_provenance_and_report_skipped_rows():
