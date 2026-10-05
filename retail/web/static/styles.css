@@ -1602,6 +1602,14 @@ button.secondary.current { background: var(--accent); color: var(--btn-ink); }
   font-size: 14px;
 }
 .reales-hint { font-size: 13px; line-height: 1.45; }
+/* /reales: máx. 4 columnas en desktop (tarjetas más anchas que auto-fill ~240px) */
+.deal-grid.reales-deal-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+@media (max-width: 1000px) {
+  .deal-grid.reales-deal-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (max-width: 620px) {
+  .deal-grid.reales-deal-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
 .deal-kinds { display: flex; flex-wrap: wrap; gap: 6px; }
 .compare-stores {
   list-style: none;
