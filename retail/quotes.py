@@ -80,6 +80,9 @@ class QuoteInput(BaseModel):
     source_name: str = Field(default="", max_length=200)
     source_sha256: str = Field(default="", pattern=r"^(?:[a-f0-9]{64})?$")
     source_kind: Literal["manual", "csv", "docling"] = "manual"
+    mode: Literal["quote", "shopping_list"] = "quote"
+    store_group: str = Field(default="", max_length=80)
+    store_ids: list[str] = Field(default_factory=list, max_length=50)
     currency: Literal["CLP"] = "CLP"
     tax_included: bool | None = None
     valid_until: date | None = None
@@ -94,6 +97,17 @@ class QuoteInput(BaseModel):
             raise ValueError("Ingresa un nombre para la cotización.")
         return value.strip()
 
+    @field_validator("store_group", mode="before")
+    @classmethod
+    def trim_store_group(cls, value):
+        return str(value or "").strip().lower()
+
+    @field_validator("store_ids", mode="before")
+    @classmethod
+    def clean_store_ids(cls, value):
+        if not value:
+            return []
+        return [str(item).strip().lower() for item in value if str(item).strip()]
 
 ALIASES = {
     "name": {"name", "nombre", "producto", "descripcion", "detalle"},

@@ -1,22 +1,56 @@
-# Piloto de cotizaciones comparadas
+# Cotizaciones y listas de compra
 
 La página `/cotizaciones`, disponible solo para administradores (como `/ofertas`)
-desde el menú Cuenta, permite importar una lista, revisar sus filas, confirmar
-productos del catálogo y exportar una comparación. Cada cuenta admin accede
-exclusivamente a sus cotizaciones. Los precios importados son referencias
-privadas: no modifican el catálogo ni el historial de las tiendas.
+desde el menú Cuenta, ofrece **dos modos**:
 
-## Uso
+1. **Lista de compra multi-tienda** — subes productos (sin precio obligatorio),
+   eliges una categoría de tiendas (p. ej. supermercados → Líder, Unimarc, Tottus
+   y otras del grupo en el catálogo) y la app arma una **matriz** lista × tiendas
+   con el mejor match ≥80% por tienda usando precios frescos de Mongo.
+2. **Cotización con precios de referencia** — importas una cotización de proveedor
+   **con** `precio_unitario`, confirmas coincidencias y comparas ahorro potencial
+   vs retail.
 
-1. Pegar una lista CSV o cargar un archivo CSV/JSON de cotización convertido.
-2. Confirmar si los precios de referencia incluyen IVA.
-3. Revisar cantidades, unidades, precios y vigencia; guardar las correcciones.
-4. Buscar y confirmar las coincidencias. Se reutilizan las reglas de identidad,
-   condición, packs y variantes del comparador.
-5. Revisar pendientes y exportar el CSV. La diferencia es potencial, sin despacho;
-   no representa una venta ni ahorro realizado.
+Cada cuenta admin accede solo a sus listas/cotizaciones. Los precios importados
+son referencias privadas: no modifican el catálogo ni el historial de las tiendas.
+**No hay scrape live síncrono** en la petición: se usa el catálogo Mongo; los SKUs
+matcheados pueden recibir un boost opcional de prioridad de scrape (mayor si hay
+Seguimiento activo).
 
-Ejemplo CSV (pesos CLP enteros):
+## Modo lista de compra
+
+1. En `/cotizaciones`, pestaña **Lista de compra**.
+2. Nombre de la lista + categoría de tiendas (grupo del registry / `store_categories`).
+3. Pegar o subir CSV. Columnas: `nombre` (obligatorio); opcionales: `cantidad`,
+   `marca`, `ean`, `unidad`, `precio_unitario` (solo referencia).
+4. **Importar y comparar tiendas** → la API busca en el catálogo por cada ítem y
+   rellena celdas (precio, confianza, link a ficha). Sin match: «sin stock o sin match».
+5. Revisar celdas; clic en una celda para confirmar o cambiar el match de esa tienda.
+6. Resumen: mejor tienda para la canasta (suma donde hay match; marca faltantes) y
+   mejor precio por ítem.
+7. Exportar CSV de la matriz.
+
+Ejemplo CSV:
+
+```csv
+nombre;cantidad;marca
+Azúcar granulada 1 kg;1;Iansa
+Café molido 500 g;2;Juan Valdez
+Papel higiénico 12 un;1;
+```
+
+Tiendas del grupo **supermercados** en el catálogo actual (sin Jumbo hasta que
+exista scraper/registro): `lider`, `unimarc`, `tottus`, `alvi`, `cugat` (las que
+esten registradas y listadas en el grupo).
+
+## Modo cotización (referencia)
+
+1. Pestaña **Cotización con precios de referencia**.
+2. Pegar CSV o cargar JSON convertido (Docling).
+3. Confirmar IVA, revisar filas, confirmar coincidencias.
+4. Exportar CSV de comparación (ahorro potencial sin despacho).
+
+Ejemplo CSV:
 
 ```csv
 nombre;cantidad;precio_unitario;marca;unidad
@@ -30,9 +64,11 @@ el dígito verificador GTIN. Máximo 100 productos y 512 KB de CSV; el piloto ad
 
 ## Playbook PDF offline (5 pasos)
 
+Solo aplica al modo cotización:
+
 1. Obtener el PDF o imagen del proveedor en un entorno con Docling (`pip install -e '.[documents]'` o el entorno `scraping`/Soyo).
 2. Convertir a JSON del piloto: `python scripts/convert_quote_document.py proveedor.pdf --output output/cotizacion.json --title "…" --supplier "…"` (revisar avisos en consola).
-3. Abrir `/cotizaciones`, iniciar sesión como administrador, importar el JSON o pegar CSV equivalente.
+3. Abrir `/cotizaciones`, modo cotización, iniciar sesión como administrador, importar el JSON o pegar CSV equivalente.
 4. Confirmar IVA, vigencia y filas con avisos; buscar y confirmar coincidencias por línea.
 5. Exportar CSV de comparación; registrar feedback útil/corrección si aplica. No usar URLs arbitrarias dentro del contenedor web.
 
@@ -46,9 +82,9 @@ de retail lee sus tablas sin cargar modelos de OCR:
   --output output/cotizacion-proveedor.json --title "Equipos" --supplier "Proveedor"
 ```
 
-Luego importar `output/cotizacion-proveedor.json` en `/cotizaciones`. Se conservan
-archivo de origen, SHA-256, tabla, página y fila. La conversión informa estado,
-número de páginas, productos y filas/tablas que requieren revisión. Los avisos
+Luego importar `output/cotizacion-proveedor.json` en `/cotizaciones` (modo cotización).
+Se conservan archivo de origen, SHA-256, tabla, página y fila. La conversión informa
+estado, número de páginas, productos y filas/tablas que requieren revisión. Los avisos
 viajan con la cotización; no se muestra una comparación completa hasta revisar
 el documento original cuando hubo avisos de extracción.
 
@@ -76,13 +112,15 @@ extraen precios mediante un LLM ni se inventan filas a partir del texto.
 - Precio del catálogo positivo en CLP y observado en las últimas 48 horas.
 - Cantidad disponible suficiente. Una señal general de disponibilidad solo
   permite comparar una unidad; pedidos múltiples requieren cantidad observada.
-- IVA de la referencia confirmado y cotización vigente.
+- **Cotización:** IVA de la referencia confirmado y cotización vigente.
+- **Lista de compra:** IVA/precio de referencia no obligatorios; la matriz usa
+  solo precios del catálogo.
 - Unidades de peso, volumen o longitud: con factores documentados
   (`retail/quote_units.py`: 1 L = 1000 ml, 1 kg = 1000 g, 1 m = 100 cm/1000 mm).
   Si el catálogo declara el envase, se compara precio por kg/l/m; si no, la fila
   queda pendiente.
 - La comparación es por productos, sin agregar ni multiplicar costos de despacho.
-- Si varias filas usan el mismo SKU, se verifica la cantidad combinada.
+- Si varias filas usan el mismo SKU, se verifica la cantidad combinada (modo cotización).
 - Cambios concurrentes se rechazan con 409 para evitar sobrescribir revisiones.
 
 ## Job async Docling
@@ -98,8 +136,7 @@ produce `result.json`. Estados: `queued` → `processing` → `done` |
 - `GET /api/quotes/convert-jobs/{id}` consulta el estado.
 - `POST /api/quotes/convert-jobs/{id}/import` carga el JSON revisable como cotización.
 
-La UI `/cotizaciones` muestra el panel de conversión y permite actualizar estado
-e importar el resultado.
+La UI `/cotizaciones` muestra el panel de conversión en el modo cotización.
 
 ## Estados del piloto
 
@@ -107,62 +144,49 @@ Cada cotización avanza `borrador → revisión → comparada → exportada`:
 
 - **Borrador:** importada, sin coincidencias ni ediciones.
 - **Revisión:** hay correcciones, coincidencias parciales o avisos pendientes.
-- **Comparada:** todas las filas son comparables (precio vigente, stock/unidad/IVA/vigencia OK).
-- **Exportada:** se descargó el CSV con una comparación completa.
+- **Comparada:** (cotización) todas las filas comparables; (lista) canasta completa
+  en al menos una tienda del set.
+- **Exportada:** se descargó el CSV con una comparación/matriz completa.
 
-Una edición invalida coincidencias y vuelve a revisión. Las cantidades/unidades sin
-confirmar y las referencias vencidas quedan pendientes: no generan ahorro inventado.
+Una edición invalida coincidencias y vuelve a revisión (en lista regenera la matriz).
 
 ## API y métricas
 
 La API canónica es `/api/quotes`. El alias español `/api/cotizaciones` expone las
-mismas rutas (por ejemplo `GET /api/cotizaciones` lista cotizaciones; sin sesión
-responde 401, no 404; usuario approved no-admin responde 403). La página HTML
-sigue en `/cotizaciones` y exige rol administrador (`require_admin_html`, igual
-que `/ofertas`).
+mismas rutas. La página HTML sigue en `/cotizaciones` y exige rol administrador.
 
-`POST /api/quotes/import-csv`, `POST /api/quotes`, `GET /api/quotes`,
-`GET/PUT /api/quotes/{id}`, `GET /api/quotes/{id}/candidates/{index}`,
-`PUT /api/quotes/{id}/selection`, `GET /api/quotes/{id}/export.csv` y
-`POST /api/quotes/{id}/feedback` exigen administrador (`current_user(..., admin=True)`)
-y filtran por propietario.
+Endpoints relevantes:
 
-Colecciones Mongo: `business_quotes` (por `owner_id`) y `business_quote_events`
-(import, review, confirm, export, feedback, error).
+| Método | Ruta | Uso |
+|--------|------|-----|
+| GET | `/api/quotes/store-groups` | Categorías + tiendas para el selector |
+| POST | `/api/quotes/import-csv` | `mode=quote` o `mode=shopping_list` + `store_group` |
+| POST | `/api/quotes/{id}/rebuild-matrix` | Regenerar matriz (solo lista) |
+| GET | `/api/quotes/{id}/candidates/{i}?store=` | Candidatos (filtro tienda opcional) |
+| PUT | `/api/quotes/{id}/selection` | Confirmar match (celda o fila) |
+| GET | `/api/quotes/{id}/export.csv` | CSV comparación o matriz |
 
-El administrador puede consultar `GET /api/admin/purchasing-metrics`: importaciones,
-matches/filas confirmadas, exportaciones, errores, ahorro potencial exportado y
-feedback útil/corrección. Los resultados privados tienen `Cache-Control: no-store`.
+Colecciones Mongo: `business_quotes` (por `owner_id`; campos `mode`, `store_group`,
+`store_matches`, `resolved_stores`) y `business_quote_events`.
 
-Exportación del piloto: CSV (informe mínimo). XLSX/PDF de marca no están en el MVP;
-el PDF de origen se convierte fuera de la petición web con Docling.
-
-El piloto materializa la conexión documental y retail. La activación de nuevos
-motores de extracción se debe decidir con pruebas por fuente; la facturación y
-los planes comerciales requieren resultados de pilotos reales. TimesFM conserva
-sus requisitos de historial y validación, y las alertas existentes se siguen
-gestionando desde la ficha del producto.
+`GET /api/admin/purchasing-metrics` resume importaciones, matches, exportaciones y
+feedback. Resultados privados: `Cache-Control: no-store`.
 
 ## Verificación
 
 ```bash
-.venv/bin/python -m pytest tests/test_quotes.py tests/test_quotes_api.py -q
+.venv/bin/python -m pytest tests/test_quotes.py tests/test_quotes_api.py tests/test_shopping_list.py -q
 node --check retail/web/static/cotizaciones.js
 # En un entorno que ya incluya Playwright/Chromium (no toca producción):
 .venv/bin/python tests/browser/purchasing_smoke.py
 ```
 
-El smoke de navegador intercepta `/api/quotes` con datos sintéticos; requiere
-`playwright install chromium` la primera vez.
-
-La prueba de navegador usa respuestas sintéticas y no modifica producción ni envía avisos.
-
 ## Despliegue
 
-El piloto vive en `scraping-ficha` (no requiere cambios en el contenedor de
-Docling). Empujar código con `./push-to-server.sh` y en BMAX aplicar
-`scripts/deploy-prod.sh` con los tres compose habituales
+El piloto vive en `scraping-ficha`. Empujar código con `./push-to-server.sh` y en
+BMAX aplicar `scripts/deploy-prod.sh` con los compose habituales
 (`docker-compose.prod.yml` + `platform` + `soyo-access` si corresponde),
 `Dockerfile.screenshots`, sin `--force-recreate` y sin tocar volúmenes
 Mongo/Redis/Qdrant. Verificar `https://precios.meincart.cl/cotizaciones`
-sin sesión (redirect a `/entrar`) y con sesión de administrador.
+sin sesión (redirect a `/entrar`) y con sesión de administrador: pestañas
+Lista de compra / Cotización.

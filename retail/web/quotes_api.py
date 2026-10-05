@@ -16,6 +16,10 @@ from retail.quotes import (MAX_SOURCE_BYTES, QuoteInput, QuoteLine, candidate_fo
                            comparison_report, parse_csv_quote, resolve_quote_status,
                            source_hash)
 from retail.search import connect_repo
+from retail.shopping_list import (MODE_SHOPPING_LIST, available_store_groups,
+                                  build_store_matches, is_shopping_list,
+                                  matrix_export_csv, resolve_list_stores,
+                                  shopping_matrix_report)
 from retail.web.deps import current_user, require_admin_html
 
 def private_response(response: Response):
@@ -31,6 +35,9 @@ class CsvInput(BaseModel):
     source_name: str = Field(default="lista.csv", max_length=200)
     text: str = Field(min_length=1, max_length=MAX_SOURCE_BYTES)
     tax_included: bool | None = None
+    mode: Literal["quote", "shopping_list"] = "quote"
+    store_group: str = Field(default="", max_length=80)
+    store_ids: list[str] = Field(default_factory=list, max_length=50)
 
 
 class Selection(BaseModel):
@@ -38,6 +45,7 @@ class Selection(BaseModel):
     store: str = Field(min_length=1, max_length=80)
     product_id: str = Field(min_length=1, max_length=300)
     version: int = Field(ge=1)
+    confirm: bool = True
 
 
 class QuoteEdit(QuoteInput):
@@ -77,20 +85,42 @@ def _record_event(repo, *, kind: str, user: dict, quote_id: str = "", detail: di
     })
 
 
-def _report(repo, quote):
-    selections = quote.get("selections") or {}
+def _load_documents(repo, keys: list[tuple[str, str]]) -> dict[tuple[str, str], dict]:
     documents = {}
-    for selection in selections.values():
-        key = selection["store"], selection["product_id"]
-        if key not in documents:
-            doc = repo.product_detail(*key)
-            if doc:
-                documents[key] = doc
+    for key in keys:
+        if key in documents or not key[0] or not key[1]:
+            continue
+        doc = repo.product_detail(*key)
+        if doc:
+            documents[key] = doc
+    return documents
+
+
+def _report(repo, quote):
+    if is_shopping_list(quote):
+        store_matches = quote.get("store_matches") or {}
+        keys = []
+        for per_store in store_matches.values():
+            for selection in (per_store or {}).values():
+                keys.append((selection["store"], selection["product_id"]))
+        stores = quote.get("resolved_stores") or resolve_list_stores(quote, repo=repo)
+        documents = _load_documents(repo, keys)
+        return shopping_matrix_report(quote, store_matches, documents, stores=stores)
+    selections = quote.get("selections") or {}
+    keys = [(selection["store"], selection["product_id"]) for selection in selections.values()]
+    documents = _load_documents(repo, keys)
     return comparison_report(quote, selections, documents)
 
 
 def _apply_status(repo, quote, report):
-    status = resolve_quote_status(quote, report)
+    if is_shopping_list(quote):
+        status = report["summary"].get("status") or "draft"
+        if quote.get("exported_at") and report["summary"].get("complete"):
+            status = "exported"
+            report["summary"]["status"] = status
+            report["summary"]["status_label"] = "Exportada"
+    else:
+        status = resolve_quote_status(quote, report)
     if quote.get("status") != status:
         repo.db.business_quotes.update_one(
             {"_id": quote["_id"], "owner_id": quote["owner_id"]},
@@ -100,7 +130,7 @@ def _apply_status(repo, quote, report):
     report["summary"]["status"] = status
     report["summary"]["status_label"] = {
         "draft": "Borrador", "review": "Revisión", "compared": "Comparada", "exported": "Exportada",
-    }[status]
+    }.get(status, report["summary"].get("status_label") or status)
     return quote, report
 
 
@@ -108,6 +138,11 @@ def _create(repo, user, payload: QuoteInput, *, event_kind: str = "import"):
     if repo.db.business_quotes.count_documents({"owner_id": user["id"]}, limit=201) >= 200:
         raise HTTPException(status_code=409, detail="El piloto admite hasta 200 cotizaciones por cuenta.")
     document = payload.model_dump(mode="json")
+    if document.get("mode") == MODE_SHOPPING_LIST:
+        if not document.get("store_group") and not document.get("store_ids"):
+            raise HTTPException(status_code=422, detail="Elige una categoría de tiendas para la lista de compra.")
+        # IVA / precio de referencia no son obligatorios en este modo.
+        document.setdefault("tax_included", True)
     document.update(
         _id=uuid.uuid4().hex,
         owner_id=user["id"],
@@ -115,10 +150,22 @@ def _create(repo, user, payload: QuoteInput, *, event_kind: str = "import"):
         status="draft",
         created_at=datetime.now(timezone.utc).isoformat(),
         selections={},
+        store_matches={},
+        resolved_stores=[],
     )
+    if document.get("mode") == MODE_SHOPPING_LIST:
+        try:
+            stores = resolve_list_stores(document, repo=repo)
+            document["resolved_stores"] = stores
+            document["store_matches"] = build_store_matches(repo, document)
+            report = _report(repo, document)
+            document["status"] = report["summary"].get("status") or "review"
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
     repo.db.business_quotes.insert_one(document)
     _record_event(repo, kind=event_kind, user=user, quote_id=document["_id"],
-                  detail={"items": len(document["items"]), "source_kind": document.get("source_kind")})
+                  detail={"items": len(document["items"]), "source_kind": document.get("source_kind"),
+                          "mode": document.get("mode"), "store_group": document.get("store_group")})
     return _public(document)
 
 
@@ -154,14 +201,72 @@ def import_csv(request: Request, payload: CsvInput):
         user = current_user(request, repo, admin=True)
         try:
             items = parse_csv_quote(payload.text, payload.source_name)
-            quote = QuoteInput(title=payload.title, supplier=payload.supplier,
-                               source_name=payload.source_name, source_kind="csv",
-                               source_sha256=source_hash(payload.text), tax_included=payload.tax_included,
-                               items=items)
+            if payload.mode == MODE_SHOPPING_LIST:
+                tax = True if payload.tax_included is None else payload.tax_included
+            else:
+                tax = payload.tax_included
+            quote = QuoteInput(
+                title=payload.title,
+                supplier=payload.supplier,
+                source_name=payload.source_name,
+                source_kind="csv",
+                source_sha256=source_hash(payload.text),
+                tax_included=tax,
+                mode=payload.mode,
+                store_group=payload.store_group,
+                store_ids=payload.store_ids,
+                items=items,
+            )
             return _create(repo, user, quote, event_kind="import")
         except ValueError as exc:
             _record_event(repo, kind="error", user=user, detail={"where": "import_csv", "message": str(exc)[:300]})
             raise HTTPException(status_code=422, detail=str(exc)) from exc
+    finally:
+        repo.close()
+
+
+@router.get("/api/quotes/store-groups")
+def quote_store_groups(request: Request):
+    """Categorías de tiendas disponibles para el modo lista de compra."""
+    repo = _repository()
+    try:
+        current_user(request, repo, admin=True)
+        return {"groups": available_store_groups(repo=repo)}
+    finally:
+        repo.close()
+
+
+@router.post("/api/quotes/{quote_id}/rebuild-matrix")
+def rebuild_matrix(request: Request, quote_id: str):
+    """Vuelve a buscar matches por tienda desde el catálogo Mongo actual."""
+    repo = _repository()
+    try:
+        user = current_user(request, repo, admin=True)
+        quote = _owned(repo, user, quote_id)
+        if not is_shopping_list(quote):
+            raise HTTPException(status_code=422, detail="Solo aplica al modo lista de compra.")
+        version = int(quote.get("version") or 1)
+        try:
+            stores = resolve_list_stores(quote, repo=repo)
+            matches = build_store_matches(repo, quote)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        result = repo.db.business_quotes.update_one(
+            {"_id": quote_id, "owner_id": user["id"], "version": version},
+            {"$set": {
+                "store_matches": matches,
+                "resolved_stores": stores,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }, "$inc": {"version": 1}},
+        )
+        if not result.matched_count:
+            raise HTTPException(status_code=409, detail="La lista cambió. Recárgala antes de regenerar.")
+        quote = _owned(repo, user, quote_id)
+        quote, report = _apply_status(repo, quote, _report(repo, quote))
+        _record_event(repo, kind="rebuild_matrix", user=user, quote_id=quote_id,
+                      detail={"matched_cells": report["summary"].get("matched_cells"),
+                              "stores": stores})
+        return {"quote": _public(quote), "report": report}
     finally:
         repo.close()
 
@@ -271,7 +376,7 @@ def get_quote(request: Request, quote_id: str):
 
 
 @router.get("/api/quotes/{quote_id}/candidates/{index}")
-def get_candidates(request: Request, quote_id: str, index: int):
+def get_candidates(request: Request, quote_id: str, index: int, store: str | None = None):
     repo = _repository()
     try:
         user = current_user(request, repo, admin=True)
@@ -288,9 +393,16 @@ def get_candidates(request: Request, quote_id: str, index: int):
         for query in queries[:4]:
             for doc in repo.find_by_query(query, limit=100):
                 documents[(doc.get("store"), doc.get("product_id"))] = doc
-        rows = [candidate for doc in documents.values() if (candidate := candidate_for(line, doc))]
+        wanted = (store or "").strip().lower()
+        rows = []
+        for doc in documents.values():
+            if wanted and str(doc.get("store") or "").lower() != wanted:
+                continue
+            candidate = candidate_for(line, doc)
+            if candidate:
+                rows.append(candidate)
         rows.sort(key=lambda row: (not row["usable"], -row["confidence"], row["price"]))
-        return {"candidates": rows[:20], "review_required": True}
+        return {"candidates": rows[:20], "review_required": True, "store": wanted or None}
     finally:
         repo.close()
 
@@ -300,10 +412,17 @@ def edit_quote(request: Request, quote_id: str, payload: QuoteEdit):
     repo = _repository()
     try:
         user = current_user(request, repo, admin=True)
-        _owned(repo, user, quote_id)
+        existing = _owned(repo, user, quote_id)
         values = payload.model_dump(mode="json", exclude={"version"})
-        values.update(selections={}, updated_at=datetime.now(timezone.utc).isoformat(),
+        values.update(selections={}, store_matches={}, updated_at=datetime.now(timezone.utc).isoformat(),
                       status="review", exported_at=None)
+        if values.get("mode") == MODE_SHOPPING_LIST or is_shopping_list(existing):
+            values["mode"] = MODE_SHOPPING_LIST
+            try:
+                values["resolved_stores"] = resolve_list_stores(values, repo=repo)
+                values["store_matches"] = build_store_matches(repo, {**existing, **values})
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
         result = repo.db.business_quotes.update_one(
             {"_id": quote_id, "owner_id": user["id"], "version": payload.version},
             {"$set": values, "$inc": {"version": 1}},
@@ -313,7 +432,7 @@ def edit_quote(request: Request, quote_id: str, payload: QuoteEdit):
         quote = _owned(repo, user, quote_id)
         quote, report = _apply_status(repo, quote, _report(repo, quote))
         _record_event(repo, kind="review", user=user, quote_id=quote_id,
-                      detail={"items": len(quote["items"])})
+                      detail={"items": len(quote["items"]), "mode": quote.get("mode")})
         return {"quote": _public(quote), "report": report}
     finally:
         repo.close()
@@ -331,22 +450,46 @@ def select_candidate(request: Request, quote_id: str, payload: Selection):
         line = QuoteLine.model_validate(quote["items"][payload.index])
         if not doc or not candidate_for(line, doc):
             raise HTTPException(status_code=422, detail="La variante no es compatible con el producto solicitado.")
-        result = repo.db.business_quotes.update_one(
-            {"_id": quote_id, "owner_id": user["id"], "version": payload.version},
-            {"$set": {f"selections.{payload.index}": {"store": payload.store, "product_id": payload.product_id},
-                      "updated_at": datetime.now(timezone.utc).isoformat()}, "$inc": {"version": 1}},
-        )
+        if is_shopping_list(quote):
+            allowed = set(quote.get("resolved_stores") or resolve_list_stores(quote, repo=repo))
+            if payload.store not in allowed:
+                raise HTTPException(status_code=422, detail="La tienda no pertenece al set de la lista.")
+            result = repo.db.business_quotes.update_one(
+                {"_id": quote_id, "owner_id": user["id"], "version": payload.version},
+                {"$set": {
+                    f"store_matches.{payload.index}.{payload.store}": {
+                        "store": payload.store,
+                        "product_id": payload.product_id,
+                        "auto": False,
+                        "confirmed": payload.confirm,
+                    },
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                }, "$inc": {"version": 1}},
+            )
+        else:
+            result = repo.db.business_quotes.update_one(
+                {"_id": quote_id, "owner_id": user["id"], "version": payload.version},
+                {"$set": {f"selections.{payload.index}": {"store": payload.store, "product_id": payload.product_id},
+                          "updated_at": datetime.now(timezone.utc).isoformat()}, "$inc": {"version": 1}},
+            )
         if not result.matched_count:
             raise HTTPException(status_code=409, detail="La cotización cambió. Recárgala antes de confirmar.")
         quote = _owned(repo, user, quote_id)
         quote, report = _apply_status(repo, quote, _report(repo, quote))
-        _record_event(repo, kind="confirm", user=user, quote_id=quote_id, detail={
+        detail = {
             "index": payload.index, "store": payload.store, "product_id": payload.product_id,
-            "confirmed_items": report["summary"]["confirmed_items"],
-            "compared_items": report["summary"]["compared_items"],
-            "potential_saving": report["summary"]["potential_saving"],
-            "status": quote["status"],
-        })
+            "mode": quote.get("mode"), "status": quote["status"],
+        }
+        if is_shopping_list(quote):
+            detail["matched_cells"] = report["summary"].get("matched_cells")
+            detail["confirmed_cells"] = report["summary"].get("confirmed_cells")
+        else:
+            detail.update({
+                "confirmed_items": report["summary"]["confirmed_items"],
+                "compared_items": report["summary"]["compared_items"],
+                "potential_saving": report["summary"]["potential_saving"],
+            })
+        _record_event(repo, kind="confirm", user=user, quote_id=quote_id, detail=detail)
         return {"quote": _public(quote), "report": report}
     finally:
         repo.close()
@@ -359,38 +502,51 @@ def export_quote(request: Request, quote_id: str):
         user = current_user(request, repo, admin=True)
         quote = _owned(repo, user, quote_id)
         report = _report(repo, quote)
-        output = io.StringIO()
-        writer = csv.writer(output, delimiter=";")
-        writer.writerow(["Producto", "Cantidad", "Referencia CLP", "Mercado CLP", "Diferencia sin despacho CLP",
-                         "Tienda", "Estado", "Revisión", "Evidencia"])
-        for row in report["rows"]:
-            selected = row["selected"] or {}
-            evidence = row["item"].get("evidence") or {}
-            values = [row["item"]["name"], row["item"]["quantity"], row["reference_subtotal"],
-                      row["market_subtotal"], row["potential_saving"], selected.get("store", ""),
-                      report["summary"]["status_label"],
-                      " | ".join(row["issues"]), f"{evidence.get('source', '')} fila {evidence.get('row', '')}"]
-            writer.writerow([("'" + value if value.lstrip().startswith(("=", "+", "-", "@")) else value)
-                             if isinstance(value, str) else value for value in values])
+        if is_shopping_list(quote):
+            body = matrix_export_csv(report)
+            filename = f"lista-compra-{quote_id}.csv"
+            export_detail = {
+                "mode": MODE_SHOPPING_LIST,
+                "matched_cells": report["summary"].get("matched_cells"),
+                "best_store": report["summary"].get("best_store"),
+                "best_store_subtotal": report["summary"].get("best_store_subtotal"),
+                "complete": report["summary"].get("complete"),
+            }
+        else:
+            output = io.StringIO()
+            writer = csv.writer(output, delimiter=";")
+            writer.writerow(["Producto", "Cantidad", "Referencia CLP", "Mercado CLP", "Diferencia sin despacho CLP",
+                             "Tienda", "Estado", "Revisión", "Evidencia"])
+            for row in report["rows"]:
+                selected = row["selected"] or {}
+                evidence = row["item"].get("evidence") or {}
+                values = [row["item"]["name"], row["item"]["quantity"], row["reference_subtotal"],
+                          row["market_subtotal"], row["potential_saving"], selected.get("store", ""),
+                          report["summary"]["status_label"],
+                          " | ".join(row["issues"]), f"{evidence.get('source', '')} fila {evidence.get('row', '')}"]
+                writer.writerow([("'" + value if value.lstrip().startswith(("=", "+", "-", "@")) else value)
+                                 if isinstance(value, str) else value for value in values])
+            body = "\ufeff" + output.getvalue()
+            filename = f"cotizacion-{quote_id}.csv"
+            export_detail = {
+                "compared_items": report["summary"]["compared_items"],
+                "potential_saving": report["summary"]["potential_saving"],
+                "complete": report["summary"]["complete"],
+            }
         exported_at = datetime.now(timezone.utc).isoformat()
         quote["exported_at"] = exported_at
         quote, report = _apply_status(repo, quote, report)
+        export_detail["status"] = quote["status"]
         repo.db.business_quotes.update_one(
             {"_id": quote_id, "owner_id": user["id"]},
             {"$set": {"exported_at": exported_at, "status": quote["status"]}},
         )
-        _record_event(repo, kind="export", user=user, quote_id=quote_id, detail={
-            "compared_items": report["summary"]["compared_items"],
-            "potential_saving": report["summary"]["potential_saving"],
-            "complete": report["summary"]["complete"],
-            "status": quote["status"],
-        })
-        return Response("\ufeff" + output.getvalue(), media_type="text/csv",
-                        headers={"Content-Disposition": f'attachment; filename="cotizacion-{quote_id}.csv"',
+        _record_event(repo, kind="export", user=user, quote_id=quote_id, detail=export_detail)
+        return Response(body, media_type="text/csv",
+                        headers={"Content-Disposition": f'attachment; filename="{filename}"',
                                  "Cache-Control": "no-store"})
     finally:
         repo.close()
-
 
 @router.post("/api/quotes/{quote_id}/feedback")
 def quote_feedback(request: Request, quote_id: str, payload: PilotEvent):

@@ -13,14 +13,16 @@ El listado histórico más amplio sigue en [`PENDIENTES.md`](../PENDIENTES.md) e
 - [x] Índices Mongo idempotentes: `business_quotes` (`owner_id` + `created_at`, `owner_id` + `status`) y `business_quote_events` (`owner_id` + `at`, `quote_id` + `at`) en `retail/mongo.py`.
 - [x] Alias API español `/api/cotizaciones` → mismo comportamiento que `/api/quotes`.
 - [x] Acceso solo administrador (UI + API + menú Cuenta), como `/ofertas`.
-- [ ] Prueba funcional en producción con cuenta admin: import CSV, confirmar match, exportar CSV.
+- [x] Modo **lista de compra multi-tienda** (matriz lista × tiendas, grupo supermercados, export CSV, sin scrape live en request).
+- [ ] Prueba funcional en producción con cuenta admin: lista multi-tienda + cotización CSV, confirmar match, exportar.
 - [ ] Smoke de navegador en CI (`tests/browser/purchasing_smoke.py` con Playwright).
 - [x] Job async Docling (conversión PDF fuera de la petición HTTP, cola/worker dedicado).
 - [ ] Export XLSX / informe con marca (post-MVP).
 - [ ] Despacho incluido en totales de comparación (hoy solo producto, sin inventar costos).
-- [x] Unidades kg/l y conversiones de peso/volumen/longitud con reglas explícitas.- [ ] Ventana de precio de catálogo configurable (piloto fijo 48 h; evaluar categoría + SLA por vertical).
+- [x] Unidades kg/l y conversiones de peso/volumen/longitud con reglas explícitas.
+- [ ] Ventana de precio de catálogo configurable (piloto fijo 48 h; evaluar categoría + SLA por vertical).
 - [ ] TimesFM, Scrapling masivo, multi-tenant comercial (fuera de este piloto).
-
+- [ ] Registrar Jumbo como tienda del grupo supermercados cuando exista scraper/fuente.
 Rutas clave:
 
 | Recurso | Ruta |

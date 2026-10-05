@@ -69,8 +69,12 @@ class Collection:
         if found is None:
             return SimpleNamespace(matched_count=0)
         for key, value in updates.get("$set", {}).items():
-            if key.startswith("selections."):
-                found.setdefault("selections", {})[key.split(".", 1)[1]] = value
+            if "." in key:
+                cursor = found
+                parts = key.split(".")
+                for part in parts[:-1]:
+                    cursor = cursor.setdefault(part, {})
+                cursor[parts[-1]] = value
             else:
                 found[key] = value
         for key, value in updates.get("$inc", {}).items():
@@ -99,14 +103,82 @@ def quotes_client(monkeypatch):
     user = {"id": "user-1", "role": "admin", "status": "approved"}
     doc = {"store": "lider", "product_id": "sku", "name": "Samsung Galaxy S25 256GB", "brand": "Samsung",
            "price": 600000, "stock": 5, "condition": "new", "updated_at": datetime.now(timezone.utc)}
+    catalog = {
+        ("lider", "sku"): doc,
+        ("lider", "az"): {
+            "store": "lider", "product_id": "az", "sku_id": "az", "name": "Azúcar granulada 1 kg",
+            "brand": "", "price": 1290, "price_all_payment": 1290, "stock": 20, "condition": "new",
+            "currency": "CLP", "updated_at": datetime.now(timezone.utc),
+        },
+        ("unimarc", "az"): {
+            "store": "unimarc", "product_id": "az", "sku_id": "az", "name": "Azúcar granulada 1 kg",
+            "brand": "", "price": 1190, "price_all_payment": 1190, "stock": 20, "condition": "new",
+            "currency": "CLP", "updated_at": datetime.now(timezone.utc),
+        },
+        ("tottus", "az"): {
+            "store": "tottus", "product_id": "az", "sku_id": "az", "name": "Azúcar granulada 1 kg",
+            "brand": "", "price": 1350, "price_all_payment": 1350, "stock": 20, "condition": "new",
+            "currency": "CLP", "updated_at": datetime.now(timezone.utc),
+        },
+        ("lider", "cf"): {
+            "store": "lider", "product_id": "cf", "sku_id": "cf", "name": "Café molido 500 g",
+            "brand": "", "price": 4500, "price_all_payment": 4500, "stock": 20, "condition": "new",
+            "currency": "CLP", "updated_at": datetime.now(timezone.utc),
+        },
+        ("unimarc", "cf"): {
+            "store": "unimarc", "product_id": "cf", "sku_id": "cf", "name": "Café molido 500 g",
+            "brand": "", "price": 4200, "price_all_payment": 4200, "stock": 20, "condition": "new",
+            "currency": "CLP", "updated_at": datetime.now(timezone.utc),
+        },
+        ("lider", "ph"): {
+            "store": "lider", "product_id": "ph", "sku_id": "ph", "name": "Papel higiénico 12 un",
+            "brand": "", "price": 5990, "price_all_payment": 5990, "stock": 20, "condition": "new",
+            "currency": "CLP", "updated_at": datetime.now(timezone.utc),
+        },
+        ("unimarc", "ph"): {
+            "store": "unimarc", "product_id": "ph", "sku_id": "ph", "name": "Papel higiénico 12 un",
+            "brand": "", "price": 6200, "price_all_payment": 6200, "stock": 20, "condition": "new",
+            "currency": "CLP", "updated_at": datetime.now(timezone.utc),
+        },
+        ("tottus", "ph"): {
+            "store": "tottus", "product_id": "ph", "sku_id": "ph", "name": "Papel higiénico 12 un",
+            "brand": "", "price": 5800, "price_all_payment": 5800, "stock": 20, "condition": "new",
+            "currency": "CLP", "updated_at": datetime.now(timezone.utc),
+        },
+    }
+
+    def product_detail(store, product_id):
+        return deepcopy(catalog.get((store, product_id)) or (doc if store == "lider" and product_id == "sku" else None))
+
+    def find_by_query(query, limit=100):
+        text = str(query).lower()
+        return [deepcopy(row) for (store, pid), row in catalog.items() if text[:4] in row["name"].lower() or text in row["name"].lower()]
+
     repo = SimpleNamespace(
         db=SimpleNamespace(business_quotes=quotes, business_quote_events=events),
-        product_detail=lambda *args: doc,
-        find_by_query=lambda *args, **kwargs: [doc],
+        product_detail=product_detail,
+        find_by_query=find_by_query,
+        scrape_priorities=SimpleNamespace(update_one=lambda *a, **k: None),
         close=lambda: None,
     )
     monkeypatch.setattr("retail.web.quotes_api.connect_repo", lambda: repo)
     monkeypatch.setattr("retail.web.quotes_api.current_user", _fake_current_user(user))
+    monkeypatch.setattr(
+        "retail.shopping_list.stores_for_group",
+        lambda group, repo=None: ["lider", "unimarc", "tottus"] if group == "supermercados" else [],
+    )
+    monkeypatch.setattr(
+        "retail.shopping_list.list_store_categories",
+        lambda repo=None: [{"id": "supermercados", "title": "Supermercados", "store_ids": ["lider", "unimarc", "tottus"], "sort_order": 0}],
+    )
+    monkeypatch.setattr(
+        "retail.web.quotes_api.resolve_list_stores",
+        lambda quote, repo=None: quote.get("store_ids") or ["lider", "unimarc", "tottus"],
+    )
+    monkeypatch.setattr(
+        "retail.web.quotes_api.available_store_groups",
+        lambda repo=None: [{"id": "supermercados", "title": "Supermercados", "store_ids": ["lider", "unimarc", "tottus"]}],
+    )
     return TestClient(app), user, quotes, events
 
 
@@ -115,6 +187,36 @@ def create(client):
                            "text": "nombre;cantidad;precio_unitario;marca\nSamsung Galaxy S25 256GB;2;700000;Samsung"})
     assert response.status_code == 201
     return response.json()["id"]
+
+
+def test_shopping_list_matrix_import_and_export(quotes_client):
+    client, user, collection, events = quotes_client
+    groups = client.get("/api/quotes/store-groups")
+    assert groups.status_code == 200
+    assert groups.json()["groups"][0]["id"] == "supermercados"
+    response = client.post("/api/quotes/import-csv", json={
+        "title": "Super del mes",
+        "mode": "shopping_list",
+        "store_group": "supermercados",
+        "text": "nombre;cantidad\nAzúcar granulada 1 kg;1\nCafé molido 500 g;2\nPapel higiénico 12 un;1",
+    })
+    assert response.status_code == 201, response.text
+    quote = response.json()
+    assert quote["mode"] == "shopping_list"
+    assert quote["resolved_stores"] == ["lider", "unimarc", "tottus"]
+    detail = client.get(f"/api/quotes/{quote['id']}")
+    assert detail.status_code == 200
+    report = detail.json()["report"]
+    assert report["mode"] == "shopping_list"
+    assert len(report["rows"]) == 3
+    assert report["summary"]["best_store"] == "unimarc"
+    assert report["summary"]["best_store_subtotal"] == 1190 + 8400 + 6200
+    assert report["rows"][1]["cells"]["tottus"]["matched"] is False
+    exported = client.get(f"/api/quotes/{quote['id']}/export.csv")
+    assert exported.status_code == 200
+    assert "lista-compra" in exported.headers.get("content-disposition", "")
+    assert "Azúcar granulada 1 kg" in exported.text
+    assert "sin stock o sin match" in exported.text
 
 
 def test_quote_review_and_export_are_private_and_versioned(quotes_client):
@@ -147,7 +249,8 @@ def test_edit_clears_approvals_and_never_writes_retail_history(quotes_client):
     client.put(f"/api/quotes/{quote_id}/selection", json={"index": 0, "store": "lider", "product_id": "sku", "version": 1})
     quote = client.get(f"/api/quotes/{quote_id}").json()["quote"]
     editable = {key: value for key, value in quote.items()
-                if key not in {"id", "created_at", "updated_at", "selections", "exported_at", "status", "feedback"}}
+                if key not in {"id", "created_at", "updated_at", "selections", "store_matches",
+                               "resolved_stores", "exported_at", "status", "feedback"}}
     editable["items"][0]["quantity"] = 3
     response = client.put(f"/api/quotes/{quote_id}", json=editable)
     assert response.status_code == 200
