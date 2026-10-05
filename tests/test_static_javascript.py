@@ -81,7 +81,7 @@ def test_product_price_charts_show_every_calendar_day():
     assert ".price-chart-scroll .chart" in styles
     assert "max-width: none" in styles
     assert "overflow-x: auto" in styles
-    assert 'producto.js?v=36' in page
+    assert 'producto.js?v=37' in page
     assert 'styles.css?v=80' in page
 
 
