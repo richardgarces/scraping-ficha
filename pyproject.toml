@@ -22,6 +22,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+documents = [
+    "docling>=2.70.0,<3",
+]
 screenshots = [
     "playwright>=1.40.0",
 ]

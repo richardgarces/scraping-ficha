@@ -32,6 +32,7 @@ from retail.web.forecasts_api import router as forecasts_router
 from retail.web.admin_analysis_api import router as admin_analysis_router
 from retail.web.push_api import router as push_router
 from retail.web.reviews_api import router as reviews_router
+from retail.web.quotes_api import router as quotes_router
 from retail.offer_screenshot import offer_shot_media_type, offer_shot_path
 from retail.web.anti_scraping import (
     VISITOR_COOKIE,
@@ -51,6 +52,7 @@ app.include_router(forecasts_router)
 app.include_router(admin_analysis_router)
 app.include_router(push_router)
 app.include_router(reviews_router)
+app.include_router(quotes_router)
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
 
@@ -103,6 +105,9 @@ def robots() -> PlainTextResponse:
 
 @app.middleware("http")
 async def count_app_requests(request: Request, call_next):
+    if request.url.path.startswith("/api/quotes") and request.method in {"POST", "PUT"}:
+        if len(await request.body()) > 600_000:
+            return JSONResponse({"detail": "La cotización supera el tamaño permitido."}, status_code=413)
     decision = None
     if not os.environ.get("PYTEST_CURRENT_TEST"):
         decision = inspect_request(
@@ -284,7 +289,7 @@ def siguiendo() -> FileResponse:
 def _member_page(path: str) -> bool:
     """Páginas que cualquier cuenta aprobada puede abrir, no solo el admin."""
     base = path.split("?", 1)[0].rstrip("/") or "/"
-    return base in {"/reales", "/super", "/comparar", "/analisis-producto"}
+    return base in {"/reales", "/super", "/comparar", "/analisis-producto", "/cotizaciones"}
 
 
 @app.get("/entrar")

@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Cotizaciones comparadas · Retail Chile</title>
+  <link rel="stylesheet" href="/static/styles.css?v=82">
+  <link rel="stylesheet" href="/static/cotizaciones.css?v=1">
+</head>
+<body>
+  <header class="top"><div><p class="eyebrow">Retail Chile</p><h1>Cotizaciones comparadas</h1></div>
+    <form class="desktop-quick-search" action="/catalogo" method="get" role="search">
+      <label class="desktop-search-field"><span class="sr-only">Buscar un producto</span><input name="q" type="search" placeholder="Busca un producto…"></label>
+      <label class="quick-search-toggle"><input name="quick" type="checkbox" value="1" checked><span class="quick-search-long">Búsqueda rápida</span><span class="quick-search-short">Rápida</span></label>
+      <button type="submit" aria-label="Buscar">Buscar</button>
+    </form>
+    <nav class="nav"><a href="/">Explorar</a><a href="/catalogo">Catálogo</a><a href="/hoy">Ofertas de hoy</a><a href="/reales">Ofertas reales</a>
+      <details class="nav-menu" data-login><summary>Cuenta</summary><div class="nav-menu-list"><a href="/entrar" data-login-mode="entrar">Entrar</a><a href="/entrar?modo=inscribir" data-login-mode="inscribir">Inscribirse</a></div></details>
+      <details class="nav-menu" data-auth hidden><summary data-user-label>Cuenta</summary><div class="nav-menu-list">
+        <a href="/cotizaciones" class="current">Cotizaciones</a><a href="/siguiendo">Siguiendo</a>
+        <a href="/cron" data-admin hidden>Cron / lotes</a><a href="/analisis-producto" data-admin hidden>Análisis de producto</a><a href="/estadisticas" data-admin hidden>Estadísticas</a><a href="/usuarios" data-admin hidden>Usuarios</a><a href="/ofertas" data-admin hidden>Configurar</a><a href="#" data-logout>Salir</a>
+      </div></details>
+    </nav>
+  </header>
+  <main class="settings">
+    <p id="quote-status" class="summary" role="status" aria-live="polite">Cargando tus cotizaciones…</p>
+    <section class="panel">
+      <h2>Comparar una lista de compra</h2>
+      <p>Importa productos, revisa los datos y confirma sus coincidencias con el catálogo. Estados: borrador → revisión → comparada → exportada. Tus cotizaciones son privadas.</p>
+      <form id="quote-import" class="form-grid">
+        <label>Nombre de la lista <input id="quote-title" required maxlength="150" placeholder="Compra de equipos"></label>
+        <label>Proveedor de referencia <input id="quote-supplier" maxlength="150"></label>
+        <label class="span">Archivo CSV o cotización convertida <input id="quote-file" type="file" accept=".csv,.json"></label>
+        <label class="span">Lista CSV <textarea id="quote-csv" rows="5" placeholder="nombre;cantidad;precio_unitario;marca&#10;Samsung Galaxy S25 256GB;1;799990;Samsung"></textarea></label>
+        <label class="span"><input id="quote-tax" type="checkbox"> Confirmo que los precios de referencia incluyen IVA</label>
+        <p class="muted span">Precios en pesos chilenos enteros. Columnas: nombre, cantidad, precio_unitario; opcionales: marca, ean, unidad. Máximo 100 productos. Para PDFs, importa el JSON generado por la conversión documental.</p>
+        <button type="submit">Importar y revisar</button>
+      </form>
+    </section>
+    <section class="panel"><h2>Mis cotizaciones</h2><div id="quote-list" class="quote-list"></div></section>
+    <section class="panel" id="quote-detail" hidden>
+      <h2 id="quote-heading"></h2>
+      <form id="quote-edit" class="form-grid">
+        <label>Válida hasta <input id="quote-valid-until" type="date"></label>
+        <label><input id="quote-edit-tax" type="checkbox"> Precios de referencia con IVA incluido</label>
+        <label class="span"><input id="quote-source-reviewed" type="checkbox"> Revisé la lista contra el documento original, incluidas las filas que necesitan corrección</label>
+        <div class="table-wrap span"><table><thead><tr><th>Producto y evidencia</th><th>Cantidad</th><th>Precio unitario CLP</th><th>Unidad</th><th>Revisar coincidencia</th></tr></thead><tbody id="quote-lines"></tbody></table></div>
+        <button type="submit">Guardar correcciones</button>
+      </form>
+      <div id="quote-candidates" aria-live="polite"></div>
+      <div id="quote-report" aria-live="polite"></div>
+      <div id="quote-pilot-metrics" data-admin hidden></div>
+      <p class="auth-actions"><a id="quote-export" class="btn secondary">Exportar comparación CSV</a><button type="button" data-feedback="useful">Me resultó útil</button><button type="button" data-feedback="needs_correction" class="secondary">Necesita corrección</button></p>
+    </section>
+  </main>
+  <script src="/static/prices.js?v=31"></script><script src="/static/cotizaciones.js?v=1"></script>
+</body>
+</html>

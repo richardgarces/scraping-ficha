@@ -651,6 +651,14 @@ window.retailUser = undefined;
 let sessionPromise;
 
 function applySession(user) {
+  document.querySelectorAll(".nav-menu[data-auth] .nav-menu-list").forEach(menu => {
+    if (!menu.querySelector('a[href="/cotizaciones"]')) {
+      const link = document.createElement("a");
+      link.href = "/cotizaciones";
+      link.textContent = "Cotizaciones";
+      menu.prepend(link);
+    }
+  });
   window.retailUser = user || null;
   const loggedIn = Boolean(user);
   const admin = Boolean(user && user.role === "admin");

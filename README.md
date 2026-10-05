@@ -7,6 +7,10 @@ Para qué sirve la aplicación y cómo configurarla: **[docs/GUIA.md](docs/GUIA.
 La arquitectura de identidad, condición, despacho, pagos y stock está descrita
 en **[docs/inteligencia_comercial.md](docs/inteligencia_comercial.md)**.
 
+El piloto de **[cotizaciones comparadas](docs/COTIZACIONES.md)** conecta listas
+CSV y documentos de scraping/Docling con el catálogo, revisión de equivalencias
+y comparación de costos. Disponible en `/cotizaciones` para cuentas aprobadas.
+
 - `retail/sources/`: una tienda por módulo (se descubren solas)
 - `retail/platforms/`: motores VTEX, Shopify y Magento
 - `retail/scaffold/templates/`: plantillas de `retail nueva`
