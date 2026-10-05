@@ -97,9 +97,8 @@ async function load() {
     : "Todavía no hay productos guardados. Corre una búsqueda o el batch.";
   $("grid").innerHTML = items.length ? items.map(card).join("") : "<p class='panel muted'>Sin resultados con esos filtros.</p>";
   saveProductTrail(items);
-  $("page-label").textContent = `Página ${data.page} de ${totalPages}`;
-  $("prev").disabled = data.page <= 1;
-  $("next").disabled = data.page >= totalPages;
+  const pager = RetailPager.render(data.page, totalPages);
+  page = pager.page;
   updateFilterSummary();
   } finally {
     if (typeof setQuickSearchBusy === "function") setQuickSearchBusy(false);

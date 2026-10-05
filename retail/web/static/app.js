@@ -811,9 +811,9 @@ function renderPager(total) {
   nav.hidden = false;
   nav.innerHTML = `
     <span class="pager-range">${start}–${end} de ${total}</span>
-    <button type="button" class="secondary" data-page="prev" ${currentPage <= 1 ? "disabled" : ""}>Anterior</button>
+    ${currentPage > 1 ? '<button type="button" class="secondary" data-page="prev" aria-label="Ir a la página anterior">Anterior</button>' : ""}
     ${numbers}
-    <button type="button" class="secondary" data-page="next" ${currentPage >= pages ? "disabled" : ""}>Siguiente</button>`;
+    ${currentPage < pages ? '<button type="button" class="secondary" data-page="next" aria-label="Ir a la página siguiente">Siguiente</button>' : ""}`;
 }
 
 function setView(view) {

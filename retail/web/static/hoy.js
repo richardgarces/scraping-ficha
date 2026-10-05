@@ -183,9 +183,8 @@ function renderDeals(data) {
     ? rows.map(dealCard).join("")
     : `<p class="panel muted">Sin ofertas.</p>`;
   saveProductTrail(rows);
-  $("page-label").textContent = `Página ${data.page || 1} de ${totalPages}`;
-  $("prev").disabled = (data.page || 1) <= 1;
-  $("next").disabled = (data.page || 1) >= totalPages;
+  const pager = RetailPager.render(data.page || 1, totalPages);
+  page = pager.page;
 }
 
 function dealCard(item) {

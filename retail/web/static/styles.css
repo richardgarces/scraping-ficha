@@ -521,6 +521,16 @@ html[data-theme="day"] .offer-toggle-chip[aria-pressed="true"] .offer-toggle-mar
   color: var(--accent);
   background: color-mix(in srgb, var(--accent) 12%, var(--panel));
 }
+.simple-pager {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  width: 100%;
+  gap: 12px;
+}
+.simple-pager #prev { grid-column: 1; justify-self: end; }
+.simple-pager #page-label { grid-column: 2; text-align: center; white-space: nowrap; }
+.simple-pager #next { grid-column: 3; justify-self: start; }
+.simple-pager button[hidden] { display: none; }
 .deal-ctas { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
 .deal .watch-btn { width: 100%; margin-top: 4px; }
 .summary.stats { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; color: var(--text); }
@@ -1736,7 +1746,7 @@ body.modal-open { overflow: hidden; }
 .tiers li { display: flex; justify-content: space-between; gap: 16px; padding: 4px 0; border-bottom: 1px solid var(--line); color: var(--muted); }
 .tiers li.current { color: var(--text); font-weight: 600; }
 .tiers li.current b { color: var(--accent); }
-.pager { display: flex; gap: 16px; align-items: center; justify-content: center; }
+.pager { gap: 16px; align-items: center; justify-content: center; }
 .store-offer { color: var(--text); }
 .store-offer:hover { color: var(--accent); }
 .store-offer .store { pointer-events: none; }

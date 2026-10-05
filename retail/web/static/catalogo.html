@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#258fdf">
   <title>Catálogo</title>
   <script>(function(){var m=localStorage.getItem("retail-theme");if(m==="day"||m==="night"){document.documentElement.dataset.theme=m;return;}var h=new Date().getHours();document.documentElement.dataset.theme=(h>=7&&h<19)?"day":"night";})();</script>
-  <link rel="stylesheet" href="/static/styles.css?v=77">
+  <link rel="stylesheet" href="/static/styles.css?v=77-pager">
 </head>
 <body>
   <header class="top">
@@ -84,13 +84,14 @@
 
     <section id="grid" class="card-grid"></section>
 
-    <section class="panel pager">
-      <button type="button" id="prev" class="secondary">Anterior</button>
+    <section class="panel pager simple-pager" aria-label="Paginación del catálogo">
+      <button type="button" id="prev" class="secondary" aria-label="Ir a la página anterior">Anterior</button>
       <span id="page-label" class="muted"></span>
-      <button type="button" id="next" class="secondary">Siguiente</button>
+      <button type="button" id="next" class="secondary" aria-label="Ir a la página siguiente">Siguiente</button>
     </section>
   </main>
   <script src="/static/prices.js?v=30"></script>
-  <script src="/static/catalogo.js?v=9"></script>
+  <script src="/static/pagination.js?v=1"></script>
+  <script src="/static/catalogo.js?v=9-pager"></script>
 </body>
 </html>
