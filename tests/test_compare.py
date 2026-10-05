@@ -8,7 +8,7 @@ from retail.compare import (
     same_product_identity,
 )
 from retail.models import Product
-from retail.search import attach_cheaper_hints, merge_products
+from retail.search import attach_cheaper_hints, merge_products, refresh_cached_comparisons
 from retail.web.app import app
 
 
@@ -497,6 +497,33 @@ def test_partybox_encore_generations_are_separate_but_second_generation_groups()
         "gap_percent": 28.6,
     }
     assert first_generation["offers"][0]["cheaper_elsewhere"] is None
+
+
+def test_old_cached_search_is_regrouped_before_serving():
+    rows = [
+        {
+            "store": "ebest", "product_id": "32672", "sku_id": "32672",
+            "name": "JBL Partybox Encore 2 Essential", "brand": None, "price": 199990,
+        },
+        {
+            "store": "pcfactory", "product_id": "57197", "sku_id": "57197",
+            "name": "JBL PartyBox Encore Essential 2", "brand": "JBL", "price": 249990,
+        },
+        {
+            "store": "entel", "product_id": "old", "sku_id": "old",
+            "name": "Partybox Encore Essential", "brand": "JBL", "price": 264990,
+            "cheaper_elsewhere": {"store": "pcfactory", "price": 249990},
+        },
+    ]
+    cached = {"groups": [{"offers": rows}], "rows": rows, "comparison_version": 1}
+
+    refresh_cached_comparisons(cached)
+
+    by_id = {row["product_id"]: row for row in cached["rows"]}
+    assert cached["comparison_version"] == 2
+    assert by_id["32672"]["cheaper_elsewhere"] is None
+    assert by_id["57197"]["cheaper_elsewhere"]["store"] == "ebest"
+    assert by_id["old"]["cheaper_elsewhere"] is None
 
 
 def test_pack_count_splits_tablets_of_the_same_name():

@@ -457,6 +457,41 @@ def attach_cheaper_hints(groups: list[dict[str, Any]]) -> None:
     mark_false_list_discounts(groups)
 
 
+def refresh_cached_comparisons(result: dict[str, Any]) -> dict[str, Any]:
+    """Actualiza agrupación y mínimos de una caché creada con reglas anteriores."""
+    if int(result.get("comparison_version") or 0) >= 2:
+        return result
+    rows = [dict(row) for row in result.get("rows") or [] if isinstance(row, dict)]
+    if not rows or not result.get("groups"):
+        return result
+    originals = {
+        (str(row.get("store") or ""), str(row.get("product_id") or "")): row
+        for row in rows
+    }
+    groups = compare_products([Product.from_dict(row) for row in rows])
+    for group in groups:
+        enriched = []
+        for computed in group.get("offers") or []:
+            key = (str(computed.get("store") or ""), str(computed.get("product_id") or ""))
+            offer = dict(originals.get(key) or computed)
+            for field in (
+                "compare_code", "entity_id", "entity_confidence",
+                "entity_match_method", "is_lowest", "comparison_price", "total_price",
+            ):
+                offer[field] = computed.get(field)
+            enriched.append(offer)
+        group["offers"] = enriched
+    collapse_display(groups)
+    attach_cheaper_hints(groups)
+    result["groups"] = groups
+    result["rows"] = flatten_rows(groups)
+    result["offer_count"] = len(result["rows"])
+    result["group_count"] = len(groups)
+    result["comparable_count"] = sum(1 for group in groups if group.get("comparable"))
+    result["comparison_version"] = 2
+    return result
+
+
 def flatten_rows(groups: list[dict[str, Any]]) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for group in groups:
@@ -817,7 +852,8 @@ def build_result(
         "saved": saved,
         "progress": _client_progress(progress, reveal=reveal),
         "product_index": product_index,
-        "groups": groups,
+        "comparison_version": 2,
+        "groups": display,
         "rows": rows,
     }
 
@@ -982,6 +1018,7 @@ def _run_search_events(
         )
         if cached_result is not None and not cache_is_underfilled_db:
             cached_result = dict(cached_result)
+            refresh_cached_comparisons(cached_result)
             cached_result["product_index"] = product_index
             cached_result["stores"] = chosen
             cached_result["cancelled"] = False
