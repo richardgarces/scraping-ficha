@@ -50,4 +50,16 @@ services:
       - LOG_JSON=false
       - LOG_COLOR=true
       - LOG_FILE=/dev/stdout
-      
+
+## Capturas de Líder
+
+Playwright puede llegar a la intersticial PerimeterX/HUMAN («Robot or human?»)
+mientras FlareSolverr sí accede a la ficha. Ante una captura bloqueada,
+`capture_offer_screenshot` solicita `returnScreenshot` al solver. Verifica que
+el HTML ya no sea una comprobación antibot y que la imagen sea un PNG válido
+antes de usarla. La captura y el HTML provienen del mismo navegador, sin abrir
+una nueva sesión Playwright que volvería a perder las cookies.
+
+Si el respaldo falla o sigue bloqueado, se mantiene la imagen del producto.
+No se envía una captura de la intersticial ni se da por resuelto un desafío
+solo porque FlareSolverr devuelve `status: ok`.

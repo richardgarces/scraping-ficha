@@ -24,22 +24,19 @@ def is_challenge(status: int, headers, body: str) -> bool:
     )
 
 
-def solve(url: str, endpoint: str) -> dict:
+def solve(url: str, endpoint: str, *, screenshot: bool = False) -> dict:
     max_timeout = int(os.environ.get("FLARESOLVERR_MAX_TIMEOUT", "60000"))
     if max_timeout <= 0:
         raise RuntimeError("FLARESOLVERR_MAX_TIMEOUT debe ser positivo")
     endpoint = endpoint.rstrip("/")
     if not endpoint.endswith("/v1"):
         endpoint += "/v1"
+    payload = {"cmd": "request.get", "url": url, "maxTimeout": max_timeout}
+    if screenshot:
+        payload.update({"returnScreenshot": True, "waitInSeconds": 2})
     request = Request(
         endpoint,
-        data=json.dumps(
-            {
-                "cmd": "request.get",
-                "url": url,
-                "maxTimeout": max_timeout,
-            }
-        ).encode(),
+        data=json.dumps(payload).encode(),
         headers={"Content-Type": "application/json"},
     )
     try:
@@ -61,4 +58,10 @@ def solve(url: str, endpoint: str) -> dict:
         status, {"server": "cloudflare"}, solution["response"]
     ):
         raise RuntimeError("FlareSolverr no resolvió el desafío")
+    from retail.offer_screenshot import is_bot_check_page
+
+    if is_bot_check_page(solution["response"]):
+        raise RuntimeError(
+            "FlareSolverr devolvió una comprobación antibot sin resolver"
+        )
     return solution

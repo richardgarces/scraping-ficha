@@ -2,11 +2,14 @@
 
 Solo se usa al enviar una alerta (no en cada scrape). Si Playwright/Chromium
 no están instalados, falla la captura o la página es una comprobación antibot,
-se vuelve al `image_url` del producto. Esa intersticial no se resuelve.
+se intenta una captura verificada mediante FlareSolverr si está configurado.
+Si el respaldo falla, se vuelve al `image_url` del producto.
 """
 
 from __future__ import annotations
 
+import base64
+import io
 import os
 import re
 import threading
@@ -628,6 +631,30 @@ def _discard_screenshot(dest: Path) -> None:
         pass
 
 
+def _capture_with_solver(target: str, dest: Path) -> bool:
+    """Captura desde el mismo navegador que obtuvo el HTML validado."""
+    endpoint = os.environ.get("FLARESOLVERR_URL")
+    if not endpoint:
+        return False
+    try:
+        from PIL import Image
+        from retail.flaresolverr import solve
+
+        solution = solve(target, endpoint, screenshot=True)
+        content = base64.b64decode(solution.get("screenshot", ""), validate=True)
+        with Image.open(io.BytesIO(content)) as image:
+            if image.format != "PNG":
+                raise ValueError("FlareSolverr no devolvió una captura PNG")
+            image.verify()
+        dest.write_bytes(content)
+        print("Captura de oferta: respaldo FlareSolverr verificado.")
+        return True
+    except Exception as exc:
+        print(f"Captura de oferta: falló el respaldo FlareSolverr ({exc}).")
+        _discard_screenshot(dest)
+        return False
+
+
 def capture_offer_screenshot(payload: dict[str, Any]) -> str | None:
     """Captura PNG de la página de oferta. None si está desactivado o falla."""
     if not screenshots_enabled():
@@ -654,6 +681,9 @@ def capture_offer_screenshot(payload: dict[str, Any]) -> str | None:
                 page.wait_for_timeout(min(1_500, timeout // 4))
                 blocked, provider = _page_bot_check_details(page)
                 if blocked:
+                    _discard_screenshot(dest)
+                    if _capture_with_solver(target, dest):
+                        return str(dest)
                     store_id = _store_id(payload) or "la tienda"
                     print(
                         f"Captura de oferta: {store_id} mostró una comprobación antibot; "

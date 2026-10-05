@@ -1,3 +1,5 @@
+import base64
+import io
 import json
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -5,6 +7,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import pytest
 
 from retail.http import HttpError, HttpSession
+from retail.flaresolverr import solve
+from retail.offer_screenshot import _capture_with_solver
 
 
 @pytest.fixture
@@ -57,6 +61,24 @@ def solver_service(monkeypatch):
                         ],
                     },
                 }
+            if result["status"] == "ok":
+                if "/botcheck" in payload["url"]:
+                    result["solution"]["response"] = (
+                        "<html><title>Robot or human?</title><main id='px-captcha'>"
+                        "Activate and hold to confirm that you're human. PRESS & HOLD</main></html>"
+                    )
+                if payload.get("returnScreenshot"):
+                    from PIL import Image
+
+                    buffer = io.BytesIO()
+                    Image.new("RGB", (640, 480), "white").save(buffer, format="PNG")
+                    result["solution"]["screenshot"] = base64.b64encode(
+                        buffer.getvalue()
+                    ).decode()
+                    if "/corrupt-image" in payload["url"]:
+                        result["solution"]["screenshot"] = base64.b64encode(
+                            b"not a PNG"
+                        ).decode()
             self.wfile.write(json.dumps(result).encode())
 
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
@@ -115,3 +137,26 @@ def test_disabled_solver(solver_service, monkeypatch):
     monkeypatch.delenv("FLARESOLVERR_URL")
     assert session.get(endpoint + "/protected")[0] == 403
     assert calls == []
+
+
+def test_solver_ok_with_robot_page_is_rejected(solver_service):
+    _, endpoint, _ = solver_service
+    with pytest.raises(RuntimeError, match="antibot sin resolver"):
+        solve(endpoint + "/botcheck", endpoint)
+
+
+def test_solver_screenshot_validated_and_saved(solver_service, tmp_path):
+    _, endpoint, calls = solver_service
+    destination = tmp_path / "offer.png"
+    assert _capture_with_solver(endpoint + "/html", destination) is True
+    assert destination.read_bytes().startswith(b"\x89PNG")
+    assert calls[-1]["returnScreenshot"] is True
+
+
+@pytest.mark.parametrize("path", ["/botcheck", "/corrupt-image", "/error"])
+def test_bad_solver_capture_discarded(solver_service, tmp_path, path):
+    _, endpoint, _ = solver_service
+    destination = tmp_path / "offer.png"
+    destination.write_bytes(b"old blocked capture")
+    assert _capture_with_solver(endpoint + path, destination) is False
+    assert not destination.exists()
