@@ -38,6 +38,18 @@ SPANISH_HTML = """
 <body><p>Comprobando si la conexión del sitio es segura</p></body></html>
 """
 
+WALMART_HOLD_HTML = """
+<html><head><title>Robot or human?</title></head>
+<body>
+  <main id="px-captcha">
+    <p>Activate and hold the button to confirm that you're human. Thank You!</p>
+    <button>PRESS &amp; HOLD</button>
+  </main>
+  <script>window._pxAppId = "PXu6b0qd2S";</script>
+  <script src="https://captcha.px-cdn.net/PXu6b0qd2S/captcha.js"></script>
+</body></html>
+"""
+
 PRODUCT_HTML = """
 <html><head><title>Televisor 55 | Lider</title></head>
 <body>
@@ -64,6 +76,27 @@ def test_challenge_titles_and_markers():
         "<html><script>window._cf_chl_opt = {cType:'managed'};</script></html>",
         "Ficha",
     ) is True
+
+
+def test_walmart_press_and_hold_requires_context():
+    assert shots.is_bot_check_page(WALMART_HOLD_HTML) is True
+    assert shots.bot_check_provider(WALMART_HOLD_HTML) == "perimeterx"
+    assert shots.is_bot_check_page(
+        "<html><title>Lider</title><body><main></main></body></html>",
+        "Robot or human?",
+        "Activate and hold the button to confirm that you're human. PRESS & HOLD",
+    ) is True
+
+    # Palabras aisladas pueden aparecer en instrucciones o nombres de producto.
+    assert shots.is_bot_check_page(
+        "<html><title>Robot or Human: The Psychology Book</title><p>Libro importado</p></html>"
+    ) is False
+    assert shots.is_bot_check_page(
+        "<html><title>Taladro | Lider</title><p>Press and hold for two seconds to start.</p></html>"
+    ) is False
+    assert shots.is_bot_check_page(
+        '<html><title>Pago</title><div id="px-captcha"></div><p>Completa el formulario.</p></html>'
+    ) is False
 
 
 def test_product_page_is_not_a_challenge():
@@ -94,10 +127,11 @@ def test_mark_and_list_store_bot_check():
 
     repo = Repo()
     seen = datetime(2026, 10, 3, 18, 0, tzinfo=timezone.utc)
-    saved = shots.mark_store_bot_check(repo, " Lider ", seen_at=seen)
+    saved = shots.mark_store_bot_check(repo, " Lider ", seen_at=seen, provider="PerimeterX")
     assert saved["store"] == "lider"
     assert saved["bot_check"] is True
     assert repo.docs["store:lider"]["bot_check_last_seen_at"] == seen
+    assert repo.docs["store:lider"]["bot_check_provider"] == "perimeterx"
     assert shots.list_store_bot_checks(repo) == {"lider": seen.isoformat()}
     assert shots.mark_store_bot_check(repo, "  ") is None
 
@@ -171,7 +205,7 @@ def test_challenge_screenshot_is_dropped_and_store_is_marked(monkeypatch, tmp_pa
     monkeypatch.setattr(
         shots,
         "note_store_bot_check",
-        lambda payload, repo=None: marked.append(shots._store_id(payload)),
+        lambda payload, repo=None, provider=None: marked.append((shots._store_id(payload), provider)),
     )
     dest = tmp_path / "challenge.png"
     monkeypatch.setattr(shots, "_destination_path", lambda payload, url: dest)
@@ -184,10 +218,24 @@ def test_challenge_screenshot_is_dropped_and_store_is_marked(monkeypatch, tmp_pa
             pass
 
         def title(self):
-            return "Just a moment..."
+            return "Robot or human?"
 
         def content(self):
-            return CHALLENGE_HTML
+            # Simula HTML que solo conserva los marcadores del proveedor; la
+            # copia visible se obtiene además desde textContent tras render.
+            return '<html><body><main id="px-captcha"></main></body></html>'
+
+        def locator(self, selector):
+            assert selector == "body"
+
+            class Locator:
+                def inner_text(self, timeout=None):
+                    return (
+                        "Activate and hold the button to confirm that you're human. "
+                        "Thank You! PRESS & HOLD"
+                    )
+
+            return Locator()
 
         def screenshot(self, **kwargs):
             raise AssertionError("no se debe guardar la captura de la comprobación")
@@ -202,7 +250,7 @@ def test_challenge_screenshot_is_dropped_and_store_is_marked(monkeypatch, tmp_pa
     ) == "https://cdn.example/tv.jpg"
     assert not dest.exists()
     assert list(tmp_path.glob("*.png")) == []
-    assert marked == ["lider"]
+    assert marked == [("lider", "perimeterx")]
 
 
 def test_product_page_still_saves_png(monkeypatch, tmp_path):

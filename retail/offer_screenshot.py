@@ -332,6 +332,25 @@ _BODY_PHRASES = (
     "sorry, you have been blocked",
     "one more step before you proceed",
 )
+# PerimeterX/HUMAN usa esta variante en sitios Walmart. Las frases sueltas no
+# bastan: se exige una combinación entre ellas o texto + marcador del proveedor.
+_HOLD_CHALLENGE_COPY = (
+    "robot or human",
+    "activate and hold",
+    "press & hold",
+    "press and hold",
+    "confirm that you're human",
+    "confirm that you are human",
+)
+_PERIMETERX_MARKERS = (
+    "px-captcha",
+    "captcha.px-cdn.net",
+    "_pxcaptcha",
+    "_pxappid",
+    "perimeterx",
+    "humansecurity",
+    "human security",
+)
 _TITLE_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.I | re.S)
 _JUST_A_MOMENT_RE = re.compile(r"just a moment(?!\s+ago)\b")
 _RAY_ID_RE = re.compile(r"ray id\s*[:<]")
@@ -377,7 +396,47 @@ def _blocking_turnstile(html: str, title: str) -> bool:
     return any(marker in html for marker in ('id="cf-stage"', 'id="challenge-stage"', 'id="cf-wrapper"', "_cf_chl_opt"))
 
 
-def is_bot_check_page(html: str | None, title: str | None = None) -> bool:
+def _hold_challenge_provider(content: str) -> str:
+    if any(marker in content for marker in _PERIMETERX_MARKERS):
+        return "perimeterx"
+    return ""
+
+
+def _hold_challenge(content: str, title: str) -> bool:
+    """Detecta PRESS & HOLD solo con contexto suficiente para evitar falsos positivos."""
+    found = {phrase for phrase in _HOLD_CHALLENGE_COPY if phrase in content}
+    title_says_robot = "robot or human" in title
+    provider = _hold_challenge_provider(content)
+    has_hold_action = bool({"activate and hold", "press & hold", "press and hold"} & found)
+    has_human_confirmation = bool(
+        {"robot or human", "confirm that you're human", "confirm that you are human"} & found
+    )
+    return (
+        (has_hold_action and has_human_confirmation)
+        or (title_says_robot and has_hold_action)
+        or (bool(provider) and (has_hold_action or title_says_robot))
+    )
+
+
+def bot_check_provider(
+    html: str | None,
+    title: str | None = None,
+    text_content: str | None = None,
+) -> str:
+    """Proveedor conocido de la intersticial; vacío si no se puede atribuir."""
+    content = " ".join((str(html or ""), str(title or ""), str(text_content or ""))).lower()
+    if _hold_challenge_provider(content):
+        return "perimeterx"
+    if "cloudflare" in content or any(marker in content for marker in _STRUCTURAL_MARKERS):
+        return "cloudflare"
+    return ""
+
+
+def is_bot_check_page(
+    html: str | None,
+    title: str | None = None,
+    text_content: str | None = None,
+) -> bool:
     """True si el HTML o el título son una intersticial de comprobación antibot.
 
     No intenta resolverla. Un aviso de Cloudflare Insights o un Turnstile
@@ -385,8 +444,12 @@ def is_bot_check_page(html: str | None, title: str | None = None) -> bool:
     """
     lowered = str(html or "").lower()
     page_title = re.sub(r"\s+", " ", str(title or "")).strip().lower()
+    rendered_text = re.sub(r"\s+", " ", str(text_content or "")).strip().lower()
     if not page_title:
         page_title = _title_from_html(lowered)
+    combined = " ".join((lowered[:16_000], rendered_text[:8_000]))
+    if _hold_challenge(combined, page_title):
+        return True
     if _title_is_challenge(page_title):
         return True
     if any(marker in lowered for marker in _STRUCTURAL_MARKERS):
@@ -419,6 +482,7 @@ def mark_store_bot_check(
     store_id: str,
     *,
     seen_at: datetime | None = None,
+    provider: str | None = None,
 ) -> dict[str, Any] | None:
     """Deja `bot_check` en el documento `app_settings` `_id` = `store:<id>`."""
     store = str(store_id or "").strip().lower()
@@ -426,8 +490,11 @@ def mark_store_bot_check(
         return None
     when = seen_at or datetime.now(timezone.utc)
     payload = {"bot_check": True, "bot_check_last_seen_at": when}
+    clean_provider = str(provider or "").strip().lower()
+    if clean_provider:
+        payload["bot_check_provider"] = clean_provider
     repo.save_app_setting(store_bot_check_key(store), payload)
-    return {"store": store, "bot_check": True, "bot_check_last_seen_at": when}
+    return {"store": store, **payload}
 
 
 def bot_checks_from_documents(documents: Any) -> dict[str, str]:
@@ -491,7 +558,12 @@ def _store_id(payload: dict[str, Any] | None) -> str:
     return str(extra.get("store") or data.get("store") or "").strip().lower()
 
 
-def note_store_bot_check(payload: dict[str, Any] | None, *, repo: Any = None) -> None:
+def note_store_bot_check(
+    payload: dict[str, Any] | None,
+    *,
+    repo: Any = None,
+    provider: str | None = None,
+) -> None:
     """Marca la tienda. Si Mongo no responde, la captura igual se descarta."""
     store_id = _store_id(payload)
     if not store_id:
@@ -505,7 +577,7 @@ def note_store_bot_check(payload: dict[str, Any] | None, *, repo: Any = None) ->
             store = connect_repo()
         if store is None:
             return
-        mark_store_bot_check(store, store_id)
+        mark_store_bot_check(store, store_id, provider=provider)
     except Exception as exc:
         print(f"Captura de oferta: no se pudo marcar la comprobación antibot ({exc}).")
     finally:
@@ -516,9 +588,10 @@ def note_store_bot_check(payload: dict[str, Any] | None, *, repo: Any = None) ->
                 pass
 
 
-def _page_is_bot_check(page: Any) -> bool:
+def _page_bot_check_details(page: Any) -> tuple[bool, str]:
     title = ""
     html = ""
+    text_content = ""
     try:
         title = page.title()
     except Exception:
@@ -527,9 +600,24 @@ def _page_is_bot_check(page: Any) -> bool:
         html = page.content()
     except Exception:
         html = ""
-    if not str(title or "").strip() and not str(html or "").strip():
-        return False
-    return is_bot_check_page(html, title)
+    try:
+        text_content = page.locator("body").inner_text(timeout=1_000)
+    except Exception:
+        try:
+            text_content = page.evaluate(
+                "() => document.body ? (document.body.innerText || document.body.textContent || '') : ''"
+            )
+        except Exception:
+            text_content = ""
+    if not any(str(value or "").strip() for value in (title, html, text_content)):
+        return False, ""
+    blocked = is_bot_check_page(html, title, text_content)
+    provider = bot_check_provider(html, title, text_content) if blocked else ""
+    return blocked, provider
+
+
+def _page_is_bot_check(page: Any) -> bool:
+    return _page_bot_check_details(page)[0]
 
 
 def _discard_screenshot(dest: Path) -> None:
@@ -564,13 +652,14 @@ def capture_offer_screenshot(payload: dict[str, Any]) -> str | None:
                 page = browser.new_page(viewport={"width": 1280, "height": 720})
                 page.goto(target, wait_until="domcontentloaded", timeout=timeout)
                 page.wait_for_timeout(min(1_500, timeout // 4))
-                if _page_is_bot_check(page):
+                blocked, provider = _page_bot_check_details(page)
+                if blocked:
                     store_id = _store_id(payload) or "la tienda"
                     print(
                         f"Captura de oferta: {store_id} mostró una comprobación antibot; "
                         "no se adjunta esa captura."
                     )
-                    note_store_bot_check(payload)
+                    note_store_bot_check(payload, provider=provider)
                     _discard_screenshot(dest)
                     return None
                 page.screenshot(path=str(dest), full_page=False, type="png")
