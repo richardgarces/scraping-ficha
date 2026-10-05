@@ -422,11 +422,18 @@ def deals(
 
 
 @router.get("/api/explore-categories")
-def explore_categories(limit: int = Query(default=40, ge=1, le=80)) -> dict:
-    """Categorías para «Explora rápido»: nombre + value, sin counts."""
+def explore_categories(
+    request: Request,
+    limit: int = Query(default=40, ge=1, le=80),
+    include_counts: bool = Query(default=False),
+) -> dict:
+    """Categorías para «Explora rápido»: value/label/icon; counts solo admin."""
     from retail.search_cache import connect_redis
+    from retail.web.deps import request_is_admin
 
-    cache_key = f"explore:categories:v1:{int(limit)}"
+    # Path público nunca calcula/expone counts (aunque manden el flag).
+    want_counts = bool(include_counts and request_is_admin(request))
+    cache_key = f"explore:categories:v2:{int(limit)}:{'c' if want_counts else 'n'}"
     client = connect_redis()
     if client is not None:
         try:
@@ -435,17 +442,22 @@ def explore_categories(limit: int = Query(default=40, ge=1, le=80)) -> dict:
                 payload = json.loads(raw)
                 if isinstance(payload, dict) and isinstance(payload.get("categories"), list):
                     payload["cache"] = True
+                    payload["include_counts"] = want_counts
                     return payload
         except Exception:
             pass
 
     repo = _repo_or_404()
     try:
-        categories = repo.explore_categories(limit=limit)
-        payload = {"categories": categories, "cache": False}
+        categories = repo.explore_categories(limit=limit, include_counts=want_counts)
+        payload = {
+            "categories": categories,
+            "cache": False,
+            "include_counts": want_counts,
+        }
         if client is not None:
             try:
-                # Lista estable: 15 min basta; no incluye precios ni PII.
+                # Rankeo por muestra: 15 min; counts admin también cacheados.
                 client.setex(cache_key, 900, json.dumps(payload, ensure_ascii=False))
             except Exception:
                 pass

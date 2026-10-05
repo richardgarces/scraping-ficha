@@ -57,6 +57,37 @@ function categoryIconKind(value) {
   return "other";
 }
 
+function loadAdminCategoryCounts(rail) {
+  if (!rail || typeof ensureUser !== "function") return;
+  ensureUser().then(async (user) => {
+    if (!(user && user.role === "admin")) return;
+    try {
+      const payload = await json("/api/explore-categories?include_counts=1");
+      const byValue = new Map(
+        (payload.categories || [])
+          .filter((item) => item && item.count != null && Number.isFinite(Number(item.count)))
+          .map((item) => [String(item.value || ""), Number(item.count)])
+      );
+      rail.querySelectorAll(".category-shortcut[data-category-value]").forEach((link) => {
+        const value = link.getAttribute("data-category-value") || "";
+        const count = byValue.get(value);
+        if (count == null) return;
+        let small = link.querySelector("[data-category-count]");
+        if (!small) {
+          small = document.createElement("small");
+          small.setAttribute("data-category-count", "");
+          small.setAttribute("data-admin", "");
+          link.appendChild(small);
+        }
+        small.textContent = count.toLocaleString("es-CL");
+        small.hidden = false;
+      });
+    } catch (_) {
+      /* counts admin son opcionales; la home no debe fallar */
+    }
+  });
+}
+
 function renderCategoryShortcuts(categories) {
   const rail = $("category-rail");
   const section = $("catalog-categories");
@@ -64,14 +95,17 @@ function renderCategoryShortcuts(categories) {
   rail.innerHTML = categories.map((item) => {
     const title = item.label || item.value || "Otros";
     const value = item.value || title;
+    const icon = item.icon || categoryIconKind(title);
+    // Nunca pintar count/0 en el HTML público; el admin los carga async.
     return `
-      <a class="category-shortcut ${categoryIconKind(title)}" href="/catalogo?category=${encodeURIComponent(value)}" role="listitem" aria-label="Ver todos los productos de ${attr(title)}">
+      <a class="category-shortcut ${icon}" data-category-value="${attr(value)}" href="/catalogo?category=${encodeURIComponent(value)}" role="listitem" aria-label="Ver todos los productos de ${attr(title)}">
         <span class="category-icon" aria-hidden="true"></span>
         <span>${attr(title)}</span>
       </a>`;
   }).join("");
   section.removeAttribute("aria-busy");
   section.hidden = Boolean(currentQuery);
+  loadAdminCategoryCounts(rail);
 }
 
 /** True after /api/stores has populated #stores (even if the admin filters UI is hidden). */

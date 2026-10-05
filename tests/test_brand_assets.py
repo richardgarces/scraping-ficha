@@ -110,18 +110,24 @@ def test_home_category_cards_open_the_complete_filtered_catalog():
     assert '$("category-rail").addEventListener("click"' not in script
 
 
-def test_home_category_counts_are_not_rendered():
+def test_home_category_counts_are_not_rendered_for_public():
     script = (STATIC / "app.js").read_text(encoding="utf-8")
-    assert "data-category-count" not in script
-    assert "<small data-category-count" not in script
+    # El HTML público de Explora rápido no incluye <small>/0; admin carga counts async.
+    assert "Number(item.count) || 0" not in script
+    assert "<small data-category-count data-admin hidden>${count" not in script
+    assert "loadAdminCategoryCounts" in script
+    assert 'json("/api/explore-categories?include_counts=1")' in script
     assert 'json("/api/explore-categories")' in script
     assert 'json("/api/catalog?size=1&only_offers=false")' not in script
     assert "renderCategoryShortcuts(explore.categories || [])" in script
+    assert "item.icon || categoryIconKind(title)" in script
+    assert "data-category-value=" in script
 
 
 def test_home_loads_explore_categories_endpoint():
     app = (STATIC / "app.js").read_text(encoding="utf-8")
     assert 'json("/api/explore-categories").catch(() => ({}))' in app
+    assert "loadAdminCategoryCounts(rail)" in app
 
 
 def test_catalog_uses_one_main_search_and_collapsible_filters():
@@ -202,7 +208,7 @@ def test_first_search_waits_for_stores_before_elige_tienda_error():
     # Ocultar filtros de resultado antes de validar tiendas (evita «Sin filtros» bajo el error).
     early = app.split("function runSearch(query)")[1].split("pendingSearchQuery = null;")[0]
     assert "setResultFiltersVisible(false);" in early
-    assert "app.js?v=55" in page
+    assert "app.js?v=58" in page
 
 
 def test_refresh_meta_still_fills_stores_if_explore_fails():
@@ -306,4 +312,4 @@ def test_explore_has_collapsible_search_and_result_filters():
     assert 'id="explore-filter-count" class="filter-count"' in html
     assert 'id="toolbar" class="collapsible-filters search-result-filters"' in html
     assert "updateExploreFilterBadge" in script
-    assert '$("toolbar").hidden = false;' in script
+    assert '$("toolbar").hidden = !visible;' in script

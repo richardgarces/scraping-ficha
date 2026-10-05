@@ -71,6 +71,38 @@ def fold(value: str) -> str:
     return re.sub(r"\s+", " ", text).strip().lower()
 
 
+# Mismo orden/heurística que categoryIconKind en app.js (Explora rápido).
+_CATEGORY_ICON_RULES: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"calzado|zapato"), "calzado"),
+    (re.compile(r"deporte|aire libre"), "sports"),
+    (re.compile(r"accesorios moda|moda"), "fashion"),
+    (re.compile(r"electrodomest"), "appliance"),
+    (re.compile(r"tecnolog"), "tech"),
+    (re.compile(r"audio|musica"), "audio"),
+    (re.compile(r"belleza|higiene|salud|farmacia"), "beauty"),
+    (re.compile(r"alimento|bebida|gastronom"), "food"),
+    (re.compile(r"supermercado"), "market"),
+    (re.compile(r"ferreter|herramient|maquina|construccion"), "tools"),
+    (re.compile(r"cocina|bano"), "kitchen"),
+    (re.compile(r"juguete"), "toys"),
+    (re.compile(r"automotriz|autos?\b"), "auto"),
+    (re.compile(r"jardin|terraza"), "garden"),
+    (re.compile(r"decohogar|hogar"), "home"),
+    (re.compile(r"bebes?|infantil"), "baby"),
+    (re.compile(r"libreria|libros?"), "books"),
+    (re.compile(r"mascota"), "pets"),
+)
+
+
+def category_icon_kind(value: str) -> str:
+    """Slug CSS de icono para una etiqueta de categoría (fallback: other)."""
+    key = fold(value)
+    for pattern, kind in _CATEGORY_ICON_RULES:
+        if pattern.search(key):
+            return kind
+    return "other"
+
+
 def _normalize_spec(token: str) -> str:
     if token.endswith("g") and token[:-1].isdigit() and not token.endswith("gb"):
         return f"{token[:-1]}gb"

@@ -2338,14 +2338,76 @@ class ProductRepository:
             )
         return result
 
-    def explore_categories(self, limit: int = 40) -> list[dict[str, Any]]:
-        """Lista liviana para «Explora rápido»: solo value/label, sin counts."""
-        facets = self.browse_facets(limit=limit, include_counts=False, fields=("categories",))
-        return [
-            {"value": item.get("value"), "label": item.get("value")}
-            for item in facets.get("categories") or []
-            if item.get("value")
+    def explore_categories(
+        self,
+        limit: int = 40,
+        *,
+        include_counts: bool = False,
+        sample_size: int = 8000,
+    ) -> list[dict[str, Any]]:
+        """Lista para «Explora rápido».
+
+        Rankea por popularidad aproximada con ``$sample`` + ``$sum`` sobre la
+        muestra (rápido), no el ``$group+$sum`` completo del catálogo (~4s).
+
+        Por defecto omite ``count``; con ``include_counts=True`` (admin) lo
+        incluye. Siempre entrega ``icon`` con el mismo mapeo que la UI.
+        """
+        from retail.relevance import category_icon_kind, fold
+
+        field = "catalog_category"
+        match = {field: {"$nin": [None, ""]}, "price": {"$gt": 0}}
+        size = max(200, int(sample_size))
+        # $sample primero = cursor pseudoaleatorio (barato); luego filtramos.
+        pipeline = [
+            {"$sample": {"size": size}},
+            {"$match": match},
+            {
+                "$group": {
+                    "_id": {"$toLower": f"${field}"},
+                    "count": {"$sum": 1},
+                    "label": {"$first": f"${field}"},
+                }
+            },
+            {"$sort": {"count": -1}},
+            {"$limit": max(limit * 4, limit)},
         ]
+        merged: dict[str, dict[str, Any]] = {}
+        for row in self.collection.aggregate(pipeline):
+            label = str(row.get("label") or row.get("_id") or "").strip()
+            if not label:
+                continue
+            normalized = fold(label)
+            current = merged.get(normalized)
+            sample_count = int(row.get("count") or 0)
+            if current is None:
+                merged[normalized] = {"value": label, "count": sample_count}
+                continue
+            current["count"] = int(current.get("count") or 0) + sample_count
+            candidate = label
+            visible = str(current["value"])
+            if (candidate[:1].isupper(), any(ord(char) > 127 for char in candidate)) > (
+                visible[:1].isupper(),
+                any(ord(char) > 127 for char in visible),
+            ):
+                current["value"] = candidate
+
+        ranked = sorted(
+            merged.values(),
+            key=lambda row: (-int(row.get("count") or 0), str(row["value"]).casefold()),
+        )[:limit]
+        rows: list[dict[str, Any]] = []
+        for item in ranked:
+            value = item["value"]
+            entry: dict[str, Any] = {
+                "value": value,
+                "label": value,
+                "icon": category_icon_kind(value),
+            }
+            if include_counts:
+                entry["count"] = int(item.get("count") or 0)
+            rows.append(entry)
+        return rows
 
     def backfill_categories(self, mapping: dict[str, str]) -> int:
         """Copia la categoría del catálogo a productos guardados antes de tenerla."""
