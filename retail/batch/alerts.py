@@ -216,6 +216,16 @@ def dispatch_alerts(
                     sent.append("webhook")
                 except Exception:
                     continue
+    if sent:
+        try:
+            from retail.funnel_stats import record_funnel_event
+
+            # Un evento por alerta con canal real (no log/file).
+            real = [item for item in sent if item in {"email", "telegram", "webhook", "push"}]
+            for _ in range(min(len(real) or (1 if sent else 0), 50)):
+                record_funnel_event("alert_sent", source="batch")
+        except Exception:
+            pass
     return sent
 
 

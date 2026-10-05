@@ -271,6 +271,12 @@ def short_product_redirect(code: str):
         repo.close()
     if not found or not found.get("store") or not found.get("product_id"):
         raise HTTPException(status_code=404, detail="Enlace no encontrado.")
+    try:
+        from retail.funnel_stats import record_funnel_event
+
+        record_funnel_event("link_click", source="lnk")
+    except Exception:
+        pass
     from retail.short_links import public_product_url
 
     return RedirectResponse(
@@ -602,6 +608,12 @@ def _log_web_search(request: Request, query: str) -> None:
     try:
         host = request.client.host if request.client else None
         record_app_search(query, client_ip(request.headers, host), client_country(request.headers))
+    except Exception:
+        return
+    try:
+        from retail.funnel_stats import record_funnel_event
+
+        record_funnel_event("search", source="web")
     except Exception:
         return
 

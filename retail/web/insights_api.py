@@ -159,6 +159,12 @@ def product(store: str = Query(...), id: str = Query(...)) -> dict:
         document = repo.product_detail(store, id)
         if document is None:
             raise HTTPException(status_code=404, detail="No tenemos ese producto guardado.")
+        try:
+            from retail.funnel_stats import record_funnel_event
+
+            record_funnel_event("product_view", source="web")
+        except Exception:
+            pass
         card = _card(document)
         # La curva usa un punto por día hasta hoy. El veredicto sigue mirando
         # las mediciones reales, no esta serie rellena.
@@ -792,7 +798,11 @@ async def create_watch(request: Request) -> dict:
     repo = _repo_or_404()
     try:
         user = current_user(request, repo, required=True)
-        return repo.save_watch(
+        # Seguimiento: por defecto cualquier cambio (sube o baja), sin umbral.
+        watch_changes = bool(body.get("watch_changes", True))
+        if not target and not drop:
+            watch_changes = True
+        saved = repo.save_watch(
             {
                 "query": body.get("query"),
                 "compare_code": body.get("compare_code"),
@@ -802,12 +812,20 @@ async def create_watch(request: Request) -> dict:
                 "url": body.get("url"),
                 "target_price": int(target) if target else None,
                 "drop_percent": float(drop) if drop else None,
-                "watch_changes": bool(body.get("watch_changes", not target and not drop)),
+                "watch_changes": watch_changes,
+                "any_change": watch_changes and not target and not drop,
                 "last_seen_price": current_price,
                 "user_id": user["id"],
                 "email": user.get("email"),
             }
         )
+        try:
+            from retail.funnel_stats import record_funnel_event
+
+            record_funnel_event("follow", source="watch")
+        except Exception:
+            pass
+        return saved
     finally:
         repo.close()
 
@@ -868,8 +886,16 @@ async def activate_price_alert(request: Request) -> dict:
                 "product_id": product_id,
                 "name": document.get("name") or body.get("name") or "",
                 "url": document.get("url") or "",
+                "any_change": True,
+                "watch_changes": True,
             }
         )
+        try:
+            from retail.funnel_stats import record_funnel_event
+
+            record_funnel_event("follow", source="price_alert")
+        except Exception:
+            pass
         return {"active": True, "email": user.get("email") or ""}
     finally:
         repo.close()

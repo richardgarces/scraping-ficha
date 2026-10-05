@@ -294,6 +294,12 @@ def admin_stats(request: Request) -> dict:
     payload["search_cache"] = load_search_cache()
     payload["clicks"] = load_click_stats()
     payload["scrapes"] = load_scrape_stats()
+    try:
+        from retail.funnel_stats import load_funnel_stats
+
+        payload["funnel"] = load_funnel_stats()
+    except Exception:
+        payload["funnel"] = {"steps": []}
     return payload
 
 

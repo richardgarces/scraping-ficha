@@ -3649,6 +3649,12 @@ class ProductRepository:
             "target_price": data.get("target_price"),
             "drop_percent": data.get("drop_percent"),
             "watch_changes": bool(data.get("watch_changes", not data.get("target_price") and not data.get("drop_percent"))),
+            "any_change": bool(
+                data.get(
+                    "any_change",
+                    data.get("watch_changes", not data.get("target_price") and not data.get("drop_percent")),
+                )
+            ),
             "active": bool(data.get("active", True)),
             "user_id": data.get("user_id"),
             "email": data.get("email"),
@@ -3697,6 +3703,9 @@ class ProductRepository:
             "name": data.get("name") or "",
             "url": data.get("url") or "",
             "active": True,
+            # Sin umbral: avisa ante cualquier cambio (sube o baja).
+            "any_change": bool(data.get("any_change", True)),
+            "watch_changes": bool(data.get("watch_changes", True)),
             "updated_at": _now(),
         }
         key = {

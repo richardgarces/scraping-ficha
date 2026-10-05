@@ -251,7 +251,13 @@ def watch_alerts(result: dict[str, Any], watch: dict[str, Any]) -> list[Alert]:
     if best is None:
         return []
     price = int(best["price"])
-    if watch.get("watch_changes") or (not target and not drop_percent):
+    # Preferencia / modo «cualquier cambio»: sin umbral (sube o baja).
+    any_change = bool(
+        watch.get("any_change")
+        or watch.get("watch_changes")
+        or (not target and not drop_percent)
+    )
+    if any_change:
         previous = watch.get("last_seen_price")
         if previous is None or int(previous) == price:
             return []
@@ -266,7 +272,7 @@ def watch_alerts(result: dict[str, Any], watch: dict[str, Any]) -> list[Alert]:
                     f"{watch.get('name') or best.get('name')} {direction} de ${previous:,} a ${price:,} "
                     f"en {best.get('store_title') or best.get('store')}"
                 ).replace(",", "."),
-                {"previous_price": previous, "direction": direction},
+                {"previous_price": previous, "direction": direction, "any_change": True},
                 reference_price=previous,
             )
         ]

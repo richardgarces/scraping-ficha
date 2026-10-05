@@ -31,7 +31,7 @@ Este documento reúne trabajo pendiente o que todavía requiere validación. Una
 
 - [x] Canal Celular (push) en Medios de alerta, prueba admin y envío integrado con preferencias de Siguiendo (pendiente validar en dispositivo real tras deploy).
 - [ ] Probar de extremo a extremo las notificaciones push para usuarios autenticados: permiso, suscripción, envío, enlace y baja.
-- [ ] Confirmar que una alerta seguida se active ante cualquier cambio de precio, tanto al subir como al bajar, sin solicitar un precio objetivo.
+- [x] Confirmar que una alerta seguida se active ante cualquier cambio de precio, tanto al subir como al bajar, sin solicitar un precio objetivo.
 - [ ] Verificar la deduplicación de Telegram con ejecuciones simultáneas y reintentos de workers.
 - [ ] Validar que los enlaces de todas las notificaciones usen `https://lnk.meincart.cl/o/<id>` y redirijan a la ficha correcta.
 

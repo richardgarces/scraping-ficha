@@ -215,4 +215,12 @@ def notify_price_changes(repo: Any, changes: list[dict[str, Any]]) -> int:
                     sent += 1
             except Exception:
                 pass
+    if sent:
+        try:
+            from retail.funnel_stats import record_funnel_event
+
+            for _ in range(min(sent, 50)):
+                record_funnel_event("alert_sent", source="price_alert")
+        except Exception:
+            pass
     return sent
