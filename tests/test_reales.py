@@ -283,11 +283,26 @@ def test_easy_paris_al_mismo_precio_no_es_oferta_real():
     assert deal is None
 
 
-def test_easy_paris_al_mismo_precio_sale_con_el_check():
+def test_easy_paris_solos_tampoco_salen_con_check_iguales():
+    """Easy ≡ Paris (Cencosud): solos no hay «otra tienda», ni con iguales."""
     deal = pick_real_offer(
         [
             _offer(store="easy", product_id="e1", price=399990, price_normal=819990),
             _offer(store="paris", product_id="p1", price=399990, price_normal=829990),
+        ],
+        comparacion=False,
+        historial=False,
+        iguales=True,
+    )
+    assert deal is None
+
+
+def test_iguales_entre_cadenas_distintas():
+    """Mismo precio en dos retailers reales (no hermanas) con el check iguales."""
+    deal = pick_real_offer(
+        [
+            _offer(store="falabella", product_id="f1", price=399990, price_normal=819990),
+            _offer(store="ripley", product_id="r1", price=399990, price_normal=829990),
         ],
         comparacion=False,
         historial=False,
@@ -298,7 +313,7 @@ def test_easy_paris_al_mismo_precio_sale_con_el_check():
     assert deal["price"] == 399990
     assert deal["rival_price"] == 399990
     assert deal["gap"] == 0
-    assert {row["store"] for row in deal["stores"]} == {"easy", "paris"}
+    assert {row["store"] for row in deal["stores"]} == {"falabella", "ripley"}
 
 
 def test_misma_tienda_deja_el_menor_precio_y_compara_contra_ese():
@@ -391,8 +406,8 @@ def test_shampoo_40_no_es_super_oferta():
 def test_iguales_no_califica_como_super():
     deal = pick_real_offer(
         [
-            _offer(store="easy", product_id="e1", price=399990, price_normal=819990),
-            _offer(store="paris", product_id="p1", price=399990, price_normal=829990),
+            _offer(store="falabella", product_id="f1", price=399990, price_normal=819990),
+            _offer(store="ripley", product_id="r1", price=399990, price_normal=829990),
         ],
         comparacion=False,
         historial=False,
@@ -429,3 +444,76 @@ def test_pack_1_vs_6_no_genera_oferta_por_comparacion():
         historial=False,
     )
     assert deal is None
+
+
+def test_sodimac_vs_falabella_no_es_ahorro_cross_store():
+    """Sodimac ≡ Falabella: mismo o distinto precio no genera oferta real."""
+    same = pick_real_offer(
+        [
+            _offer(
+                store="sodimac",
+                product_id="a",
+                price=10000,
+                price_all_payment=10000,
+                price_normal=15000,
+            ),
+            _offer(
+                store="falabella",
+                product_id="b",
+                price=10000,
+                price_all_payment=10000,
+                price_normal=15000,
+            ),
+        ],
+        comparacion=True,
+        historial=False,
+    )
+    assert same is None
+    cheaper_sister = pick_real_offer(
+        [
+            _offer(
+                store="sodimac",
+                product_id="a",
+                price=8000,
+                price_all_payment=8000,
+                price_normal=15000,
+            ),
+            _offer(
+                store="falabella",
+                product_id="b",
+                price=12000,
+                price_all_payment=12000,
+                price_normal=15000,
+            ),
+        ],
+        comparacion=True,
+        historial=False,
+    )
+    assert cheaper_sister is None
+
+
+def test_sodimac_vs_paris_si_es_comparacion_cross_store():
+    deal = pick_real_offer(
+        [
+            _offer(
+                store="sodimac",
+                product_id="a",
+                price=6000,
+                price_all_payment=6000,
+                price_normal=10000,
+            ),
+            _offer(
+                store="paris",
+                product_id="b",
+                price=10000,
+                price_all_payment=10000,
+                price_normal=10000,
+            ),
+        ],
+        comparacion=True,
+        historial=False,
+    )
+    assert deal is not None
+    assert deal["store"] == "sodimac"
+    assert deal["rival_store"] == "paris"
+    assert "comparacion" in deal["kinds"]

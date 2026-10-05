@@ -665,8 +665,9 @@ def variant_key(row: dict[str, Any]) -> tuple[str, str]:
     return (row.get("store") or "", _fold(row.get("name") or ""))
 
 
-# Cadenas que publican el mismo catálogo: el product_id de Falabella es el de
-# Sodimac y Tottus, el de Paris es el de Easy. No son dos ofertas.
+# Cadenas que publican el mismo catálogo / mismos precios: Falabella ≡ Sodimac
+# (y Tottus en la misma plataforma). Paris ≡ Easy (Cencosud). No son dos tiendas
+# para comparación cross-store ni para «oferta real».
 STORE_FAMILY = {
     "falabella": "falabella",
     "sodimac": "falabella",
@@ -674,7 +675,76 @@ STORE_FAMILY = {
     "paris": "cencosud",
     "easy": "cencosud",
 }
+# Variantes de nombre/host que a veces llegan como store id o etiqueta cruda.
+STORE_ID_ALIASES = {
+    "falabella.com": "falabella",
+    "falabellachile": "falabella",
+    "www.falabella.cl": "falabella",
+    "falabella.cl": "falabella",
+    "sodimacchile": "sodimac",
+    "sodimachomecenter": "sodimac",
+    "homecenter": "sodimac",
+    "homecentersodimac": "sodimac",
+    "www.sodimac.cl": "sodimac",
+    "sodimac.cl": "sodimac",
+    "paris.cl": "paris",
+    "www.paris.cl": "paris",
+    "easychile": "easy",
+    "easy.cl": "easy",
+    "www.easy.cl": "easy",
+}
 FAMILY_ORDER = {"falabella": 0, "tottus": 1, "sodimac": 2, "paris": 0, "easy": 1}
+
+
+def normalize_store_id(store: str | None) -> str:
+    """Id canónico de tienda (falabella, sodimac, …) desde id o etiqueta."""
+    raw = _fold(store or "").strip()
+    if not raw:
+        return ""
+    compact = re.sub(r"[^a-z0-9.]+", "", raw)
+    spaced = re.sub(r"\s+", "", raw)
+    for key in (raw, spaced, compact, compact.replace(".", "")):
+        if key in STORE_FAMILY:
+            return key
+        alias = STORE_ID_ALIASES.get(key)
+        if alias:
+            return alias
+    # «Sodimac Homecenter», «Falabella Chile», etc.
+    if "sodimac" in raw or "homecenter" in raw:
+        return "sodimac"
+    if "falabella" in raw:
+        return "falabella"
+    if raw == "tottus" or "tottus" in raw:
+        return "tottus"
+    if raw == "paris" or raw.endswith("paris"):
+        return "paris"
+    if raw == "easy" or "easy " in f" {raw} ":
+        return "easy"
+    return (store or "").strip().lower()
+
+
+def store_family(store: str | None) -> str | None:
+    """Familia de retailer para comparación; None si la tienda es independiente."""
+    sid = normalize_store_id(store)
+    return STORE_FAMILY.get(sid)
+
+
+def same_retailer(left: str | None, right: str | None) -> bool:
+    """True si son la misma tienda o la misma cadena (p. ej. Sodimac ≡ Falabella)."""
+    a = normalize_store_id(left)
+    b = normalize_store_id(right)
+    if not a or not b:
+        return False
+    if a == b:
+        return True
+    fa, fb = STORE_FAMILY.get(a), STORE_FAMILY.get(b)
+    return bool(fa and fb and fa == fb)
+
+
+def retailer_key(store: str | None) -> str:
+    """Clave de agrupación: familia canónica o el id de tienda."""
+    sid = normalize_store_id(store)
+    return store_family(sid) or sid or ""
 
 
 def collapse_variants(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -710,22 +780,27 @@ def is_catalog_mirror(left: dict[str, Any], right: dict[str, Any]) -> bool:
     return key is not None and key == _mirror_key(right)
 
 
-def _mirror_key(row: dict[str, Any]) -> tuple[str, str, Any] | None:
-    family = STORE_FAMILY.get(row.get("store") or "")
+def _mirror_key(row: dict[str, Any]) -> tuple[str, str] | None:
+    """Misma cadena + mismo product_id: un solo aviso (sin mirar el precio).
+
+    Sodimac y Falabella comparten catálogo; un precio distinto entre ellas no
+    es ahorro cross-store — se colapsa al representante más barato/fresco.
+    """
+    family = store_family(row.get("store"))
     product_id = row.get("product_id") or ""
     if not family or not product_id:
         return None
-    return (family, product_id, row.get("price"))
+    return (family, str(product_id))
 
 
 def collapse_mirrors(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Una fila cuando Falabella y Sodimac (o Paris y Easy) son el mismo aviso.
 
-    Comparten catálogo y product_id. Si el precio es el mismo no hay comparación:
-    es el aviso publicado dos veces. Si alguna cadena sale más barata, se dejan
-    las dos, porque ahí sí hay que elegir.
+    Comparten catálogo y product_id. Siempre se colapsan a un representante
+    (más barato, luego preferencia de cadena / scrape fresco). No inventan
+    ahorro entre hermanas.
     """
-    buckets: dict[tuple[str, str, Any], list[dict[str, Any]]] = defaultdict(list)
+    buckets: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
     leftovers: list[dict[str, Any]] = []
     for row in rows:
         key = _mirror_key(row)
@@ -738,9 +813,11 @@ def collapse_mirrors(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     for group in buckets.values():
         group.sort(
             key=lambda row: (
-                FAMILY_ORDER.get(row.get("store") or "", 9),
+                row.get("price") is None,
+                row.get("price") if isinstance(row.get("price"), (int, float)) else 10**12,
+                FAMILY_ORDER.get(normalize_store_id(row.get("store")), 9),
                 not row.get("from_scrape"),
-                row.get("store") or "",
+                normalize_store_id(row.get("store")) or "",
             )
         )
         best = dict(group[0])
@@ -758,12 +835,16 @@ def collapse_display(groups: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Colapsa variantes y espejos de la misma cadena, y recalcula comparables."""
     for group in groups:
         offers = collapse_mirrors(collapse_variants(group.get("offers") or []))
-        priced_stores = {row.get("store") for row in offers if row.get("price") not in (None, 0)}
-        comparable = len(priced_stores) > 1
+        priced_retailers = {
+            retailer_key(row.get("store"))
+            for row in offers
+            if row.get("price") not in (None, 0) and retailer_key(row.get("store"))
+        }
+        comparable = len(priced_retailers) > 1
         for row in offers:
             row["comparable"] = comparable
         group["offers"] = offers
-        group["store_count"] = len({row.get("store") for row in offers})
+        group["store_count"] = len({retailer_key(row.get("store")) for row in offers if retailer_key(row.get("store"))})
         group["comparable"] = comparable
     return groups
 

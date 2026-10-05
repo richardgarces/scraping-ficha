@@ -198,10 +198,20 @@ def _gap_alerts(
         return int(row["price"]) + (int(row.get("shipping_cost") or 0) if use_landed else 0)
 
     priced = sorted(raw_priced, key=comparable_price)
-    if len({row.get("store") for row in priced}) < 2:
+    from retail.compare import retailer_key, same_retailer
+
+    retailers = {
+        retailer_key(row.get("store")) or row.get("store")
+        for row in priced
+        if row.get("store")
+    }
+    if len(retailers) < 2:
         return []
     lowest = priced[0]
-    second = next((row for row in priced if row.get("store") != lowest.get("store")), None)
+    second = next(
+        (row for row in priced if not same_retailer(row.get("store"), lowest.get("store"))),
+        None,
+    )
     if second is None:
         return []
     lowest_value = comparable_price(lowest)

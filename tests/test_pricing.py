@@ -208,6 +208,19 @@ def test_cheaper_elsewhere_picks_the_other_store():
     assert cheaper_elsewhere(dear, [dear, {"store": "paris", "price": 99000}]) is None
 
 
+def test_cheaper_elsewhere_ignores_sodimac_vs_falabella():
+    """Misma cadena: no hay 'más barato en otra tienda' entre Sodimac y Falabella."""
+    falabella = {"store": "falabella", "store_title": "Falabella", "price": 100000}
+    sodimac = {"store": "sodimac", "store_title": "Sodimac", "price": 85000}
+    assert cheaper_elsewhere(falabella, [falabella, sodimac]) is None
+    assert cheaper_elsewhere(sodimac, [falabella, sodimac]) is None
+    paris = {"store": "paris", "store_title": "Paris", "price": 70000}
+    hint = cheaper_elsewhere(falabella, [falabella, sodimac, paris])
+    assert hint is not None
+    assert hint["store"] == "paris"
+    assert hint["price"] == 70000
+
+
 def test_cheaper_elsewhere_uses_global_minimum_regardless_of_order():
     current = {"store": "entel", "product_id": "e2", "price": 279990}
     peers = [

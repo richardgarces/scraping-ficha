@@ -10,12 +10,15 @@ from typing import Any
 from retail.commercial import condition_group, shipping_comparable
 from retail.compare import (
     FAMILY_ORDER,
-    STORE_FAMILY,
     collapse_variants,
     identity_match_confidence,
     identity_of,
+    normalize_store_id,
     pack_of,
+    retailer_key,
     same_product_identity,
+    same_retailer,
+    store_family,
 )
 from retail.models import Product
 from retail.pricing import fake_discount as selling_price_fake_discount
@@ -618,11 +621,15 @@ def prices_are_same(left: dict[str, Any], right: dict[str, Any]) -> bool:
 
 
 def collapse_sisters(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Easy/Paris (o Falabella/Sodimac) al mismo precio de venta son un solo aviso."""
+    """Falabella/Sodimac/Tottus (o Easy/Paris) son un solo retailer.
+
+    Siempre se colapsa a un representante (más barato todo medio, luego orden
+    de familia). Un gap entre hermanas no es ahorro cross-store.
+    """
     buckets: dict[str, list[dict[str, Any]]] = defaultdict(list)
     leftover: list[dict[str, Any]] = []
     for row in rows:
-        family = STORE_FAMILY.get(row.get("store") or "")
+        family = store_family(row.get("store"))
         if not family:
             leftover.append(row)
             continue
@@ -632,33 +639,24 @@ def collapse_sisters(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     for group in buckets.values():
         group.sort(
             key=lambda row: (
-                _int(row.get("price")) or 10**12,
-                FAMILY_ORDER.get(row.get("store") or "", 9),
+                comparable_selling_price(row) or _int(row.get("price")) or 10**12,
+                FAMILY_ORDER.get(normalize_store_id(row.get("store")), 9),
+                normalize_store_id(row.get("store")) or "",
             )
         )
-        clusters: list[list[dict[str, Any]]] = []
-        for row in group:
-            placed = False
-            for cluster in clusters:
-                if prices_are_same(cluster[0], row):
-                    cluster.append(row)
-                    placed = True
-                    break
-            if not placed:
-                clusters.append([row])
-        for cluster in clusters:
-            best = dict(cluster[0])
-            if len(cluster) > 1:
-                best["mirrors"] = {"stores": [item.get("store") for item in cluster[1:]]}
-            collapsed.append(best)
+        best = dict(group[0])
+        if len(group) > 1:
+            best["mirrors"] = {"stores": [item.get("store") for item in group[1:]]}
+        collapsed.append(best)
     return collapsed
 
 
 def collapse_store_prices(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Una fila por tienda y envase: 16 comprimidos no se mezcla con 20 de la misma tienda."""
+    """Una fila por retailer (familia) y envase: Sodimac≡Falabella no duplica."""
     buckets: dict[tuple[str, tuple[str, ...]], list[dict[str, Any]]] = defaultdict(list)
     for row in rows:
-        buckets[(str(row.get("store") or ""), pack_of(row))].append(row)
+        key = retailer_key(row.get("store")) or str(row.get("store") or "")
+        buckets[(key, pack_of(row))].append(row)
     collapsed: list[dict[str, Any]] = []
     for group in buckets.values():
         group.sort(key=lambda row: comparable_selling_price(row) or _int(row.get("price")) or 10**12)
@@ -738,7 +736,13 @@ def _score_pack_group(
         for item in priced:
             base = comparable_selling_price(item) or _int(item.get("price")) or 0
             item["_comparison_price"] = base + (_int(item.get("shipping_cost")) or 0)
-    if len({item.get("store") for item in by_store}) < 2:
+    # Exige otra cadena fuera del grupo Falabella-Sodimac (o Easy-Paris).
+    retailers = {
+        retailer_key(item.get("store")) or str(item.get("store") or "")
+        for item in priced
+        if retailer_key(item.get("store")) or item.get("store")
+    }
+    if len(retailers) < 2:
         return None
     # Confianza por similitud de nombre/identidad entre tiendas, no por el
     # compare_code/SKU guardado (que suele ser distinto en cada comercio).
@@ -761,7 +765,8 @@ def _score_pack_group(
             continue
         peers = [
             peer for peer in comparable
-            if peer.get("store") != item.get("store") and comparable_selling_price(peer)
+            if not same_retailer(peer.get("store"), item.get("store"))
+            and comparable_selling_price(peer)
         ]
         integrity = offer_integrity(item, peers, entity_confidence=entity_confidence)
         # Inflación de lista, fake_discount de venta o precio igual al mercado:
@@ -780,8 +785,11 @@ def _score_pack_group(
             if not genuine:
                 continue
         if (integrity.get("cross_store") or {}).get("similar_to_market"):
-            # Sin brecha real vs el mercado: el cartel no basta.
-            if verified_discount < MIN_OWN_DISCOUNT:
+            # Sin brecha real vs el mercado: el cartel no basta para comparación/
+            # historial. «Iguales» sí: justamente es el mismo precio entre cadenas.
+            if verified_discount < MIN_OWN_DISCOUNT and not (
+                iguales and _same_price_listing(item, by_store)
+            ):
                 continue
         kinds: list[str] = []
         list_peers = _peers_at_list(item, peers)
@@ -828,7 +836,10 @@ def _score_pack_group(
 
 
 def _same_price_listing(item: dict[str, Any], shown: list[dict[str, Any]]) -> bool:
-    others = [row for row in shown if row.get("store") != item.get("store")]
+    others = [
+        row for row in shown
+        if not same_retailer(row.get("store"), item.get("store"))
+    ]
     if not others:
         return False
     return all(prices_are_same(item, row) for row in others)
@@ -837,7 +848,7 @@ def _same_price_listing(item: dict[str, Any], shown: list[dict[str, Any]]) -> bo
 def _cheapest_other(item: dict[str, Any], rows: list[dict[str, Any]]) -> dict[str, Any] | None:
     others = [
         row for row in rows
-        if row.get("store") != item.get("store")
+        if not same_retailer(row.get("store"), item.get("store"))
         and (comparable_selling_price(row) or _int(row.get("price")))
         and not is_payment_restricted(row)
     ]

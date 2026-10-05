@@ -352,7 +352,8 @@ def test_collapse_mirrors_joins_falabella_and_sodimac():
     assert any(row["store"] == "ripley" for row in salida)
 
 
-def test_collapse_mirrors_keeps_sister_stores_when_price_differs():
+def test_collapse_mirrors_keeps_cheapest_sister_when_price_differs():
+    """Sodimac ≡ Falabella: distinto precio no inventa ahorro; queda el más barato."""
     from retail.compare import collapse_mirrors
 
     salida = collapse_mirrors(
@@ -361,7 +362,22 @@ def test_collapse_mirrors_keeps_sister_stores_when_price_differs():
             {"store": "sodimac", "product_id": "1", "price": 89000},
         ]
     )
-    assert len(salida) == 2
+    assert len(salida) == 1
+    assert salida[0]["store"] == "sodimac"
+    assert salida[0]["price"] == 89000
+    assert salida[0]["mirrors"]["stores"] == ["falabella"]
+
+
+def test_same_retailer_aliases_sodimac_falabella():
+    from retail.compare import normalize_store_id, same_retailer, store_family
+
+    assert normalize_store_id("Sodimac Homecenter") == "sodimac"
+    assert normalize_store_id("Falabella.com") == "falabella"
+    assert store_family("sodimac") == store_family("falabella") == "falabella"
+    assert same_retailer("sodimac", "falabella") is True
+    assert same_retailer("sodimac", "paris") is False
+    assert same_retailer("paris", "easy") is True
+    assert same_retailer("falabella", "ripley") is False
 
 
 def test_collapse_display_stops_calling_mirrors_comparable():

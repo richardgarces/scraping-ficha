@@ -37,6 +37,8 @@ Para ofertas reales el agregador:
 
 Así dos fichas del mismo shampoo con SKUs distintos sí se comparan; dos nombres genéricos o productos distintos no.
 
+**Misma cadena:** `sodimac` ≡ `falabella` (y Tottus en la misma plataforma; Paris ≡ Easy). No cuentan como «otra tienda» para gap, `cheaper_elsewhere` ni oferta real: se colapsan a un representante (más barato). Hace falta un rival fuera del grupo (p. ej. Sodimac vs Paris). Constantes: `STORE_FAMILY`, `same_retailer` en `retail/compare.py`.
+
 Además, en `/reales` un par con identidad solo textual **no** cuenta si el ratio de precios todo medio supera **3×** (p. ej. $14.990 vs $115.990). Con gaps >2× se exigen señales duras (modelo, watts/placas, envase medido). GTIN / override manual / código de fabricante sí pueden sostener brechas mayores. Constantes: `MAX_CROSS_STORE_PRICE_RATIO`, `same_product_for_real_offer` en `retail/reales.py`. Watts y placas (`100w`, `6placa`) entran en la huella de identidad (`retail/compare.py`).
 
 El **historial** de la misma tienda no cambia: sigue usando `price_history` del propio aviso (no necesita códigos cruzados).
@@ -78,7 +80,7 @@ Pares con confianza ≥ 80% se pueden muestrear desde Análisis de producto (`GE
 
 ### Qué no filtra esta página
 
-- Easy/Paris (o Falabella/Sodimac) al **mismo** precio se colapsan en un aviso; solos no generan comparación (hace falta un rival de otra familia más caro, o el check «Mismo precio»).
+- Easy/Paris o Falabella/Sodimac **solos** no generan comparación ni «iguales»: son la misma cadena. Hace falta un rival de otra familia (p. ej. Sodimac vs Paris, o Falabella vs Ripley al mismo precio con el check «Mismo precio»).
 - Preferencias de usuario `ignore_fake_discounts` siguen aplicando a **alertas del batch**; en ofertas reales el filtro `fake_discount` ya está integrado en el criterio v2.
 ### Envío
 

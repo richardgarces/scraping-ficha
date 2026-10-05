@@ -304,7 +304,12 @@ def cheaper_elsewhere(
     *,
     min_ratio: float = MIN_CHEAPER_RATIO,
 ) -> dict[str, Any] | None:
-    """Si otra tienda cobra menos el mismo producto, la más barata."""
+    """Si otra tienda cobra menos el mismo producto, la más barata.
+
+    Sodimac ≡ Falabella (misma cadena): no cuenta como «más barato en otra tienda».
+    """
+    from retail.compare import same_retailer
+
     price = _offer_price(offer)
     if not price:
         return None
@@ -328,7 +333,7 @@ def cheaper_elsewhere(
     others = [
         peer
         for peer in peers
-        if peer.get("store") != offer.get("store")
+        if not same_retailer(peer.get("store"), offer.get("store"))
         and _offer_price(peer) is not None
         and available(peer)
     ]
@@ -399,13 +404,20 @@ def mark_false_list_discounts(groups: list[dict[str, Any]]) -> None:
     Paris a $665.990 con −23% y Lider al mismo precio de lista: el descuento de
     Paris no es real. Si todas las tiendas muestran descuento por su cuenta, no
     se toca. No pisa el payload crudo: solo flags derivados en el aviso.
+    Sodimac ≡ Falabella no cuenta como testigo de otra tienda.
     """
+    from retail.compare import retailer_key, same_retailer
+
     for group in groups:
         offers = [item for item in (group.get("offers") or []) if _offer_price(item)]
-        stores = {item.get("store") for item in offers if item.get("store")}
-        if not group.get("comparable") and len(stores) < 2:
+        retailers = {
+            retailer_key(item.get("store")) or item.get("store")
+            for item in offers
+            if item.get("store")
+        }
+        if not group.get("comparable") and len(retailers) < 2:
             continue
-        if len(stores) < 2:
+        if len(retailers) < 2:
             continue
         full_price = [item for item in offers if not has_shelf_discount(item)]
         if not full_price:
@@ -420,7 +432,7 @@ def mark_false_list_discounts(groups: list[dict[str, Any]]) -> None:
                 (
                     peer
                     for peer in full_price
-                    if peer.get("store") != offer.get("store")
+                    if not same_retailer(peer.get("store"), offer.get("store"))
                     and prices_match_or_lower(_offer_price(peer) or 0, price)
                 ),
                 None,
