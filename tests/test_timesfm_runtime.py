@@ -32,3 +32,27 @@ def test_forecast_with_timesfm3_uses_fake_backend(monkeypatch):
     assert quantiles[0]["0.1"] == [14.0, 14.0, 14.0]
     assert quantiles[0]["0.5"] == [15.0, 15.0, 15.0]
     assert quantiles[1]["0.5"] == [0.0, 0.0, 0.0]
+
+
+def test_default_timesfm25_maps_quantiles_without_mean(monkeypatch):
+    class Model:
+        @classmethod
+        def from_pretrained(cls, checkpoint, **kwargs):
+            assert checkpoint == "google/timesfm-2.5-200m-pytorch"
+            return cls()
+
+        def compile(self, config):
+            assert config.per_core_batch_size == 1
+
+        def forecast(self, horizon, inputs):
+            return np.full((1, horizon), 100.0), np.tile(np.arange(10), (1, horizon, 1))
+
+    monkeypatch.delenv("TIMESFM_CHECKPOINT", raising=False)
+    monkeypatch.setitem(sys.modules, "timesfm", types.SimpleNamespace(
+        TimesFM_2p5_200M_torch=Model, ForecastConfig=lambda **k: types.SimpleNamespace(**k),
+    ))
+    points, quantiles = forecast_with_timesfm3([[90, 100]], 2)
+    assert points == [[100, 100]]
+    assert quantiles[0]["0.1"] == [1, 1]
+    assert quantiles[0]["0.9"] == [9, 9]
+    assert "0.0" not in quantiles[0]

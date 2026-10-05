@@ -1,5 +1,18 @@
 # TimesFM: preparación de datos
 
+El proceso usa por defecto `google/timesfm-2.5-200m-pytorch` (pesos Apache 2.0).
+Instalar sus dependencias en el entorno del host BMAX con
+`.venv/bin/python -m pip install -r requirements-timesfm.txt`.
+El proceso carga `.env` del proyecto para acceder a MongoDB con autenticación.
+Antes de la primera carga del modelo ejecutar el verificador de recursos de
+`timesfm/timesfm-forecasting/scripts/check_system.py` en BMAX.
+TimesFM 3 se conserva para configuraciones explícitas mediante `TIMESFM_CHECKPOINT`;
+sus pesos predeterminados tienen restricciones para uso en producción.
+
+La API omite simulaciones al construir el resumen y busca el primer pronóstico
+utilizable entre los últimos 20 registros. La fecha del resumen corresponde al
+registro seleccionado; consultar un producto no ejecuta inferencia ni envía avisos.
+
 Antes de generar un pronóstico, cada producto debe pasar estas reglas:
 
 - identidad estable `tienda:product_id`; no se mezclan productos de tiendas ni variantes con IDs distintos;

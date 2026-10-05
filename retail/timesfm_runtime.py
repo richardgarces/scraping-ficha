@@ -35,11 +35,42 @@ def forecast_with_timesfm3(
     local_files_only: bool | None = None,
 ) -> tuple[list[list[float]], list[dict[str, list[float]]]]:
     np = importlib.import_module("numpy")
-    timesfm3 = import_timesfm3_module()
-    checkpoint = checkpoint_path or os.environ.get("TIMESFM_CHECKPOINT") or "google/timesfm-3.0-pytorch"
+    checkpoint = checkpoint_path or os.environ.get("TIMESFM_CHECKPOINT") or "google/timesfm-2.5-200m-pytorch"
     runtime_device = device or os.environ.get("TIMESFM_DEVICE")
     if local_files_only is None:
         local_files_only = os.environ.get("TIMESFM_LOCAL_FILES_ONLY", "0") in {"1", "true", "True"}
+
+    if "timesfm-2.5" in checkpoint:
+        _add_local_timesfm_src()
+        timesfm = importlib.import_module("timesfm")
+        if not 1 <= horizon <= 1024:
+            raise ValueError("TimesFM 2.5 requiere un horizonte de 1 a 1024 días.")
+        if not series_list:
+            return [], []
+        contexts = [np.asarray(series, dtype=np.float32) for series in series_list]
+        if any(context.ndim != 1 or not len(context) or not np.isfinite(context).all() for context in contexts):
+            raise ValueError("Cada serie debe contener precios finitos y no estar vacía.")
+        model = timesfm.TimesFM_2p5_200M_torch.from_pretrained(
+            checkpoint, local_files_only=local_files_only, torch_compile=False,
+        )
+        model.compile(timesfm.ForecastConfig(
+            max_context=min(16384 - ((horizon + 127) // 128) * 128, max(32, max(len(context) for context in contexts))),
+            max_horizon=horizon, per_core_batch_size=1,
+            normalize_inputs=True, use_continuous_quantile_head=True,
+            infer_is_positive=True, fix_quantile_crossing=True,
+        ))
+        points, quantiles = model.forecast(horizon=horizon, inputs=contexts)
+        points, quantiles = np.asarray(points), np.asarray(quantiles)
+        if points.shape != (len(contexts), horizon) or quantiles.shape != (len(contexts), horizon, 10):
+            raise ValueError("TimesFM devolvió dimensiones inesperadas.")
+        if not np.isfinite(points).all() or not np.isfinite(quantiles).all():
+            raise ValueError("TimesFM devolvió valores no finitos.")
+        return points.tolist(), [
+            {str(index / 10): row[:, index].tolist() for index in range(1, 10)}
+            for row in quantiles
+        ]
+
+    timesfm3 = import_timesfm3_module()
 
     forecaster = timesfm3.TimesFM3Forecaster.from_pretrained(
         pretrained_model_name_or_path=checkpoint,

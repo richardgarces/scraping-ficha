@@ -49,3 +49,36 @@ def test_forecasts_api_returns_404_for_admin_without_data(anonymous_repo, monkey
 
     response = TestClient(app).get("/api/forecasts/sku-1", params={"store": "lider"})
     assert response.status_code == 404
+
+
+def test_forecasts_api_uses_older_usable_forecast_and_skips_simulations(monkeypatch):
+    monkeypatch.setattr("retail.web.forecasts_api.current_user", lambda *a, **k: {"role": "admin"})
+    rows = [
+        {"model": "simulated", "point_forecast": [1]},
+        {"model": "timesfm", "point_forecast": []},
+        {"model": "timesfm", "point_forecast": [90, 80], "horizon": 2},
+    ]
+
+    class Cursor:
+        def sort(self, *args):
+            return self
+
+        def limit(self, *args):
+            return self
+
+        def __iter__(self):
+            return iter(rows)
+
+    closed = []
+    repo = SimpleNamespace(
+        db=SimpleNamespace(get_collection=lambda name: SimpleNamespace(find=lambda query: Cursor())),
+        collection=SimpleNamespace(find_one=lambda *a: {"price": 100}),
+        price_patterns=SimpleNamespace(find_one=lambda *a: None),
+        close=lambda: closed.append(True),
+    )
+    monkeypatch.setattr("retail.web.forecasts_api.connect_repo", lambda: repo)
+    response = TestClient(app).get("/api/forecasts/sku-1?store=lider")
+    assert response.status_code == 200
+    assert response.json()["summary"]["expected_price"] == 85
+    assert response.json()["summary"]["change_percent"] == -15
+    assert closed == [True]

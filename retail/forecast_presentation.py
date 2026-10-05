@@ -43,6 +43,8 @@ def forecast_summary(item: dict[str, Any], current_price: Any = None) -> dict[st
         current = float(current_price) if current_price not in (None, "") else points[0]
     except (TypeError, ValueError):
         current = points[0]
+    if not math.isfinite(current) or current <= 0:
+        current = points[0]
     expected = sum(points) / len(points)
     change = ((expected - current) * 100 / current) if current > 0 else 0.0
     trend = "stable"
@@ -72,6 +74,10 @@ def forecast_summary(item: dict[str, Any], current_price: Any = None) -> dict[st
         confidence_reason = "Se usaron al menos 30 días y el modelo entregó un rango de incertidumbre."
 
     generated = item.get("generated_at") or item.get("created_at")
+    try:
+        horizon = max(1, int(item.get("horizon") or len(points)))
+    except (TypeError, ValueError, OverflowError):
+        horizon = len(points)
     return {
         "trend": trend,
         "change_percent": round(change, 1),
@@ -82,7 +88,7 @@ def forecast_summary(item: dict[str, Any], current_price: Any = None) -> dict[st
         "confidence": confidence,
         "confidence_reason": confidence_reason,
         "generated_at": generated.isoformat() if hasattr(generated, "isoformat") else generated,
-        "horizon_days": max(1, int(item.get("horizon") or len(points))),
+        "horizon_days": horizon,
         "model": model or "unknown",
         "observation_count": observations,
         "experimental": True,

@@ -45,7 +45,13 @@ def get_forecasts(request: Request, product_id: str, store: str | None = Query(d
             {"_id": 0, "patterns": 1, "updated_at": 1},
         ) if store else None
         patterns = list((pattern_doc or {}).get("patterns") or [])
-        summary = forecast_summary(rows[0], (current or {}).get("price")) if rows else None
+        summary = None
+        for row in rows:
+            if str(row.get("model") or "").lower() == "simulated":
+                continue
+            summary = forecast_summary(row, (current or {}).get("price"))
+            if summary is not None:
+                break
         if summary is None and not patterns:
             raise HTTPException(status_code=404, detail="No usable forecast found for product")
         return {

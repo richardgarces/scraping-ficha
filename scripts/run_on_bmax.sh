@@ -17,6 +17,15 @@ fi
 
 mkdir -p "$ROOT_DIR/output"
 
+# La tarea de cron no hereda la configuración del contenedor web.
+# Exportar la configuración del host antes de resolver MongoDB.
+if [ -f "$ROOT_DIR/.env" ]; then
+  set -a
+  # shellcheck disable=SC1091
+  source "$ROOT_DIR/.env"
+  set +a
+fi
+
 # Resuelve Mongo antes de generar: el modo real lee el historial y escribe los
 # pronósticos directamente en la colección `forecasts`.
 MONGODB_CREDS_FILE="${MONGODB_CREDS_FILE:-$ROOT_DIR/.mongo_creds}"

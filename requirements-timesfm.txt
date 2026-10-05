@@ -1,0 +1,3 @@
+# Dependencias opcionales del proceso de pronósticos en BMAX.
+# Instalar en el entorno del host, no en el contenedor web.
+timesfm[torch]==3.0.2

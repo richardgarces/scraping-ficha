@@ -41,3 +41,12 @@ def test_legacy_text_quantiles_do_not_create_false_confidence():
     )
     assert summary["range_has_uncertainty"] is False
     assert summary["confidence"] == "low"
+
+
+def test_invalid_current_price_and_horizon_do_not_break_summary():
+    summary = forecast_summary(
+        {"model": "timesfm", "point_forecast": [100, 90], "horizon": "invalid"},
+        current_price=float("nan"),
+    )
+    assert summary["horizon_days"] == 2
+    assert summary["change_percent"] == -5.0
