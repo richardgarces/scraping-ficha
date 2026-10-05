@@ -1,10 +1,10 @@
 # Piloto de cotizaciones comparadas
 
-La página `/cotizaciones`, disponible para cuentas aprobadas desde el menú Cuenta,
-permite importar una lista, revisar sus filas, confirmar productos del catálogo y
-exportar una comparación. Cada cuenta accede exclusivamente a sus cotizaciones.
-Los precios importados son referencias privadas: no modifican el catálogo ni el
-historial de las tiendas.
+La página `/cotizaciones`, disponible solo para administradores (como `/ofertas`)
+desde el menú Cuenta, permite importar una lista, revisar sus filas, confirmar
+productos del catálogo y exportar una comparación. Cada cuenta admin accede
+exclusivamente a sus cotizaciones. Los precios importados son referencias
+privadas: no modifican el catálogo ni el historial de las tiendas.
 
 ## Uso
 
@@ -32,7 +32,7 @@ el dígito verificador GTIN. Máximo 100 productos y 512 KB de CSV; el piloto ad
 
 1. Obtener el PDF o imagen del proveedor en un entorno con Docling (`pip install -e '.[documents]'` o el entorno `scraping`/Soyo).
 2. Convertir a JSON del piloto: `python scripts/convert_quote_document.py proveedor.pdf --output output/cotizacion.json --title "…" --supplier "…"` (revisar avisos en consola).
-3. Abrir `/cotizaciones`, iniciar sesión con cuenta aprobada, importar el JSON o pegar CSV equivalente.
+3. Abrir `/cotizaciones`, iniciar sesión como administrador, importar el JSON o pegar CSV equivalente.
 4. Confirmar IVA, vigencia y filas con avisos; buscar y confirmar coincidencias por línea.
 5. Exportar CSV de comparación; registrar feedback útil/corrección si aplica. No usar URLs arbitrarias dentro del contenedor web.
 
@@ -99,12 +99,15 @@ confirmar y las referencias vencidas quedan pendientes: no generan ahorro invent
 
 La API canónica es `/api/quotes`. El alias español `/api/cotizaciones` expone las
 mismas rutas (por ejemplo `GET /api/cotizaciones` lista cotizaciones; sin sesión
-responde 401, no 404). La página HTML sigue en `/cotizaciones`.
+responde 401, no 404; usuario approved no-admin responde 403). La página HTML
+sigue en `/cotizaciones` y exige rol administrador (`require_admin_html`, igual
+que `/ofertas`).
 
 `POST /api/quotes/import-csv`, `POST /api/quotes`, `GET /api/quotes`,
 `GET/PUT /api/quotes/{id}`, `GET /api/quotes/{id}/candidates/{index}`,
 `PUT /api/quotes/{id}/selection`, `GET /api/quotes/{id}/export.csv` y
-`POST /api/quotes/{id}/feedback` usan la sesión normal y filtran por propietario.
+`POST /api/quotes/{id}/feedback` exigen administrador (`current_user(..., admin=True)`)
+y filtran por propietario.
 
 Colecciones Mongo: `business_quotes` (por `owner_id`) y `business_quote_events`
 (import, review, confirm, export, feedback, error).
@@ -144,4 +147,4 @@ Docling). Empujar código con `./push-to-server.sh` y en BMAX aplicar
 (`docker-compose.prod.yml` + `platform` + `soyo-access` si corresponde),
 `Dockerfile.screenshots`, sin `--force-recreate` y sin tocar volúmenes
 Mongo/Redis/Qdrant. Verificar `https://precios.meincart.cl/cotizaciones`
-tras iniciar sesión con una cuenta aprobada.
+sin sesión (redirect a `/entrar`) y con sesión de administrador.

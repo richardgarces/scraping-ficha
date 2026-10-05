@@ -16,7 +16,7 @@ from retail.quotes import (MAX_SOURCE_BYTES, QuoteInput, QuoteLine, candidate_fo
                            comparison_report, parse_csv_quote, resolve_quote_status,
                            source_hash)
 from retail.search import connect_repo
-from retail.web.deps import current_user, require_login_html
+from retail.web.deps import current_user, require_admin_html
 
 def private_response(response: Response):
     response.headers["Cache-Control"] = "no-store"
@@ -124,7 +124,7 @@ def _create(repo, user, payload: QuoteInput, *, event_kind: str = "import"):
 
 @router.get("/cotizaciones", include_in_schema=False)
 def quotes_page(request: Request):
-    gate = require_login_html(request, next_path="/cotizaciones")
+    gate = require_admin_html(request, next_path="/cotizaciones")
     if gate is not None:
         return gate
     from retail.web.app import STATIC
@@ -135,7 +135,7 @@ def quotes_page(request: Request):
 def create_quote(request: Request, payload: QuoteInput):
     repo = _repository()
     try:
-        user = current_user(request, repo, required=True)
+        user = current_user(request, repo, admin=True)
         try:
             return _create(repo, user, payload, event_kind="import")
         except HTTPException:
@@ -151,7 +151,7 @@ def create_quote(request: Request, payload: QuoteInput):
 def import_csv(request: Request, payload: CsvInput):
     repo = _repository()
     try:
-        user = current_user(request, repo, required=True)
+        user = current_user(request, repo, admin=True)
         try:
             items = parse_csv_quote(payload.text, payload.source_name)
             quote = QuoteInput(title=payload.title, supplier=payload.supplier,
@@ -170,7 +170,7 @@ def import_csv(request: Request, payload: CsvInput):
 def list_quotes(request: Request):
     repo = _repository()
     try:
-        user = current_user(request, repo, required=True)
+        user = current_user(request, repo, admin=True)
         quotes = []
         for row in repo.db.business_quotes.find(
             {"owner_id": user["id"]}, {"items": 0, "selections": 0},
@@ -187,7 +187,7 @@ def list_quotes(request: Request):
 def get_quote(request: Request, quote_id: str):
     repo = _repository()
     try:
-        user = current_user(request, repo, required=True)
+        user = current_user(request, repo, admin=True)
         quote = _owned(repo, user, quote_id)
         quote, report = _apply_status(repo, quote, _report(repo, quote))
         return {"quote": _public(quote), "report": report}
@@ -199,7 +199,7 @@ def get_quote(request: Request, quote_id: str):
 def get_candidates(request: Request, quote_id: str, index: int):
     repo = _repository()
     try:
-        user = current_user(request, repo, required=True)
+        user = current_user(request, repo, admin=True)
         quote = _owned(repo, user, quote_id)
         if not 0 <= index < len(quote["items"]):
             raise HTTPException(status_code=404, detail="Producto no encontrado.")
@@ -224,7 +224,7 @@ def get_candidates(request: Request, quote_id: str, index: int):
 def edit_quote(request: Request, quote_id: str, payload: QuoteEdit):
     repo = _repository()
     try:
-        user = current_user(request, repo, required=True)
+        user = current_user(request, repo, admin=True)
         _owned(repo, user, quote_id)
         values = payload.model_dump(mode="json", exclude={"version"})
         values.update(selections={}, updated_at=datetime.now(timezone.utc).isoformat(),
@@ -248,7 +248,7 @@ def edit_quote(request: Request, quote_id: str, payload: QuoteEdit):
 def select_candidate(request: Request, quote_id: str, payload: Selection):
     repo = _repository()
     try:
-        user = current_user(request, repo, required=True)
+        user = current_user(request, repo, admin=True)
         quote = _owned(repo, user, quote_id)
         if payload.index >= len(quote["items"]):
             raise HTTPException(status_code=404, detail="Producto no encontrado.")
@@ -281,7 +281,7 @@ def select_candidate(request: Request, quote_id: str, payload: Selection):
 def export_quote(request: Request, quote_id: str):
     repo = _repository()
     try:
-        user = current_user(request, repo, required=True)
+        user = current_user(request, repo, admin=True)
         quote = _owned(repo, user, quote_id)
         report = _report(repo, quote)
         output = io.StringIO()
@@ -321,7 +321,7 @@ def export_quote(request: Request, quote_id: str):
 def quote_feedback(request: Request, quote_id: str, payload: PilotEvent):
     repo = _repository()
     try:
-        user = current_user(request, repo, required=True)
+        user = current_user(request, repo, admin=True)
         _owned(repo, user, quote_id)
         repo.db.business_quotes.update_one({"_id": quote_id, "owner_id": user["id"]},
                                           {"$set": {"feedback": payload.kind}})

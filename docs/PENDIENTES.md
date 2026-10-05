@@ -12,7 +12,8 @@ El listado histórico más amplio sigue en [`PENDIENTES.md`](../PENDIENTES.md) e
 - [x] Despliegue BMAX con commit `3f4eb7b` (precios-web + workers habituales).
 - [x] Índices Mongo idempotentes: `business_quotes` (`owner_id` + `created_at`, `owner_id` + `status`) y `business_quote_events` (`owner_id` + `at`, `quote_id` + `at`) en `retail/mongo.py`.
 - [x] Alias API español `/api/cotizaciones` → mismo comportamiento que `/api/quotes`.
-- [ ] Prueba funcional en producción con cuenta aprobada: import CSV, confirmar match, exportar CSV.
+- [x] Acceso solo administrador (UI + API + menú Cuenta), como `/ofertas`.
+- [ ] Prueba funcional en producción con cuenta admin: import CSV, confirmar match, exportar CSV.
 - [ ] Smoke de navegador en CI (`tests/browser/purchasing_smoke.py` con Playwright).
 - [ ] Job async Docling (conversión PDF fuera de la petición HTTP, cola/worker dedicado).
 - [ ] Export XLSX / informe con marca (post-MVP).

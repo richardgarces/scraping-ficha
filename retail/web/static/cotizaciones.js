@@ -175,12 +175,13 @@ document.querySelectorAll("[data-feedback]").forEach(button => button.addEventLi
 }));
 
 ensureUser().then(user => {
-  if (!user) { location.href = "/entrar?next=/cotizaciones"; return; }
-  if (user.role === "admin") {
-    quoteRequest("/api/admin/purchasing-metrics").then(metrics => {
-      $("quote-pilot-metrics").hidden = false;
-      $("quote-pilot-metrics").textContent = `Piloto: ${metrics.imports} importaciones · ${metrics.matches} matches · ${metrics.exports} exportaciones · ${metrics.errors} errores · ahorro potencial exportado ${money(metrics.potential_saving_exported || 0)} · ${metrics.useful_quotes} útiles · ${metrics.needs_correction_quotes} necesitan corrección. ${metrics.note}`;
-    }).catch(showQuoteError);
+  if (!user || user.role !== "admin") {
+    location.href = "/entrar?next=/cotizaciones";
+    return;
   }
+  quoteRequest("/api/admin/purchasing-metrics").then(metrics => {
+    $("quote-pilot-metrics").hidden = false;
+    $("quote-pilot-metrics").textContent = `Piloto: ${metrics.imports} importaciones · ${metrics.matches} matches · ${metrics.exports} exportaciones · ${metrics.errors} errores · ahorro potencial exportado ${money(metrics.potential_saving_exported || 0)} · ${metrics.useful_quotes} útiles · ${metrics.needs_correction_quotes} necesitan corrección. ${metrics.note}`;
+  }).catch(showQuoteError);
   return listQuotes().then(() => quoteMessage("Importa una lista o abre una cotización guardada."));
 }).catch(showQuoteError);

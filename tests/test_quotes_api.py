@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from retail.web.app import app
@@ -77,11 +78,25 @@ class Collection:
         return SimpleNamespace(matched_count=1)
 
 
+def _fake_current_user(user):
+    def current_user(_request, _store=None, *, required=False, admin=False, detail=None):
+        if admin:
+            if not user:
+                raise HTTPException(status_code=401, detail="Entra con tu cuenta de administrador.")
+            if user.get("role") != "admin":
+                raise HTTPException(status_code=403, detail="Solo el administrador puede hacer eso.")
+        elif required and not user:
+            raise HTTPException(status_code=401, detail=detail or "Entra con tu cuenta.")
+        return user
+
+    return current_user
+
+
 @pytest.fixture
 def quotes_client(monkeypatch):
     quotes = Collection()
     events = Collection()
-    user = {"id": "user-1", "role": "admin"}
+    user = {"id": "user-1", "role": "admin", "status": "approved"}
     doc = {"store": "lider", "product_id": "sku", "name": "Samsung Galaxy S25 256GB", "brand": "Samsung",
            "price": 600000, "stock": 5, "condition": "new", "updated_at": datetime.now(timezone.utc)}
     repo = SimpleNamespace(
@@ -91,7 +106,7 @@ def quotes_client(monkeypatch):
         close=lambda: None,
     )
     monkeypatch.setattr("retail.web.quotes_api.connect_repo", lambda: repo)
-    monkeypatch.setattr("retail.web.quotes_api.current_user", lambda *args, **kwargs: user)
+    monkeypatch.setattr("retail.web.quotes_api.current_user", _fake_current_user(user))
     return TestClient(app), user, quotes, events
 
 
@@ -169,6 +184,48 @@ def test_cotizaciones_api_alias_requires_login(anonymous_repo, monkeypatch):
     client = TestClient(app)
     assert client.get("/api/cotizaciones").status_code == 401
     assert client.get("/api/quotes").status_code == 401
+
+
+def test_quotes_page_requires_admin(anonymous_repo, monkeypatch):
+    monkeypatch.setattr("retail.web.quotes_api.connect_repo", lambda: anonymous_repo)
+    client = TestClient(app)
+    page = client.get("/cotizaciones", follow_redirects=False)
+    assert page.status_code == 303
+    assert page.headers["location"].startswith("/entrar")
+    assert "cotizaciones" in page.headers["location"]
+
+
+def test_approved_non_admin_cannot_use_quotes_api(monkeypatch):
+    quotes = Collection()
+    events = Collection()
+    user = {"id": "user-1", "role": "user", "status": "approved"}
+    repo = SimpleNamespace(
+        db=SimpleNamespace(business_quotes=quotes, business_quote_events=events),
+        product_detail=lambda *args: None,
+        find_by_query=lambda *args, **kwargs: [],
+        close=lambda: None,
+    )
+    monkeypatch.setattr("retail.web.quotes_api.connect_repo", lambda: repo)
+    monkeypatch.setattr("retail.web.quotes_api.current_user", _fake_current_user(user))
+    client = TestClient(app)
+    assert client.get("/api/quotes").status_code == 403
+    assert client.get("/api/cotizaciones").status_code == 403
+    assert client.post("/api/quotes/import-csv", json={"title": "Compra", "text": "nombre\nProducto"}).status_code == 403
+    assert client.get("/api/admin/purchasing-metrics").status_code == 403
+
+
+def test_quotes_menu_link_is_admin_only():
+    from pathlib import Path
+
+    prices = Path("retail/web/static/prices.js").read_text(encoding="utf-8")
+    assert 'link.href = "/cotizaciones"' in prices
+    assert 'link.setAttribute("data-admin", "")' in prices
+    assert "if (admin)" in prices
+    assert 'user.role === "admin"' in prices
+    html = Path("retail/web/static/cotizaciones.html").read_text(encoding="utf-8")
+    assert 'href="/cotizaciones" class="current" data-admin hidden' in html
+    script = Path("retail/web/static/cotizaciones.js").read_text(encoding="utf-8")
+    assert 'user.role !== "admin"' in script
 
 
 def test_oversized_quote_is_rejected_before_processing():

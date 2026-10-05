@@ -651,17 +651,24 @@ window.retailUser = undefined;
 let sessionPromise;
 
 function applySession(user) {
-  document.querySelectorAll(".nav-menu[data-auth] .nav-menu-list").forEach(menu => {
-    if (!menu.querySelector('a[href="/cotizaciones"]')) {
-      const link = document.createElement("a");
-      link.href = "/cotizaciones";
-      link.textContent = "Cotizaciones";
-      menu.prepend(link);
-    }
-  });
   window.retailUser = user || null;
   const loggedIn = Boolean(user);
   const admin = Boolean(user && user.role === "admin");
+  document.querySelectorAll(".nav-menu[data-auth] .nav-menu-list").forEach(menu => {
+    let link = menu.querySelector('a[href="/cotizaciones"]');
+    if (admin) {
+      if (!link) {
+        link = document.createElement("a");
+        link.href = "/cotizaciones";
+        link.textContent = "Cotizaciones";
+        link.setAttribute("data-admin", "");
+        menu.prepend(link);
+      }
+      link.hidden = false;
+    } else if (link) {
+      link.hidden = true;
+    }
+  });
   document.documentElement.classList.toggle("is-authed", loggedIn);
   document.documentElement.classList.toggle("is-admin", admin);
   document.querySelectorAll("[data-admin]").forEach((el) => {
@@ -754,7 +761,7 @@ const CLICK_NAV = {
   "/super": "reales",
   "/tiendas": "tiendas",
 };
-const CLICK_ADMIN_PAGES = new Set(["/cron", "/estadisticas", "/usuarios", "/ofertas"]);
+const CLICK_ADMIN_PAGES = new Set(["/cron", "/estadisticas", "/usuarios", "/ofertas", "/cotizaciones"]);
 let fechaClickAt = 0;
 
 function trackClick(kind) {

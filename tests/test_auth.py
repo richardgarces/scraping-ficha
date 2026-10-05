@@ -66,6 +66,9 @@ def test_ofertas_and_history_are_admin_only(anonymous_repo):
     page = client.get("/ofertas", follow_redirects=False)
     assert page.status_code == 303
     assert page.headers["location"].startswith("/entrar")
+    quotes = client.get("/cotizaciones", follow_redirects=False)
+    assert quotes.status_code == 303
+    assert quotes.headers["location"].startswith("/entrar")
     history = client.get("/api/history")
     assert history.status_code == 200
     assert history.json() == []

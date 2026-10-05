@@ -298,7 +298,7 @@ def siguiendo() -> FileResponse:
 def _member_page(path: str) -> bool:
     """Páginas que cualquier cuenta aprobada puede abrir, no solo el admin."""
     base = path.split("?", 1)[0].rstrip("/") or "/"
-    return base in {"/reales", "/super", "/comparar", "/analisis-producto", "/cotizaciones"}
+    return base in {"/reales", "/super", "/comparar", "/analisis-producto"}
 
 
 @app.get("/entrar")
@@ -316,6 +316,7 @@ def entrar(request: Request):
                 or nxt.startswith("/estadisticas")
                 or nxt.startswith("/usuarios")
                 or nxt.startswith("/analisis-producto")
+                or nxt.startswith("/cotizaciones")
             )
             member_next = user and _member_page(nxt)
             if admin_next or member_next:
