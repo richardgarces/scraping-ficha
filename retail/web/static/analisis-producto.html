@@ -72,10 +72,19 @@
         <button id="entity-reset" class="secondary" type="button">Volver a detección automática</button>
       </div>
     </section>
+    <section class="panel" data-admin hidden id="identity-audit-panel">
+      <h2>Auditoría de identidad (≥80%)</h2>
+      <p class="muted">Muestreo de pares que el sistema une con confianza alta. Marca <strong>Incorrecto</strong> para forzar override (separación) o <strong>Confirmar</strong> para registrar que el par está bien.</p>
+      <div class="analysis-search">
+        <button id="identity-audit-sample" type="button" class="secondary">Muestrear pares</button>
+      </div>
+      <p id="identity-audit-status" class="summary" aria-live="polite"></p>
+      <div id="identity-audit-results"></div>
+    </section>
     <section id="analysis-summary" class="panel" hidden></section>
     <div id="analysis-results" class="analysis-results"></div>
   </main>
   <script src="/static/prices.js?v=30"></script>
-  <script src="/static/analisis-producto.js?v=7"></script>
+  <script src="/static/analisis-producto.js?v=8"></script>
 </body>
 </html>

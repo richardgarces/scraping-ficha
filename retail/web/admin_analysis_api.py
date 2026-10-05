@@ -136,7 +136,7 @@ async def entity_overrides(request: Request) -> dict:
     """Une, separa o devuelve al emparejamiento automático productos guardados."""
     repo = repo_or_503()
     try:
-        current_user(request, repo, required=True, admin=True)
+        user = current_user(request, repo, required=True, admin=True) or {}
         body = await request.json()
         action = str(body.get("action") or "").strip().lower()
         products = _entity_products(body)
@@ -145,7 +145,8 @@ async def entity_overrides(request: Request) -> dict:
                 raise HTTPException(status_code=400, detail="Selecciona al menos dos productos para unir.")
             override = f"manual:{uuid.uuid4().hex}"
             overrides = [override] * len(products)
-        elif action == "split":
+        elif action in {"split", "incorrect"}:
+            # «incorrect» = el par automático ≥80% está mal: forzar separación.
             override = None
             overrides = [f"manual:{uuid.uuid4().hex}" for _item in products]
         elif action == "reset":
@@ -156,6 +157,105 @@ async def entity_overrides(request: Request) -> dict:
         saved = repo.set_entity_overrides(products, overrides)
         if saved["matched"] != len(products):
             raise HTTPException(status_code=404, detail="Uno o más productos ya no existen.")
+        if action == "incorrect":
+            from retail.identity_audit import record_identity_audit
+
+            record_identity_audit(
+                repo,
+                action="incorrect",
+                products=products,
+                pair_id=str(body.get("pair_id") or ""),
+                confidence=(
+                    float(body["confidence"])
+                    if body.get("confidence") is not None
+                    else None
+                ),
+                note=str(body.get("note") or "Par marcado como identidad incorrecta"),
+                actor=str(user.get("email") or user.get("id") or "admin"),
+            )
         return {"ok": True, "action": action, "entity_override": override, **saved}
+    finally:
+        repo.close()
+
+
+@router.get("/api/admin/identity-audit/sample")
+async def identity_audit_sample(request: Request) -> dict:
+    """Muestra pares de identidad con confianza ≥80% para revisión admin."""
+    from retail.identity_audit import load_identity_audit_sample
+    from retail.reales import MIN_ENTITY_CONFIDENCE
+
+    repo = repo_or_503()
+    try:
+        current_user(request, repo, required=True, admin=True)
+        try:
+            limit = int(request.query_params.get("limit") or 20)
+        except (TypeError, ValueError):
+            limit = 20
+        limit = max(1, min(50, limit))
+        try:
+            min_confidence = float(
+                request.query_params.get("min_confidence") or MIN_ENTITY_CONFIDENCE
+            )
+        except (TypeError, ValueError):
+            min_confidence = MIN_ENTITY_CONFIDENCE
+        seed_raw = request.query_params.get("seed")
+        seed = int(seed_raw) if seed_raw not in (None, "") else None
+        return await run_in_threadpool(
+            load_identity_audit_sample,
+            repo,
+            min_confidence=min_confidence,
+            limit=limit,
+            seed=seed,
+        )
+    finally:
+        repo.close()
+
+
+@router.post("/api/admin/identity-audit/override")
+async def identity_audit_override(request: Request) -> dict:
+    """Atajo: marcar par incorrecto o forzar unión/separación desde el muestreo."""
+    from retail.identity_audit import record_identity_audit
+
+    repo = repo_or_503()
+    try:
+        user = current_user(request, repo, required=True, admin=True) or {}
+        body = await request.json()
+        action = str(body.get("action") or "incorrect").strip().lower()
+        products = _entity_products(body)
+        if action == "incorrect":
+            if len(products) < 2:
+                raise HTTPException(status_code=400, detail="Indica el par a marcar como incorrecto.")
+            overrides = [f"manual:{uuid.uuid4().hex}" for _item in products]
+            saved = repo.set_entity_overrides(products, overrides)
+            audit = record_identity_audit(
+                repo,
+                action="incorrect",
+                products=products,
+                pair_id=str(body.get("pair_id") or ""),
+                confidence=(
+                    float(body["confidence"])
+                    if body.get("confidence") is not None
+                    else None
+                ),
+                note=str(body.get("note") or ""),
+                actor=str(user.get("email") or user.get("id") or "admin"),
+            )
+            return {"ok": True, "action": "incorrect", **saved, "audit": audit}
+        if action == "confirm":
+            audit = record_identity_audit(
+                repo,
+                action="confirm",
+                products=products,
+                pair_id=str(body.get("pair_id") or ""),
+                confidence=(
+                    float(body["confidence"])
+                    if body.get("confidence") is not None
+                    else None
+                ),
+                note=str(body.get("note") or "Par confirmado en muestreo"),
+                actor=str(user.get("email") or user.get("id") or "admin"),
+            )
+            return {"ok": True, "action": "confirm", "audit": audit}
+        raise HTTPException(status_code=400, detail="Acción inválida (incorrect|confirm).")
     finally:
         repo.close()

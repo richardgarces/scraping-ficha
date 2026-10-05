@@ -189,4 +189,103 @@
   document.getElementById("entity-merge").addEventListener("click", () => changeEntities("merge"));
   document.getElementById("entity-split").addEventListener("click", () => changeEntities("split"));
   document.getElementById("entity-reset").addEventListener("click", () => changeEntities("reset"));
+
+  const auditPanel = document.getElementById("identity-audit-panel");
+  const auditStatus = document.getElementById("identity-audit-status");
+  const auditResults = document.getElementById("identity-audit-results");
+
+  function moneyAudit(value) {
+    if (value == null) return "—";
+    return new Intl.NumberFormat("es-CL", { style: "currency", currency: "CLP", maximumFractionDigits: 0 }).format(value);
+  }
+
+  function pairCard(pair) {
+    const left = pair.left || {};
+    const right = pair.right || {};
+    const pct = Math.round(Number(pair.confidence || 0) * 100);
+    return `<article class="panel analysis-group" data-pair-id="${escapeHtml(pair.pair_id || "")}">
+      <div class="cron-head"><div>
+        <h3>Coincidencia ${pct}% · ${escapeHtml(pair.match_method || "automático")}</h3>
+        <p class="muted">${escapeHtml(pair.pair_id || "")}</p>
+      </div></div>
+      <div class="table-wrap"><table class="results">
+        <thead><tr><th>Tienda</th><th>Producto</th><th>Precio</th></tr></thead>
+        <tbody>
+          <tr><td>${escapeHtml(left.store || "")}</td><td>${escapeHtml(left.name || "")}<br><span class="muted">${escapeHtml(left.product_id || "")}</span></td><td class="price">${moneyAudit(left.price)}</td></tr>
+          <tr><td>${escapeHtml(right.store || "")}</td><td>${escapeHtml(right.name || "")}<br><span class="muted">${escapeHtml(right.product_id || "")}</span></td><td class="price">${moneyAudit(right.price)}</td></tr>
+        </tbody>
+      </table></div>
+      <p>
+        <button type="button" class="secondary identity-audit-confirm" data-pair-id="${escapeHtml(pair.pair_id || "")}" data-confidence="${escapeHtml(pair.confidence)}" data-left-store="${escapeHtml(left.store || "")}" data-left-id="${escapeHtml(left.product_id || "")}" data-right-store="${escapeHtml(right.store || "")}" data-right-id="${escapeHtml(right.product_id || "")}">Confirmar</button>
+        <button type="button" class="identity-audit-incorrect" data-pair-id="${escapeHtml(pair.pair_id || "")}" data-confidence="${escapeHtml(pair.confidence)}" data-left-store="${escapeHtml(left.store || "")}" data-left-id="${escapeHtml(left.product_id || "")}" data-right-store="${escapeHtml(right.store || "")}" data-right-id="${escapeHtml(right.product_id || "")}">Incorrecto (override)</button>
+      </p>
+    </article>`;
+  }
+
+  async function loadIdentitySample() {
+    currentUser = await ensureUser();
+    if (currentUser?.role !== "admin") return;
+    if (auditPanel) auditPanel.hidden = false;
+    auditStatus.textContent = "Muestreando pares con confianza ≥80%…";
+    auditResults.innerHTML = "";
+    const response = await fetch("/api/admin/identity-audit/sample?limit=12&min_confidence=0.8");
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      auditStatus.textContent = data.detail || "No se pudo muestrear.";
+      return;
+    }
+    const pairs = data.pairs || [];
+    auditStatus.textContent = pairs.length
+      ? `Mostrando ${pairs.length} pares (pool ${data.pool_size || 0}).`
+      : "No hay pares ≥80% en el lote reciente.";
+    auditResults.innerHTML = pairs.map(pairCard).join("");
+  }
+
+  async function auditAction(button, action) {
+    const products = [
+      { store: button.dataset.leftStore, product_id: button.dataset.leftId },
+      { store: button.dataset.rightStore, product_id: button.dataset.rightId },
+    ];
+    const response = await fetch("/api/admin/identity-audit/override", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action,
+        products,
+        pair_id: button.dataset.pairId,
+        confidence: Number(button.dataset.confidence || 0),
+      }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      error.hidden = false;
+      error.textContent = data.detail || "No se pudo guardar la auditoría.";
+      return;
+    }
+    error.hidden = true;
+    auditStatus.textContent = action === "incorrect"
+      ? "Par marcado incorrecto y separado con override."
+      : "Par confirmado en auditoría.";
+    button.closest("article")?.remove();
+  }
+
+  document.getElementById("identity-audit-sample")?.addEventListener("click", () => {
+    loadIdentitySample().catch((reason) => {
+      auditStatus.textContent = reason.message || "No se pudo muestrear.";
+    });
+  });
+  auditResults?.addEventListener("click", (event) => {
+    const incorrect = event.target.closest(".identity-audit-incorrect");
+    if (incorrect) {
+      auditAction(incorrect, "incorrect").catch(() => {});
+      return;
+    }
+    const confirmBtn = event.target.closest(".identity-audit-confirm");
+    if (confirmBtn) auditAction(confirmBtn, "confirm").catch(() => {});
+  });
+
+  ensureUser().then((user) => {
+    currentUser = user;
+    if (user?.role === "admin" && auditPanel) auditPanel.hidden = false;
+  }).catch(() => {});
 })();

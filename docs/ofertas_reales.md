@@ -64,16 +64,20 @@ Para entrar hace falta comercial ≥ 10% **o** verificado ≥ 10% sobre el preci
 ### Señales anti-vitrina (criterio `real-offer-v2`)
 
 1. **Inflación de lista:** si `price_normal` subió ≥ 15% en 7–30 días y el precio de venta vuelve cerca (±5%) del precio previo, **no** es oferta real. Ejemplo: normal 10.000 → 14.000, “−29%” a 10.000 → ahorro real ≈ 0.
-2. **Ancla cross-store:** si el precio en oferta está a ≤ 3% de la mediana o del mínimo de otras tiendas (confianza ≥ 80%), no califica como gran oferta; el motivo habla de “similar a otras tiendas”.
-3. **Pre-evento / Cyber CL:** ventanas heurísticas Mayo–Jun, fin Sep–Oct y fin Nov. Si el precio (lista o venta) subió ≥ 10% en ~14 días previos y el “descuento” no deja un ahorro real ≥ 10%, se descarta. Constantes: `CHILE_EVENT_WINDOWS` en `retail/reales.py`.
+2. **Anti-vitrina de venta (`fake_discount`):** misma lógica que las alertas del batch (`pricing.fake_discount`): el precio de venta subió y el «descuento» solo vuelve cerca de la mediana previa → no es oferta real. Se unifica con la inflación de lista v2 en `offer_integrity`.
+3. **Ancla cross-store:** si el precio en oferta está a ≤ 3% de la mediana o del mínimo de otras tiendas (confianza ≥ 80%), no califica como gran oferta; el motivo habla de “similar a otras tiendas”.
+4. **Pre-evento / Cyber CL:** ventanas heurísticas Mayo–Jun, fin Sep–Oct y fin Nov. Si el precio (lista o venta) subió ≥ 10% en ~14 días previos y el “descuento” no deja un ahorro real ≥ 10%, se descarta. Constantes: `CHILE_EVENT_WINDOWS` en `retail/reales.py`.
 
 El worker diario (`retail/real_offer_worker.py`, versión `real-offer-v2`) persiste estas marcas en `daily_real_offers.analysis`. `/reales` **lee** las marcas; no recalcula en el request.
 
+### Auditoría de identidad (admin)
+
+Pares con confianza ≥ 80% se pueden muestrear desde Análisis de producto (`GET /api/admin/identity-audit/sample`). Marcar **Incorrecto** aplica override de separación (`entity_override` distinto por aviso) vía `POST /api/admin/identity-audit/override`; **Confirmar** solo registra la revisión en `identity_audit_events`.
+
 ### Qué no filtra esta página
 
-- **No** usa `ignore_fake_discounts` / `fake_discount()` de las alertas del batch (esa lógica mira alzas del *precio de venta*). Aquí la inflación de *lista* y el ancla cross-store son propias de ofertas reales.
 - Easy/Paris (o Falabella/Sodimac) al **mismo** precio se colapsan en un aviso; solos no generan comparación (hace falta un rival de otra familia más caro, o el check «Mismo precio»).
-
+- Preferencias de usuario `ignore_fake_discounts` siguen aplicando a **alertas del batch**; en ofertas reales el filtro `fake_discount` ya está integrado en el criterio v2.
 ### Envío
 
 Si **todas** las tiendas del grupo informan despacho comparable, se compara precio + envío (`landed_price`). Si falta algún dato, se compara solo el precio del producto.

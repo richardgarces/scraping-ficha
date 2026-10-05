@@ -17,6 +17,7 @@ from retail.compare import (
     same_product_identity,
 )
 from retail.models import Product
+from retail.pricing import fake_discount as selling_price_fake_discount
 from retail.pricing import parse_moment, series
 
 # El ejemplo del shampoo: 10.000 → 6.000 es 40%. Pedimos al menos 10% para
@@ -399,6 +400,41 @@ def cross_store_anchor(
     }
 
 
+def detect_selling_fake_discount(
+    item: dict[str, Any],
+    *,
+    now: datetime | None = None,
+) -> dict[str, Any] | None:
+    """Anti-vitrina de *venta*: el «descuento» solo deshace un alza reciente.
+
+    Reutiliza ``pricing.fake_discount`` (misma lógica que alertas del batch) y
+    la combina con la inflación de lista v2 en ``offer_integrity``.
+    """
+    if is_payment_restricted(item):
+        return None
+    stamp = now or datetime.now(timezone.utc)
+    if stamp.tzinfo is None:
+        stamp = stamp.replace(tzinfo=timezone.utc)
+    rows = series(item.get("price_history"))
+    current = comparable_selling_price(item) or _int(item.get("price"))
+    prices = [price for _, price in rows]
+    previous = None
+    for price in reversed(prices[:-1] if prices and prices[-1] == current else prices):
+        if price != current:
+            previous = price
+            break
+    signal = selling_price_fake_discount(rows, current, previous, stamp)
+    if not signal:
+        return None
+    return {
+        "kind": "fake_discount",
+        "baseline": signal.get("baseline"),
+        "inflated_from": signal.get("inflated_from"),
+        "over_baseline_percent": signal.get("over_baseline_percent"),
+        "label": "descuento de venta inflado (solo deshace un alza reciente)",
+    }
+
+
 def offer_integrity(
     item: dict[str, Any],
     peers: list[dict[str, Any]],
@@ -410,11 +446,14 @@ def offer_integrity(
     commercial = own_discount_percent(item)
     verified = verified_discount_percent(item)
     list_inflate = detect_list_inflation(item, now=now)
+    selling_fake = detect_selling_fake_discount(item, now=now)
     pre_event = detect_pre_event_inflation(item, now=now)
     anchor = cross_store_anchor(item, peers, entity_confidence=entity_confidence)
     flags: list[str] = []
     if list_inflate:
         flags.append("list_inflation")
+    if selling_fake:
+        flags.append("fake_discount")
     if pre_event:
         flags.append("pre_event_inflation")
     if anchor and anchor.get("similar_to_market"):
@@ -427,14 +466,20 @@ def offer_integrity(
             real_savings_percent,
             float(list_inflate.get("real_savings_percent") or 0),
         )
+    if selling_fake:
+        # El «descuento» de venta no aporta ahorro real vs la mediana de fondo.
+        real_savings_percent = min(real_savings_percent, 0.0)
     suspicious = bool(flags) and (
         list_inflate is not None
+        or selling_fake is not None
         or (anchor and anchor.get("similar_to_market") and commercial >= MIN_OWN_DISCOUNT)
         or (pre_event is not None and commercial >= MIN_OWN_DISCOUNT and verified < MIN_OWN_DISCOUNT)
     )
     reasons = []
     if list_inflate:
         reasons.append(list_inflate["label"])
+    if selling_fake:
+        reasons.append(selling_fake["label"])
     if pre_event:
         reasons.append(pre_event["label"])
     if anchor and anchor.get("similar_to_market"):
@@ -444,6 +489,7 @@ def offer_integrity(
         "verified_discount": verified,
         "real_savings_percent": round(real_savings_percent, 1),
         "list_inflation": list_inflate,
+        "fake_discount": selling_fake,
         "pre_event_inflation": pre_event,
         "cross_store": anchor,
         "suspicion_flags": flags,
@@ -669,13 +715,18 @@ def _score_pack_group(
             if peer.get("store") != item.get("store") and comparable_selling_price(peer)
         ]
         integrity = offer_integrity(item, peers, entity_confidence=entity_confidence)
-        # Inflación de lista o precio igual al mercado: no vender el −X% comercial
-        # como oferta real. Solo pasa si hay baja verificada genuina vs historial
-        # y además queda bajo la mediana de otras tiendas.
-        if integrity.get("list_inflation") or integrity.get("pre_event_inflation"):
+        # Inflación de lista, fake_discount de venta o precio igual al mercado:
+        # no vender el −X% comercial como oferta real. Solo pasa si hay baja
+        # verificada genuina vs historial y además queda bajo la mediana.
+        if (
+            integrity.get("list_inflation")
+            or integrity.get("fake_discount")
+            or integrity.get("pre_event_inflation")
+        ):
             genuine = (
                 float(integrity.get("real_savings_percent") or 0) >= MIN_OWN_DISCOUNT
                 and not (integrity.get("cross_store") or {}).get("similar_to_market")
+                and not integrity.get("fake_discount")
             )
             if not genuine:
                 continue
@@ -692,10 +743,10 @@ def _score_pack_group(
             comparable_selling_price(item) or _int(item.get("price")),
             _int(item.get("price_normal")),
         )
-        # Si solo «estuvo a precio lleno» porque inflaron la lista, no cuenta.
-        history_ok = bool(was_on) and not integrity.get("list_inflation")
+        # Si solo «estuvo a precio lleno» porque inflaron la lista/venta, no cuenta.
+        history_ok = bool(was_on) and not integrity.get("list_inflation") and not integrity.get("fake_discount")
         if historial and (history_ok or verified_discount >= MIN_OWN_DISCOUNT):
-            if integrity.get("list_inflation") and verified_discount < MIN_OWN_DISCOUNT:
+            if (integrity.get("list_inflation") or integrity.get("fake_discount")) and verified_discount < MIN_OWN_DISCOUNT:
                 pass
             else:
                 kinds.append("historial")
@@ -882,6 +933,7 @@ def _card(
         "was_full_price_on": was_on if "historial" in kinds else None,
         "stores": stores,
         "list_inflation": signals.get("list_inflation"),
+        "fake_discount": signals.get("fake_discount"),
         "pre_event_inflation": signals.get("pre_event_inflation"),
         "cross_store": signals.get("cross_store"),
         "suspicion_flags": signals.get("suspicion_flags") or [],
