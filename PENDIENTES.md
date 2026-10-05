@@ -4,6 +4,8 @@
 
 Este documento reúne trabajo pendiente o que todavía requiere validación. Una tarea solo debe marcarse como terminada después de probarla en el entorno correspondiente.
 
+**Piloto cotizaciones y pendientes recientes:** ver [`docs/PENDIENTES.md`](docs/PENDIENTES.md).
+
 ## Prioridad alta
 
 - [ ] Revisar los cambios locales aún no versionados en `retail/web/auth_api.py`, `retail/web/static/catalogo.html`, `retail/web/static/settings.js` y `tests/test_pricing.py`.

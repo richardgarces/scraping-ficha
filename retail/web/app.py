@@ -103,9 +103,18 @@ def robots() -> PlainTextResponse:
     return PlainTextResponse("User-agent: *\nDisallow: /\n", headers={"Cache-Control": "public, max-age=3600"})
 
 
+def _quotes_api_path(path: str) -> str:
+    if path == "/api/cotizaciones" or path.startswith("/api/cotizaciones/"):
+        return "/api/quotes" + path[len("/api/cotizaciones") :]
+    return path
+
+
 @app.middleware("http")
 async def count_app_requests(request: Request, call_next):
-    if request.url.path.startswith("/api/quotes") and request.method in {"POST", "PUT"}:
+    quoted_path = _quotes_api_path(request.url.path)
+    if quoted_path != request.url.path:
+        request.scope["path"] = quoted_path
+    if quoted_path.startswith("/api/quotes") and request.method in {"POST", "PUT"}:
         if len(await request.body()) > 600_000:
             return JSONResponse({"detail": "La cotización supera el tamaño permitido."}, status_code=413)
     decision = None

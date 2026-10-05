@@ -459,6 +459,27 @@ class ProductRepository:
             self.product_index_queries.create_index([("product_id", ASCENDING), ("created_at", DESCENDING)])
         except OperationFailure:
             pass
+        try:
+            quotes = self.db["business_quotes"]
+            quotes.create_index(
+                [("owner_id", ASCENDING), ("created_at", DESCENDING)],
+                name="business_quote_owner_created",
+            )
+            quotes.create_index(
+                [("owner_id", ASCENDING), ("status", ASCENDING)],
+                name="business_quote_owner_status",
+            )
+            quote_events = self.db["business_quote_events"]
+            quote_events.create_index(
+                [("owner_id", ASCENDING), ("at", DESCENDING)],
+                name="business_quote_event_owner_at",
+            )
+            quote_events.create_index(
+                [("quote_id", ASCENDING), ("at", ASCENDING)],
+                name="business_quote_event_quote_at",
+            )
+        except OperationFailure:
+            pass
         with _INDEX_LOCK:
             _INDEXED_DATABASES.add(index_key)
 

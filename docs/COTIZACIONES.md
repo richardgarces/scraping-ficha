@@ -28,6 +28,14 @@ También se reconoce `descripción`, `precio`, `ean` y sus equivalentes en ingl�
 el dígito verificador GTIN. Máximo 100 productos y 512 KB de CSV; el piloto admite
 200 cotizaciones por cuenta. Las correcciones invalidan las coincidencias anteriores.
 
+## Playbook PDF offline (5 pasos)
+
+1. Obtener el PDF o imagen del proveedor en un entorno con Docling (`pip install -e '.[documents]'` o el entorno `scraping`/Soyo).
+2. Convertir a JSON del piloto: `python scripts/convert_quote_document.py proveedor.pdf --output output/cotizacion.json --title "…" --supplier "…"` (revisar avisos en consola).
+3. Abrir `/cotizaciones`, iniciar sesión con cuenta aprobada, importar el JSON o pegar CSV equivalente.
+4. Confirmar IVA, vigencia y filas con avisos; buscar y confirmar coincidencias por línea.
+5. Exportar CSV de comparación; registrar feedback útil/corrección si aplica. No usar URLs arbitrarias dentro del contenedor web.
+
 ## Conectar scraping/Docling
 
 `scraping/scripts/scrape_and_convert.py` exporta documentos Docling JSON. El puente
@@ -89,6 +97,10 @@ confirmar y las referencias vencidas quedan pendientes: no generan ahorro invent
 
 ## API y métricas
 
+La API canónica es `/api/quotes`. El alias español `/api/cotizaciones` expone las
+mismas rutas (por ejemplo `GET /api/cotizaciones` lista cotizaciones; sin sesión
+responde 401, no 404). La página HTML sigue en `/cotizaciones`.
+
 `POST /api/quotes/import-csv`, `POST /api/quotes`, `GET /api/quotes`,
 `GET/PUT /api/quotes/{id}`, `GET /api/quotes/{id}/candidates/{index}`,
 `PUT /api/quotes/{id}/selection`, `GET /api/quotes/{id}/export.csv` y
@@ -115,9 +127,12 @@ gestionando desde la ficha del producto.
 ```bash
 .venv/bin/python -m pytest tests/test_quotes.py tests/test_quotes_api.py -q
 node --check retail/web/static/cotizaciones.js
-# En un entorno que ya incluya Playwright/Chromium:
-python tests/browser/purchasing_smoke.py
+# En un entorno que ya incluya Playwright/Chromium (no toca producción):
+.venv/bin/python tests/browser/purchasing_smoke.py
 ```
+
+El smoke de navegador intercepta `/api/quotes` con datos sintéticos; requiere
+`playwright install chromium` la primera vez.
 
 La prueba de navegador usa respuestas sintéticas y no modifica producción ni envía avisos.
 

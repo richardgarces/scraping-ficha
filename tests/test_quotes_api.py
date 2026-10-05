@@ -164,6 +164,13 @@ def test_quote_endpoints_require_login(anonymous_repo, monkeypatch):
     assert response.status_code == 401
 
 
+def test_cotizaciones_api_alias_requires_login(anonymous_repo, monkeypatch):
+    monkeypatch.setattr("retail.web.quotes_api.connect_repo", lambda: anonymous_repo)
+    client = TestClient(app)
+    assert client.get("/api/cotizaciones").status_code == 401
+    assert client.get("/api/quotes").status_code == 401
+
+
 def test_oversized_quote_is_rejected_before_processing():
     response = TestClient(app).post("/api/quotes/import-csv", content=b"x" * 600001,
                                    headers={"Content-Type": "application/json"})
