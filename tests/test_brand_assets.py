@@ -110,12 +110,18 @@ def test_home_category_cards_open_the_complete_filtered_catalog():
     assert '$("category-rail").addEventListener("click"' not in script
 
 
-def test_home_category_counts_are_visible_only_to_admins():
+def test_home_category_counts_are_not_rendered():
     script = (STATIC / "app.js").read_text(encoding="utf-8")
-    assert "<small data-category-count data-admin hidden>" in script
-    assert 'user && user.role === "admin"' in script
-    assert "element.hidden = !isAdmin" in script
-    assert "productos</small>" not in script
+    assert "data-category-count" not in script
+    assert "<small data-category-count" not in script
+    assert 'json("/api/explore-categories")' in script
+    assert 'json("/api/catalog?size=1&only_offers=false")' not in script
+    assert "renderCategoryShortcuts(explore.categories || [])" in script
+
+
+def test_home_loads_explore_categories_endpoint():
+    app = (STATIC / "app.js").read_text(encoding="utf-8")
+    assert 'json("/api/explore-categories").catch(() => ({}))' in app
 
 
 def test_catalog_uses_one_main_search_and_collapsible_filters():
@@ -199,12 +205,12 @@ def test_first_search_waits_for_stores_before_elige_tienda_error():
     assert "app.js?v=55" in page
 
 
-def test_refresh_meta_still_fills_stores_if_catalog_fails():
-    """Health/history/catalog must not block fillStores when /api/stores works."""
+def test_refresh_meta_still_fills_stores_if_explore_fails():
+    """Health/history/explore must not block fillStores when /api/stores works."""
     app = (STATIC / "app.js").read_text(encoding="utf-8")
     assert 'json("/api/health").catch(() => ({}))' in app
     assert 'json("/api/history").catch(() => [])' in app
-    assert 'json("/api/catalog?size=1&only_offers=false").catch(() => ({}))' in app
+    assert 'json("/api/explore-categories").catch(() => ({}))' in app
     assert 'json("/api/stores")' in app
     assert "fillStores(stores);" in app
 

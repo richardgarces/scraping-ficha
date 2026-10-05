@@ -23,6 +23,15 @@ HISTORY_LIMIT = 400
 _INDEXED_DATABASES: set[tuple[str, str, str]] = set()
 _INDEX_LOCK = threading.Lock()
 
+# Búsqueda web: no traer miniaturas binarias ni historial (se cargan aparte).
+SEARCH_FIND_PROJECTION: dict[str, int] = {
+    "_id": 0,
+    "thumbnail": 0,
+    "price_history": 0,
+}
+SEARCH_FIND_MAX_TIME_MS = 1200
+SEARCH_FIND_ID_LIMIT = 50
+
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
@@ -217,6 +226,11 @@ class ProductRepository:
         for keys in (
             [("compare_code", ASCENDING), ("price", ASCENDING)],
             [("last_search_query", ASCENDING), ("updated_at", DESCENDING)],
+            # Lookups exactos por id/sku sin forzar COLLSCAN (find_by_query).
+            [("product_id", ASCENDING)],
+            [("sku_id", ASCENDING)],
+            # Facetas / Explora rápido sin COLLSCAN completo.
+            [("catalog_category", ASCENDING)],
         ):
             try:
                 self.collection.create_index(keys)
@@ -840,6 +854,12 @@ class ProductRepository:
                                 "from": self.collection.name,
                                 "localField": "product_id",
                                 "foreignField": "_id",
+                                "pipeline": [
+                                    {"$project": {
+                                        "thumbnail": 0,
+                                        "price_history": 0,
+                                    }},
+                                ],
                                 "as": "product",
                             }
                         },
@@ -1558,37 +1578,112 @@ class ProductRepository:
         return closed
 
     def find_by_query(self, query: str, limit: int = 200) -> list[dict[str, Any]]:
+        """Candidatos para la búsqueda web sin COLLSCAN ni documentos enormes.
+
+        Preferencia (índices): ``last_search_query`` exacto, ``$text`` sobre
+        name/brand/sku_id, ids exactos. El regex multi-campo sin anclar queda
+        solo como fallback si no hubo hits (misma semántica antigua).
+        """
         text = query.strip()
         if not text:
             return []
-        escaped = re.escape(text)
-        cursor = (
-            self.collection.find(
-                {
-                    "$or": [
-                        {"last_search_query": {"$regex": escaped, "$options": "i"}},
-                        {"name": {"$regex": escaped, "$options": "i"}},
-                        {"brand": {"$regex": escaped, "$options": "i"}},
-                        {"sku_id": {"$regex": escaped, "$options": "i"}},
-                        {"product_id": {"$regex": escaped, "$options": "i"}},
-                    ]
-                }
-            )
-            .sort("updated_at", -1)
-            .limit(limit)
-        )
-        rows = []
-        for item in cursor:
-            item.pop("_id", None)
-            rows.append(item)
-        return rows
+        limit = max(1, min(int(limit), 500))
+        seen: dict[tuple[str, str], dict[str, Any]] = {}
+
+        def take(cursor) -> None:
+            for item in cursor:
+                key = (str(item.get("store") or ""), str(item.get("product_id") or ""))
+                if not key[1] or key in seen:
+                    continue
+                item.pop("_id", None)
+                item.pop("score", None)
+                seen[key] = item
+                if len(seen) >= limit:
+                    return
+
+        def run(filter_doc: dict[str, Any], *, sort=None, cap: int | None = None, projection=None) -> None:
+            if len(seen) >= limit:
+                return
+            remaining = limit - len(seen)
+            want = remaining if cap is None else min(remaining, cap)
+            cursor = self.collection.find(filter_doc, projection if projection is not None else SEARCH_FIND_PROJECTION)
+            if sort is not None:
+                cursor = cursor.sort(sort)
+            cursor = cursor.limit(want).max_time_ms(SEARCH_FIND_MAX_TIME_MS)
+            take(cursor)
+
+        # 1) Repeticiones del día / scrapes previos: índice last_search_query+updated_at.
+        try:
+            run({"last_search_query": text}, sort=[("updated_at", -1)])
+        except Exception:
+            pass
+
+        # 2) Índice de texto (name/brand/sku_id) — evita el COLLSCAN del regex.
+        if len(seen) < limit:
+            try:
+                run(
+                    {"$text": {"$search": text}},
+                    sort=[("score", {"$meta": "textScore"})],
+                    projection={**SEARCH_FIND_PROJECTION, "score": {"$meta": "textScore"}},
+                )
+            except Exception:
+                pass
+
+        # 3) Código/sku exacto (consultas de una sola ficha).
+        if " " not in text and len(text) >= 3 and len(seen) < limit:
+            try:
+                run(
+                    {"$or": [{"product_id": text}, {"sku_id": text}]},
+                    cap=SEARCH_FIND_ID_LIMIT,
+                )
+            except Exception:
+                pass
+
+        # 4) Fallback: misma $or regex de antes, solo si no hubo candidatos.
+        if not seen:
+            escaped = re.escape(text)
+            try:
+                run(
+                    {
+                        "$or": [
+                            {"last_search_query": {"$regex": escaped, "$options": "i"}},
+                            {"name": {"$regex": escaped, "$options": "i"}},
+                            {"brand": {"$regex": escaped, "$options": "i"}},
+                            {"sku_id": {"$regex": escaped, "$options": "i"}},
+                            {"product_id": {"$regex": escaped, "$options": "i"}},
+                        ]
+                    },
+                    sort=[("updated_at", -1)],
+                )
+            except Exception:
+                return []
+
+        rows = list(seen.values())
+        rows.sort(key=lambda row: row.get("updated_at") or "", reverse=True)
+        return rows[:limit]
+
+    @staticmethod
+    def _store_product_filter(wanted: list[tuple[str, str]]) -> dict[str, Any]:
+        """Filtro por (store, product_id) agrupando $in por tienda (usa store_product_id)."""
+        by_store: dict[str, list[str]] = {}
+        for store, product_id in wanted:
+            by_store.setdefault(store, []).append(product_id)
+        if len(by_store) == 1:
+            store, product_ids = next(iter(by_store.items()))
+            return {"store": store, "product_id": {"$in": product_ids}}
+        return {
+            "$or": [
+                {"store": store, "product_id": {"$in": product_ids}}
+                for store, product_ids in by_store.items()
+            ]
+        }
 
     def histories(self, keys: list[tuple[str, str]], limit: int = 80) -> dict[tuple[str, str], list[dict[str, Any]]]:
         wanted = [(store, product_id) for store, product_id in keys if store and product_id]
         if not wanted:
             return {}
         cursor = self.collection.find(
-            {"$or": [{"store": store, "product_id": product_id} for store, product_id in wanted]},
+            self._store_product_filter(wanted),
             {"store": 1, "product_id": 1, "price_history": 1},
         )
         found: dict[tuple[str, str], list[dict[str, Any]]] = {}
@@ -1612,7 +1707,7 @@ class ProductRepository:
             return set()
         cursor = self.collection.find(
             {
-                "$or": [{"store": store, "product_id": product_id} for store, product_id in wanted],
+                **self._store_product_filter(wanted),
                 "thumbnail.data": {"$exists": True},
             },
             {"store": 1, "product_id": 1},
@@ -1646,7 +1741,7 @@ class ProductRepository:
         if not pairs:
             return []
         cursor = self.collection.find(
-            {"$or": [{"store": store, "product_id": product_id} for (store, product_id), _ in pairs]},
+            self._store_product_filter([key for key, _ in pairs]),
             {"store": 1, "product_id": 1, "thumbnail.source_url": 1},
         )
         current = {
@@ -2163,7 +2258,16 @@ class ProductRepository:
         *,
         category: str | None = None,
         store: str | None = None,
+        include_counts: bool = False,
+        fields: tuple[str, ...] | None = None,
     ) -> dict[str, list[dict[str, Any]]]:
+        """Facetas del catálogo.
+
+        Por defecto no calcula conteos ($group + $sum sobre products): eso es lo
+        que hace lento «Explora rápido». Con ``include_counts=True`` (admin)
+        se conserva el comportamiento anterior.
+        """
+        wanted = fields or ("categories", "stores", "brands")
         category_filter = catalog_browse_filter(category)
         store_filter = dict(category_filter)
         if store:
@@ -2177,16 +2281,27 @@ class ProductRepository:
             key = {"$toLower": f"${field}"} if fold_case else f"${field}"
             match = dict(base_match or {})
             match.update({field: {"$nin": [None, ""]}, "price": {"$gt": 0}})
-            pipeline = [
-                {"$match": match},
-                {"$group": {"_id": key, "count": {"$sum": 1}, "label": {"$first": f"${field}"}}},
-                {"$sort": {"count": -1}},
-                {"$limit": limit * 3 if field == "catalog_category" else limit},
-            ]
-            rows = [
-                {"value": row.get("label") or row["_id"], "count": row["count"]}
-                for row in self.collection.aggregate(pipeline)
-            ]
+            if include_counts:
+                pipeline = [
+                    {"$match": match},
+                    {"$group": {"_id": key, "count": {"$sum": 1}, "label": {"$first": f"${field}"}}},
+                    {"$sort": {"count": -1}},
+                    {"$limit": limit * 3 if field == "catalog_category" else limit},
+                ]
+            else:
+                # Sin $sum: solo etiquetas para navegar (mucho más barato + cacheable).
+                pipeline = [
+                    {"$match": match},
+                    {"$group": {"_id": key, "label": {"$first": f"${field}"}}},
+                    {"$sort": {"label": 1}},
+                    {"$limit": limit * 3 if field == "catalog_category" else limit},
+                ]
+            rows = []
+            for row in self.collection.aggregate(pipeline):
+                item = {"value": row.get("label") or row["_id"]}
+                if include_counts:
+                    item["count"] = int(row.get("count") or 0)
+                rows.append(item)
             if field != "catalog_category":
                 return rows
             from retail.relevance import fold
@@ -2198,20 +2313,39 @@ class ProductRepository:
                 if current is None:
                     merged[normalized] = dict(row)
                     continue
-                current["count"] += row["count"]
+                if include_counts:
+                    current["count"] = int(current.get("count") or 0) + int(row.get("count") or 0)
                 candidate = str(row["value"])
                 visible = str(current["value"])
                 if (candidate[:1].isupper(), any(ord(char) > 127 for char in candidate)) > (
                     visible[:1].isupper(), any(ord(char) > 127 for char in visible)
                 ):
                     current["value"] = candidate
-            return sorted(merged.values(), key=lambda row: (-row["count"], str(row["value"])))[:limit]
+            if include_counts:
+                return sorted(merged.values(), key=lambda row: (-int(row.get("count") or 0), str(row["value"])))[:limit]
+            return sorted(merged.values(), key=lambda row: str(row["value"]).casefold())[:limit]
 
-        return {
-            "categories": top("catalog_category", fold_case=True),
-            "stores": top("store", base_match=category_filter if category else None),
-            "brands": top("brand", fold_case=True, base_match=store_filter if store else category_filter if category else None),
-        }
+        result: dict[str, list[dict[str, Any]]] = {}
+        if "categories" in wanted:
+            result["categories"] = top("catalog_category", fold_case=True)
+        if "stores" in wanted:
+            result["stores"] = top("store", base_match=category_filter if category else None)
+        if "brands" in wanted:
+            result["brands"] = top(
+                "brand",
+                fold_case=True,
+                base_match=store_filter if store else category_filter if category else None,
+            )
+        return result
+
+    def explore_categories(self, limit: int = 40) -> list[dict[str, Any]]:
+        """Lista liviana para «Explora rápido»: solo value/label, sin counts."""
+        facets = self.browse_facets(limit=limit, include_counts=False, fields=("categories",))
+        return [
+            {"value": item.get("value"), "label": item.get("value")}
+            for item in facets.get("categories") or []
+            if item.get("value")
+        ]
 
     def backfill_categories(self, mapping: dict[str, str]) -> int:
         """Copia la categoría del catálogo a productos guardados antes de tenerla."""

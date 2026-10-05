@@ -421,8 +421,42 @@ def deals(
         repo.close()
 
 
+@router.get("/api/explore-categories")
+def explore_categories(limit: int = Query(default=40, ge=1, le=80)) -> dict:
+    """Categorías para «Explora rápido»: nombre + value, sin counts."""
+    from retail.search_cache import connect_redis
+
+    cache_key = f"explore:categories:v1:{int(limit)}"
+    client = connect_redis()
+    if client is not None:
+        try:
+            raw = client.get(cache_key)
+            if raw:
+                payload = json.loads(raw)
+                if isinstance(payload, dict) and isinstance(payload.get("categories"), list):
+                    payload["cache"] = True
+                    return payload
+        except Exception:
+            pass
+
+    repo = _repo_or_404()
+    try:
+        categories = repo.explore_categories(limit=limit)
+        payload = {"categories": categories, "cache": False}
+        if client is not None:
+            try:
+                # Lista estable: 15 min basta; no incluye precios ni PII.
+                client.setex(cache_key, 900, json.dumps(payload, ensure_ascii=False))
+            except Exception:
+                pass
+        return payload
+    finally:
+        repo.close()
+
+
 @router.get("/api/catalog")
 def catalog(
+    request: Request,
     q: str | None = Query(default=None),
     category: str | None = Query(default=None),
     store: str | None = Query(default=None),
@@ -434,24 +468,31 @@ def catalog(
     sort: str = Query(default="updated"),
     page: int = Query(default=1, ge=1),
     size: int = Query(default=40, ge=1, le=120),
+    include_counts: bool = Query(default=False),
 ) -> dict:
     repo = _repo_or_404()
     try:
-        facets = repo.browse_facets(category=category, store=store)
+        want_counts = False
+        if include_counts:
+            user = current_user(request, repo)
+            want_counts = bool(user and user.get("role") == "admin")
+
+        facets = repo.browse_facets(category=category, store=store, include_counts=want_counts)
         # Si cambió la categoría, un store/brand anterior puede ya no pertenecer
         # a sus facetas; se ignora ese filtro en vez de presentar una página vacía.
         available_stores = {str(item.get("value") or "") for item in facets.get("stores") or []}
         if store and store not in available_stores:
             store = None
-        facets = repo.browse_facets(category=category, store=store)
+            facets = repo.browse_facets(category=category, store=None, include_counts=want_counts)
         available_brands = {
             str(item.get("value") or "").casefold()
             for item in facets.get("brands") or []
         }
         if brand and brand.casefold() not in available_brands:
             brand = None
-        if store or brand:
-            facets = repo.browse_facets(category=category, store=store)
+        if store and brand:
+            # Brands dependen del store elegido; una sola reconsulta si hace falta.
+            facets = repo.browse_facets(category=category, store=store, include_counts=want_counts)
         found = repo.browse(
             text=q,
             category=category,
@@ -472,7 +513,7 @@ def catalog(
             item["display_store"], item["store_title"] = display_store(item, titles)
         for item in facets.get("stores") or []:
             item["label"] = display_store({"store": item.get("value")}, titles)[1]
-        return {**found, "facets": facets}
+        return {**found, "facets": facets, "include_counts": want_counts}
     finally:
         repo.close()
 

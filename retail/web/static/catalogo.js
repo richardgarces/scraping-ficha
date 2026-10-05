@@ -21,7 +21,12 @@ function fillSelect(select, values, anyLabel, { keepMissing = true } = {}) {
   select.innerHTML =
     `<option value="">${anyLabel}</option>` +
     rows
-      .map((item) => `<option value="${attr(item.value)}" ${item.value === selected ? "selected" : ""}>${attr(item.label || item.value)} (${item.count})</option>`)
+      .map((item) => {
+        const label = item.label || item.value;
+        const count = item.count;
+        const text = count == null || count === "" ? label : `${label} (${count})`;
+        return `<option value="${attr(item.value)}" ${item.value === selected ? "selected" : ""}>${attr(text)}</option>`;
+      })
       .join("");
   select.value = selected;
 }

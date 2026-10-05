@@ -21,6 +21,7 @@ TOP_ORIGINS = 12
 _COUNTED_API = (
     "/api/search",
     "/api/catalog",
+    "/api/explore-categories",
     "/api/deals",
     "/api/reales",
     "/api/super",

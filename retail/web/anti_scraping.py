@@ -32,6 +32,7 @@ _AUTOMATION_RE = re.compile(
 _DATA_PREFIXES = (
     "/api/catalog",
     "/api/catalog-insights",
+    "/api/explore-categories",
     "/api/categories",
     "/api/deals",
     "/api/forecasts",

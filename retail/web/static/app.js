@@ -64,24 +64,14 @@ function renderCategoryShortcuts(categories) {
   rail.innerHTML = categories.map((item) => {
     const title = item.label || item.value || "Otros";
     const value = item.value || title;
-    const count = Number(item.count) || 0;
     return `
       <a class="category-shortcut ${categoryIconKind(title)}" href="/catalogo?category=${encodeURIComponent(value)}" role="listitem" aria-label="Ver todos los productos de ${attr(title)}">
         <span class="category-icon" aria-hidden="true"></span>
         <span>${attr(title)}</span>
-        <small data-category-count data-admin hidden>${count.toLocaleString("es-CL")}</small>
       </a>`;
   }).join("");
   section.removeAttribute("aria-busy");
   section.hidden = Boolean(currentQuery);
-  if (typeof ensureUser === "function") {
-    ensureUser().then((user) => {
-      const isAdmin = Boolean(user && user.role === "admin");
-      rail.querySelectorAll("[data-category-count]").forEach((element) => {
-        element.hidden = !isAdmin;
-      });
-    });
-  }
 }
 
 /** True after /api/stores has populated #stores (even if the admin filters UI is hidden). */
@@ -1249,11 +1239,11 @@ function renderExpandedSearchOffer() {
 
 async function refreshMeta() {
   // /api/stores es lo único bloqueante para buscar; el resto no debe impedir fillStores.
-  const [health, stores, history, catalog] = await Promise.all([
+  const [health, stores, history, explore] = await Promise.all([
     json("/api/health").catch(() => ({})),
     json("/api/stores"),
     json("/api/history").catch(() => []),
-    json("/api/catalog?size=1&only_offers=false").catch(() => ({})),
+    json("/api/explore-categories").catch(() => ({})),
   ]);
   const mongo = health.mongo ? `MongoDB ${health.products} productos` : "MongoDB no disponible";
   const qdrant = health.qdrant ? "Qdrant conectado" : "Qdrant no disponible";
@@ -1261,7 +1251,7 @@ async function refreshMeta() {
   console.info(`health ${mongo} · ${qdrant} · ${redis} · ${health.stores ?? "?"} tiendas`);
   fillStores(stores);
   fillHistory(Array.isArray(history) ? history : []);
-  renderCategoryShortcuts(catalog.facets?.categories || []);
+  renderCategoryShortcuts(explore.categories || []);
 }
 
 function withStopped(result) {
