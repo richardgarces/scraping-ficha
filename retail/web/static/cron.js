@@ -36,9 +36,19 @@ const STATUS_LABEL = {
   paused: "Pausado",
   stopping: "Deteniendo",
   stopped: "Detenida",
+  partial: "Parcial hoy",
   done: "Listo hoy",
   failed: "Falló hoy",
 };
+
+function groupIncomplete(group) {
+  if (group.can_continue) return true;
+  const processed = Number(group.last_run?.processed) || 0;
+  const items = Number(group.last_run?.items) || 0;
+  if (items > 0 && processed > 0 && processed < items) return true;
+  if (group.last_run?.budget_exhausted && processed > 0 && (items <= 0 || processed < items)) return true;
+  return false;
+}
 
 function normalizedGroupStatus(status) {
   return STATUS_LABEL[status] ? status : "idle";
@@ -85,10 +95,12 @@ function groupActionsCell(group, paused) {
       ${starting ? "Iniciando…" : "Iniciar ahora"}
     </button>`);
   }
-  if (["failed", "stopped"].includes(status) && groupHasStores(group)) {
+  // Falló / detenida / parcial hoy (presupuesto o X<Y): Continuar + Reiniciar.
+  // «Listo hoy» completo (X>=Y) no ofrece Continuar.
+  if (["failed", "stopped", "partial"].includes(status) && groupHasStores(group)) {
     const starting = startingGroups.has(group.id);
     const processed = Number(group.last_run?.processed) || 0;
-    const canContinue = processed > 0;
+    const canContinue = status === "partial" ? groupIncomplete(group) : processed > 0;
     if (canContinue) {
       const continueTitle = paused
         ? "Reanuda las corridas antes de continuar un grupo."
@@ -104,6 +116,18 @@ function groupActionsCell(group, paused) {
     actions.push(`<button type="button" class="secondary cron-restart" data-start-group="${escapeHtml(group.id)}" data-start-mode="restart"
       title="${escapeHtml(restartTitle)}" aria-label="${escapeHtml(restartTitle)}"${paused || starting ? " disabled" : ""}>
       ${starting ? "Iniciando…" : "Reiniciar"}
+    </button>`);
+  }
+  // Compat: API antigua que aún manda done con progreso incompleto.
+  if (status === "done" && groupHasStores(group) && groupIncomplete(group)) {
+    const starting = startingGroups.has(group.id);
+    const processed = Number(group.last_run?.processed) || 0;
+    const continueTitle = paused
+      ? "Reanuda las corridas antes de continuar un grupo."
+      : `Continuar ${group.title || group.id} desde el producto ${processed}`;
+    actions.push(`<button type="button" class="secondary cron-continue" data-start-group="${escapeHtml(group.id)}" data-start-mode="continue"
+      title="${escapeHtml(continueTitle)}" aria-label="${escapeHtml(continueTitle)}"${paused || starting ? " disabled" : ""}>
+      ${starting ? "Iniciando…" : "Continuar"}
     </button>`);
   }
   if (!actions.length) return "—";
@@ -167,10 +191,11 @@ function storeStatusCell(job) {
       ${stopping ? "Deteniendo…" : "Detener"}
     </button>`);
   }
-  if (["failed", "stopped"].includes(job.status)) {
+  if (["failed", "stopped", "partial"].includes(job.status)) {
     const starting = startingStores.has(job.id);
     const processed = Number(job.last_run?.processed) || 0;
-    if (processed > 0) {
+    const canContinue = job.status === "partial" ? groupIncomplete(job) : processed > 0;
+    if (canContinue) {
       const continueTitle = `Continuar scraping de ${title} desde la consulta ${processed}`;
       actions.push(`<button type="button" class="secondary cron-continue" data-start-store="${escapeHtml(job.id)}" data-start-mode="continue"
         title="${escapeHtml(continueTitle)}" aria-label="${escapeHtml(continueTitle)}"${starting ? " disabled" : ""}>
@@ -185,6 +210,14 @@ function storeStatusCell(job) {
   }
   if (job.status === "done") {
     const starting = startingStores.has(job.id);
+    if (groupIncomplete(job)) {
+      const processed = Number(job.last_run?.processed) || 0;
+      const continueTitle = `Continuar scraping de ${title} desde la consulta ${processed}`;
+      actions.push(`<button type="button" class="secondary cron-continue" data-start-store="${escapeHtml(job.id)}" data-start-mode="continue"
+        title="${escapeHtml(continueTitle)}" aria-label="${escapeHtml(continueTitle)}"${starting ? " disabled" : ""}>
+        ${starting ? "Iniciando…" : "Continuar"}
+      </button>`);
+    }
     const restartTitle = `Reiniciar scraping de ${title} desde el comienzo`;
     actions.push(`<button type="button" class="secondary cron-restart" data-start-store="${escapeHtml(job.id)}" data-start-mode="restart"
       title="${escapeHtml(restartTitle)}" aria-label="${escapeHtml(restartTitle)}"${starting ? " disabled" : ""}>
@@ -278,11 +311,14 @@ function progressCell(group) {
       const items = group.last_run.items || 0;
       return items ? `Detenida en ${processed}/${items} productos` : "Detenida";
     }
-    if (group.status === "done" && group.last_run) {
+    if ((group.status === "done" || group.status === "partial") && group.last_run) {
       const p = group.last_run.processed || 0;
       const t = group.last_run.items || 0;
       const rate = Number(group.last_run.queries_per_minute) || 0;
-      const turn = group.last_run.budget_exhausted ? " · continuará mañana" : "";
+      const incomplete = groupIncomplete(group) || group.status === "partial";
+      const turn = incomplete
+        ? (group.last_run.budget_exhausted ? " · turno por presupuesto" : " · incompleto")
+        : "";
       return t ? `${p}/${t} productos${rate ? ` · ${rate.toLocaleString("es-CL")} consultas/min` : ""}${turn}` : "—";
     }
     return "—";
@@ -648,7 +684,7 @@ function renderStoreJobs(payload) {
   const selected = select?.value || "";
   const live = lastStoreJobs.filter((job) => ["running", "paused"].includes(job.status));
   const visible = displayJobs.filter((job) => {
-    if (["running", "paused", "failed", "stopped", "done"].includes(job.status)) return true;
+    if (["running", "paused", "failed", "stopped", "partial", "done"].includes(job.status)) return true;
     return selected && job.id === selected;
   });
   renderStoreLive(lastStoreJobs);
@@ -730,10 +766,11 @@ function basicStatusCell(job) {
       ${stopping ? "Deteniendo…" : "Detener"}
     </button>`);
   }
-  if (["failed", "stopped"].includes(job.status)) {
+  if (["failed", "stopped", "partial"].includes(job.status)) {
     const starting = startingBasic;
     const processed = Number(job.last_run?.processed) || 0;
-    if (processed > 0) {
+    const canContinue = job.status === "partial" ? groupIncomplete(job) : processed > 0;
+    if (canContinue) {
       const continueTitle = `Continuar scraping básico desde el producto ${processed}`;
       actions.push(`<button type="button" class="secondary cron-continue" data-basic-mode="continue"
         title="${escapeHtml(continueTitle)}" aria-label="${escapeHtml(continueTitle)}"${starting ? " disabled" : ""}>
@@ -748,6 +785,14 @@ function basicStatusCell(job) {
   }
   if (job.status === "done") {
     const starting = startingBasic;
+    if (groupIncomplete(job)) {
+      const processed = Number(job.last_run?.processed) || 0;
+      const continueTitle = `Continuar scraping básico desde el producto ${processed}`;
+      actions.push(`<button type="button" class="secondary cron-continue" data-basic-mode="continue"
+        title="${escapeHtml(continueTitle)}" aria-label="${escapeHtml(continueTitle)}"${starting ? " disabled" : ""}>
+        ${starting ? "Iniciando…" : "Continuar"}
+      </button>`);
+    }
     const restartTitle = "Reiniciar scraping básico desde el comienzo";
     actions.push(`<button type="button" class="secondary cron-restart" data-basic-mode="restart"
       title="${escapeHtml(restartTitle)}" aria-label="${escapeHtml(restartTitle)}"${starting ? " disabled" : ""}>
@@ -766,7 +811,9 @@ function renderBasic(payload) {
   const formActions = $("basic-scrape-actions");
   const running = ["running", "paused"].includes(job.status);
   const failed = ["failed", "stopped"].includes(job.status);
-  const canContinue = failed && (Number(job.last_run?.processed) || 0) > 0;
+  const canContinue =
+    (failed && (Number(job.last_run?.processed) || 0) > 0) ||
+    (["partial", "done"].includes(job.status) && groupIncomplete(job));
   if (!["running", "paused"].includes(job.status)) stoppingBasic = false;
   if (button && button.dataset.busy !== "1") {
     button.disabled = running || startingBasic;
@@ -774,7 +821,7 @@ function renderBasic(payload) {
     else if (canContinue) {
       button.textContent = "Continuar";
       button.dataset.startMode = "continue";
-    } else if (failed || job.status === "done") {
+    } else if (failed || job.status === "done" || job.status === "partial") {
       button.textContent = "Reiniciar";
       button.dataset.startMode = "restart";
     } else {
@@ -881,7 +928,9 @@ function syncRunButton() {
   const running = ["running", "paused"].includes(status);
   const failed = ["failed", "stopped"].includes(status);
   const processed = Number(job?.last_run?.processed) || 0;
-  const canContinue = failed && processed > 0;
+  const canContinue =
+    (failed && processed > 0) ||
+    (["partial", "done"].includes(status) && job && groupIncomplete(job));
   const starting = Boolean(tienda && startingStores.has(tienda));
   const title = job?.title || tienda;
 
@@ -898,7 +947,7 @@ function syncRunButton() {
     button.disabled = false;
     button.textContent = "Continuar";
     button.dataset.startMode = "continue";
-  } else if (failed || status === "done") {
+  } else if (failed || status === "done" || status === "partial") {
     button.disabled = false;
     button.textContent = "Reiniciar";
     button.dataset.startMode = "restart";

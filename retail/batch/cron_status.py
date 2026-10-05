@@ -28,7 +28,7 @@ PHASE_LABELS = {
     "stopped": "Detenida",
     "digest": "Resumen",
     "done": "Listo",
-    "budget_done": "Turno completado",
+    "budget_done": "Turno completado (presupuesto)",
     "failed": "Falló",
 }
 
@@ -74,8 +74,43 @@ def normalize_run_status(raw: str | None) -> str:
     return status or "unknown"
 
 
+def run_products_incomplete(run: dict[str, Any] | None) -> bool:
+    """True si la corrida terminó sin cubrir el catálogo (X < Y productos).
+
+    «Listo hoy» (status done) también se usa cuando el presupuesto diario
+    (batch_budget_minutes) corta el turno: queda budget_exhausted y progreso
+    parcial. Eso no es 100% del catálogo.
+    """
+    if not run:
+        return False
+    items = int(run.get("items") or 0)
+    if items <= 0:
+        return False
+    processed = int(run.get("processed") or 0)
+    return processed < items
+
+
+def run_can_continue(run: dict[str, Any] | None) -> bool:
+    """Continuar tiene sentido si hay avance y aún faltan productos del catálogo."""
+    if not run:
+        return False
+    processed = int(run.get("processed") or 0)
+    if processed <= 0:
+        return False
+    status = normalize_run_status(run.get("status"))
+    if status in {"failed", "stopped"}:
+        return True
+    if status == "done":
+        return run_products_incomplete(run) or bool(run.get("budget_exhausted"))
+    return False
+
+
 def derive_group_status(run: dict[str, Any] | None, *, today: str | None = None) -> str:
-    """idle | running | failed | done — done/failed solo cuentan si la corrida es de hoy (CL)."""
+    """idle | running | failed | stopped | partial | done — terminales solo si son de hoy (CL).
+
+    done = corrida de hoy cerrada con catálogo completo (o sin métrica de items).
+    partial = cerrada hoy pero incompleta (p. ej. presupuesto diario agotado).
+    """
     if not run:
         return "idle"
     status = normalize_run_status(run.get("status"))
@@ -90,6 +125,11 @@ def derive_group_status(run: dict[str, Any] | None, *, today: str | None = None)
     if status == "stopped":
         return "stopped"
     if status == "done":
+        # Presupuesto diario agotado o X < Y → parcial (sigue pudiendo Continuar).
+        if run_products_incomplete(run):
+            return "partial"
+        if bool(run.get("budget_exhausted")) and int(run.get("items") or 0) <= 0:
+            return "partial"
         return "done"
     return "idle"
 
@@ -208,6 +248,7 @@ def build_cron_batch_status(*, repo: Any | None = None, today: str | None = None
                     "label": f"{slot['hour']:02d}:{slot['minute']:02d}",
                 },
                 "status": status,
+                "can_continue": run_can_continue(run) if status in {"partial", "failed", "stopped"} else False,
                 "progress": progress_payload(run) if status in {"running", "paused"} else None,
                 "last_run": public_run_summary(run),
             }
@@ -226,6 +267,7 @@ def build_cron_batch_status(*, repo: Any | None = None, today: str | None = None
                 "title": public_store_label(store_id, titles),
                 "groups": list(run.get("groups") or []),
                 "status": status,
+                "can_continue": run_can_continue(run) if status in {"partial", "failed", "stopped"} else False,
                 "progress": progress_payload(run) if status in {"running", "paused"} else None,
                 "last_run": public_run_summary(run),
             }
@@ -239,6 +281,7 @@ def build_cron_batch_status(*, repo: Any | None = None, today: str | None = None
         "id": "scraping_basico",
         "title": "Scraping básico",
         "status": basic_status,
+        "can_continue": run_can_continue(basic_run) if basic_status in {"partial", "failed", "stopped"} else False,
         "progress": progress_payload(basic_run) if basic_status in {"running", "paused"} else None,
         "last_run": public_run_summary(basic_run),
     }

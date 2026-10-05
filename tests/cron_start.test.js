@@ -31,7 +31,14 @@ test("solo los grupos en espera y con tiendas ofrecen iniciar", () => {
   assert.match(idle, /Iniciar ahora/);
   assert.match(idle, /data-start-group="retail"/);
   assert.doesNotMatch(idle, / disabled/);
-  assert.doesNotMatch(cron.groupActionsCell({ ...group, status: "done" }, false), /data-start-group/);
+  assert.doesNotMatch(
+    cron.groupActionsCell({
+      ...group,
+      status: "done",
+      last_run: { processed: 100, items: 100 },
+    }, false),
+    /data-start-group/,
+  );
   for (const status of ["running", "paused"]) {
     const cell = cron.groupActionsCell({ ...group, status, progress: { phase: "products" } }, false);
     assert.match(cell, /data-stop-group="retail"/);
@@ -79,6 +86,35 @@ test("un grupo fallido ofrece continuar y reiniciar", () => {
   }, false);
   assert.match(stopped, /Continuar/);
   assert.match(stopped, /Reiniciar/);
+});
+
+test("parcial hoy (presupuesto) ofrece Continuar; completo no", () => {
+  const cron = loadCron();
+  assert.match(cron.groupStatusCell({ ...group, status: "partial" }), /Parcial hoy/);
+  const partial = cron.groupActionsCell({
+    ...group,
+    status: "partial",
+    can_continue: true,
+    last_run: { processed: 1778, items: 22499, budget_exhausted: true },
+  }, false);
+  assert.match(partial, /data-start-mode="continue"/);
+  assert.match(partial, /Continuar/);
+  assert.match(partial, /data-start-mode="restart"/);
+  const pausedPartial = cron.groupActionsCell({
+    ...group,
+    status: "partial",
+    can_continue: true,
+    last_run: { processed: 480, items: 1292, budget_exhausted: true },
+  }, true);
+  assert.match(pausedPartial, / disabled/);
+  assert.match(pausedPartial, /Reanuda las corridas/);
+  const complete = cron.groupActionsCell({
+    ...group,
+    status: "done",
+    last_run: { processed: 22499, items: 22499, budget_exhausted: false },
+  }, false);
+  assert.doesNotMatch(complete, /data-start-mode="continue"/);
+  assert.doesNotMatch(complete, /Continuar/);
 });
 
 test("doble clic y redibujado no duplican la solicitud", async () => {
@@ -151,10 +187,21 @@ test("scraping de tienda ofrece detener, continuar y reiniciar según estado", (
   assert.match(stopped, /data-start-mode="restart"/);
   assert.match(stopped, /Reiniciar/);
 
-  const done = cron.storeStatusCell({ ...job, status: "done", last_run: { processed: 2296 } });
+  const done = cron.storeStatusCell({
+    ...job,
+    status: "done",
+    last_run: { processed: 2296, items: 2296 },
+  });
   assert.doesNotMatch(done, /data-start-mode="continue"/);
   assert.match(done, /data-start-mode="restart"/);
   assert.match(done, /Reiniciar/);
+  const partialStore = cron.storeStatusCell({
+    ...job,
+    status: "partial",
+    can_continue: true,
+    last_run: { processed: 100, items: 500, budget_exhausted: true },
+  });
+  assert.match(partialStore, /data-start-mode="continue"/);
 
   const idle = cron.storeStatusCell({ id: "acqui", title: "Acqui", status: "idle" });
   assert.match(idle, /data-start-store="acqui"/);
@@ -268,7 +315,20 @@ test("el formulario de tienda pasa a Continuar, Reiniciar o Detener según el es
   assert.match(actions.innerHTML, /data-start-mode="restart"/);
   assert.match(actions.innerHTML, /Reiniciar/);
 
-  vm.runInContext(`lastStoreJobs[0].status = "done"`, cron);
+  vm.runInContext(`lastStoreJobs[0].status = "partial"`, cron);
+  cron.syncRunButton();
+  assert.equal(button.textContent, "Continuar");
+  assert.equal(button.dataset.startMode, "continue");
+
+  vm.runInContext(
+    `lastStoreJobs[0] = ${JSON.stringify({
+      id: "doite",
+      title: "Doite",
+      status: "done",
+      last_run: { processed: 2324, items: 2324 },
+    })}`,
+    cron,
+  );
   cron.syncRunButton();
   assert.equal(button.textContent, "Reiniciar");
   assert.equal(button.dataset.startMode, "restart");
@@ -322,7 +382,11 @@ test("scraping básico ofrece detener, continuar y reiniciar según estado", () 
   assert.match(stopped, /data-basic-mode="restart"/);
   assert.match(stopped, /Reiniciar/);
 
-  const done = cron.basicStatusCell({ ...job, status: "done", last_run: { processed: 202001 } });
+  const done = cron.basicStatusCell({
+    ...job,
+    status: "done",
+    last_run: { processed: 202001, items: 202001 },
+  });
   assert.doesNotMatch(done, /data-basic-mode="continue"/);
   assert.match(done, /data-basic-mode="restart"/);
 });

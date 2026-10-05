@@ -2151,9 +2151,11 @@ tr.cron-store-selected td { background: color-mix(in srgb, var(--accent, #2563eb
 td.num { font-variant-numeric: tabular-nums; text-align: right; }
 .badge.status-idle { background: transparent; border: 1px solid var(--line); color: var(--muted); }
 .badge.status-running { background: #3d2f17; color: var(--warn); }
+.badge.status-partial { background: color-mix(in srgb, var(--warn) 22%, var(--panel-2)); color: var(--warn); }
 .badge.status-done { background: var(--accent-dim); color: var(--accent); }
 .badge.status-failed { background: #402020; color: var(--danger); }
 html[data-theme="day"] .badge.status-running { background: #fff3d6; color: #9a6200; }
+html[data-theme="day"] .badge.status-partial { background: #fff3d6; color: #9a6200; }
 html[data-theme="day"] .badge.status-failed { background: #fde8e8; color: #b42323; }
 
 @media (max-width: 700px) {

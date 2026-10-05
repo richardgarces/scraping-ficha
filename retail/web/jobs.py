@@ -62,8 +62,16 @@ def start_group_batch(grupo: str, *, mode: str | None = None) -> dict[str, Any]:
         if action == "restart" and hasattr(repo, "clear_group_batch_cursor"):
             repo.clear_group_batch_cursor(group)
         elif action == "continue":
+            from retail.batch.group_scope import batch_cursor_key
+
             previous = repo.latest_group_batch_run(group) if hasattr(repo, "latest_group_batch_run") else None
-            product = resume_product_id(previous)
+            # Preferir cursor del turno (next_id tras presupuesto) a rehacer la última búsqueda.
+            product = None
+            if hasattr(repo, "get_app_setting"):
+                cursor = repo.get_app_setting(batch_cursor_key(group)) or {}
+                product = str(cursor.get("next_id") or "").strip() or None
+            if not product:
+                product = resume_product_id(previous)
             if not product:
                 raise GroupBatchNothingToResume(group)
             repo.set_group_batch_cursor(group, product)

@@ -10,6 +10,8 @@ from retail.batch.cron_status import (
     build_cron_batch_status,
     derive_group_status,
     progress_payload,
+    run_can_continue,
+    run_products_incomplete,
 )
 from retail.batch.schedule import group_slots
 from retail.web.app import app
@@ -262,8 +264,26 @@ def test_derive_group_status_today():
     assert progress["processed"] == 3
     assert progress["percent"] == 30.0
 
-    done_today = {"status": "done", "started_at": "2026-09-15T09:00:00-03:00"}
+    done_today = {
+        "status": "done",
+        "started_at": "2026-09-15T09:00:00-03:00",
+        "processed": 10,
+        "items": 10,
+    }
     assert derive_group_status(done_today, today=today) == "done"
+    assert run_can_continue(done_today) is False
+
+    partial_budget = {
+        "status": "done",
+        "started_at": "2026-09-15T09:00:00-03:00",
+        "processed": 1778,
+        "items": 22499,
+        "budget_exhausted": True,
+        "phase": "budget_done",
+    }
+    assert run_products_incomplete(partial_budget) is True
+    assert derive_group_status(partial_budget, today=today) == "partial"
+    assert run_can_continue(partial_budget) is True
 
     failed_legacy = {"status": "error", "started_at": "2026-09-15T09:00:00-03:00"}
     assert derive_group_status(failed_legacy, today=today) == "failed"

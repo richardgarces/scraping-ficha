@@ -228,6 +228,37 @@ def test_continue_places_cursor_on_last_progress(group_job):
     assert group_job.runs[0]["resume_mode"] == "continue"
 
 
+def test_continue_prefers_saved_budget_cursor(group_job):
+    group_job.repo.get_app_setting = lambda key: {
+        "next_id": "prod-next-after-budget",
+        "budget_exhausted": True,
+    }
+    group_job.repo.latest_group_batch_run = lambda group: {
+        "status": "done",
+        "processed": 1778,
+        "items": 22499,
+        "budget_exhausted": True,
+        "searches": [{"id": "prod-last-done"}],
+        "current_id": None,
+    }
+    result = jobs.start_group_batch("retail", mode="continue")
+    assert result["mode"] == "continue"
+    assert group_job.cursors == [("set", "retail", "prod-next-after-budget")]
+
+
+def test_continue_incomplete_done_run_allowed(group_job):
+    group_job.repo.latest_group_batch_run = lambda group: {
+        "status": "done",
+        "processed": 480,
+        "items": 1292,
+        "budget_exhausted": True,
+        "searches": [{"id": "farm-resume"}],
+    }
+    result = jobs.start_group_batch("retail", mode="continue")
+    assert result["ok"] is True
+    assert group_job.cursors == [("set", "retail", "farm-resume")]
+
+
 def test_restart_clears_cursor(group_job):
     result = jobs.start_group_batch("retail", mode="restart")
     assert result["mode"] == "restart"
