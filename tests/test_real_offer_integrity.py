@@ -3,9 +3,11 @@
 from datetime import datetime, timedelta, timezone
 
 from retail.reales import (
+    comparable_selling_price,
     cross_store_anchor,
     detect_list_inflation,
     detect_pre_event_inflation,
+    is_payment_restricted,
     offer_integrity,
     pick_real_offer,
 )
@@ -167,3 +169,81 @@ def test_cyber_like_pre_event_inflation():
     )
     # No debe vender el −21% comercial como oferta real sin baja genuina.
     assert deal is None
+
+
+def test_card_only_price_is_payment_restricted_not_real_offer():
+    """Solo precio con tarjeta: no comparable; no gana como oferta real."""
+    card_only = _offer(
+        store="falabella",
+        product_id="a",
+        price=6000,
+        price_card=6000,
+        payment_card_name="CMR Falabella",
+        price_normal=10000,
+        # Sin price_all_payment / price_internet.
+    )
+    assert is_payment_restricted(card_only) is True
+    assert comparable_selling_price(card_only) == 0
+    deal = pick_real_offer(
+        [
+            card_only,
+            _offer(store="ripley", product_id="b", price=10000, price_normal=10000, price_all_payment=10000),
+        ],
+        comparacion=True,
+        historial=False,
+    )
+    assert deal is None
+
+
+def test_all_payment_beats_card_discount_for_real_offer_score():
+    """Score usa todo medio; tarjeta más baja se muestra pero no define la oferta."""
+    deal = pick_real_offer(
+        [
+            _offer(
+                store="falabella",
+                product_id="a",
+                price=7000,
+                price_all_payment=7000,
+                price_card=5000,
+                payment_card_name="CMR Falabella",
+                price_normal=10000,
+            ),
+            _offer(
+                store="ripley",
+                product_id="b",
+                price=10000,
+                price_all_payment=10000,
+                price_normal=10000,
+            ),
+        ],
+        comparacion=True,
+        historial=False,
+    )
+    assert deal is not None
+    assert deal["store"] == "falabella"
+    assert deal["price"] == 7000
+    assert deal["price_all_payment"] == 7000
+    assert deal["price_card"] == 5000
+    assert deal["price_basis"] == "all_payment"
+    assert deal["payment_restricted"] is False
+    assert "tarjeta" in (deal.get("reason") or "").lower() or deal["price_card"] == 5000
+
+
+def test_card_coupon_basis_without_all_payment_excluded():
+    restricted = _offer(
+        store="paris",
+        product_id="c",
+        price=5500,
+        price_basis="card",
+        payment_card_name="Cencosud",
+        price_normal=10000,
+    )
+    assert is_payment_restricted(restricted) is True
+    assert pick_real_offer(
+        [
+            restricted,
+            _offer(store="ripley", product_id="d", price=10000, price_all_payment=10000, price_normal=10000),
+        ],
+        comparacion=True,
+        historial=False,
+    ) is None

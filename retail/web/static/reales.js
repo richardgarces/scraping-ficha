@@ -71,12 +71,16 @@ function storeLine(row) {
     row.best_price ? '<span class="badge off">Mejor precio</span>' : "",
     row.strongest_verified ? '<span class="badge">Mayor baja comprobada</span>' : "",
     row.strongest_published ? '<span class="badge ghost">Mayor descuento publicado</span>' : "",
+    row.payment_restricted ? '<span class="badge ghost">Solo tarjeta</span>' : "",
   ].filter(Boolean).join(" ");
   const ficha = row.product_id
     ? `/producto?store=${encodeURIComponent(row.store)}&id=${encodeURIComponent(row.product_id)}`
     : "";
   const verified = row.verified_discount > 0 ? `<small>${Math.round(row.verified_discount)}% vs historial</small>` : "";
-  const inner = `<span class="compare-store-brand">${storeLogo(row.display_store || row.store, title)}</span><span class="compare-store-value"><span class="price">${money(row.price)}</span>${off}${verified}${labels}</span>`;
+  const cardNote = row.price_card && row.price_card !== row.price
+    ? `<small>Con tarjeta ${attr(row.payment_card_name || "")}: ${money(row.price_card)}</small>`
+    : "";
+  const inner = `<span class="compare-store-brand">${storeLogo(row.display_store || row.store, title)}</span><span class="compare-store-value"><span class="price">${money(row.price)}</span>${off}${verified}${cardNote}${labels}</span>`;
   if (ficha) {
     return `<li class="${row.win ? "win" : ""}"><a href="${attr(ficha)}">${inner}</a></li>`;
   }
@@ -124,8 +128,11 @@ function dealCard(item) {
         <div class="deal-kinds">${kinds}${market}${identity}</div>
         <div class="deal-prices">
           <div>
-            <span class="deal-label">Oferta</span>
+            <span class="deal-label">Todo medio</span>
             <span class="price">${money(item.price)}</span>
+            ${item.price_card && item.price_card !== item.price
+              ? `<small class="muted">Con tarjeta ${attr(item.payment_card_name || "")}: ${money(item.price_card)} (no comparable)</small>`
+              : ""}
           </div>
           <div>
             <span class="deal-label">Otra tienda</span>

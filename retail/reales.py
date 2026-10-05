@@ -87,9 +87,61 @@ def is_super_offer(card: dict[str, Any] | None, threshold: float = MIN_SUPER_PER
     return gap > threshold or discount > threshold
 
 
+def all_payment_price(item: dict[str, Any] | None) -> int | None:
+    """Precio para todo medio de pago (comparable entre tiendas)."""
+    if not item:
+        return None
+    return _int(item.get("price_all_payment")) or _int(item.get("price_internet"))
+
+
+def card_price(item: dict[str, Any] | None) -> int | None:
+    if not item:
+        return None
+    return _int(item.get("price_card")) or _int(item.get("price_cmr"))
+
+
+def is_payment_restricted(item: dict[str, Any] | None) -> bool:
+    """True si el aviso solo cotiza con tarjeta/cupón (sin precio todo medio).
+
+    Ese precio no es comparable como oferta real: exige un medio de pago
+    concreto y no debe ganar el ranking frente a un precio para todo medio.
+    """
+    if not item:
+        return False
+    if all_payment_price(item):
+        return False
+    basis = str(item.get("price_basis") or "").strip().casefold()
+    if basis in {"card", "coupon", "cupon", "tarjeta"}:
+        return True
+    card = card_price(item)
+    price = _int(item.get("price"))
+    # Solo hay precio con tarjeta (o el publicado coincide con la tarjeta).
+    if card and (price is None or price == card):
+        return True
+    return False
+
+
+def comparable_selling_price(item: dict[str, Any] | None) -> int:
+    """Precio usado para score/brecha de oferta real: siempre todo medio.
+
+    Si solo hay tarjeta/cupón, devuelve 0 (no comparable).
+    No incluye despacho: eso va en ``_comparison_price`` vía ``_selling_price``.
+    """
+    if not item:
+        return 0
+    all_pay = all_payment_price(item)
+    if all_pay:
+        return all_pay
+    if is_payment_restricted(item):
+        return 0
+    return _int(item.get("price")) or 0
+
+
 def own_discount_percent(item: dict[str, Any]) -> float:
     normal = _int(item.get("price_normal"))
-    price = _int(item.get("price"))
+    price = comparable_selling_price(item) or _int(item.get("price"))
+    if is_payment_restricted(item):
+        return 0.0
     if not normal or not price or normal <= price:
         return 0.0
     return round((normal - price) * 100 / normal, 1)
@@ -97,7 +149,9 @@ def own_discount_percent(item: dict[str, Any]) -> float:
 
 def verified_discount_percent(item: dict[str, Any]) -> float:
     """Baja contra precios realmente observados, no contra el 'antes' de vitrina."""
-    current = _int(item.get("price"))
+    if is_payment_restricted(item):
+        return 0.0
+    current = comparable_selling_price(item) or _int(item.get("price"))
     rows = series(item.get("price_history"))
     previous = [price for _moment, price in rows if price and price != current]
     if not current or len(previous) < 2:
@@ -313,8 +367,13 @@ def cross_store_anchor(
     """Ancla el «ahorro real» vs mediana/mínimo de otras tiendas (confianza ≥ 80%)."""
     if entity_confidence < MIN_ENTITY_CONFIDENCE:
         return None
-    price = _selling_price(item)
-    others = [_selling_price(peer) for peer in peers if _selling_price(peer)]
+    price = comparable_selling_price(item) or _selling_price(item)
+    others = [
+        comparable_selling_price(peer) or _selling_price(peer)
+        for peer in peers
+        if (comparable_selling_price(peer) or _selling_price(peer))
+        and not is_payment_restricted(peer)
+    ]
     if not price or len(others) < 1:
         return None
     peer_min = min(others)
@@ -455,8 +514,8 @@ def previous_full_price_day(
 
 
 def prices_are_same(left: dict[str, Any], right: dict[str, Any]) -> bool:
-    first = _int(left.get("price"))
-    second = _int(right.get("price"))
+    first = comparable_selling_price(left) or _int(left.get("price"))
+    second = comparable_selling_price(right) or _int(right.get("price"))
     if not first or not second:
         return False
     high, low = max(first, second), min(first, second)
@@ -507,9 +566,9 @@ def collapse_store_prices(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         buckets[(str(row.get("store") or ""), pack_of(row))].append(row)
     collapsed: list[dict[str, Any]] = []
     for group in buckets.values():
-        group.sort(key=lambda row: _int(row.get("price")) or 10**12)
+        group.sort(key=lambda row: comparable_selling_price(row) or _int(row.get("price")) or 10**12)
         collapsed.append(dict(group[0]))
-    collapsed.sort(key=lambda row: _int(row.get("price")) or 10**12)
+    collapsed.sort(key=lambda row: comparable_selling_price(row) or _int(row.get("price")) or 10**12)
     return collapsed
 
 
@@ -526,7 +585,7 @@ def pick_real_offer(
     shown = [
         item
         for item in collapse_variants(offers)
-        if _int(item.get("price")) and not is_agotado(item)
+        if (comparable_selling_price(item) or _int(item.get("price"))) and not is_agotado(item)
     ]
     ranked: list[dict[str, Any]] = []
     by_pack: dict[tuple[tuple[str, ...], str], list[dict[str, Any]]] = defaultdict(list)
@@ -575,11 +634,15 @@ def _score_pack_group(
     iguales: bool,
 ) -> dict[str, Any] | None:
     by_store = collapse_store_prices(shown)
-    priced = [item for item in collapse_sisters(by_store) if _int(item.get("price"))]
+    priced = [
+        item for item in collapse_sisters(by_store)
+        if comparable_selling_price(item) or _int(item.get("price"))
+    ]
     use_landed = shipping_comparable(priced)
     if use_landed:
         for item in priced:
-            item["_comparison_price"] = (_int(item.get("price")) or 0) + (_int(item.get("shipping_cost")) or 0)
+            base = comparable_selling_price(item) or _int(item.get("price")) or 0
+            item["_comparison_price"] = base + (_int(item.get("shipping_cost")) or 0)
     if len({item.get("store") for item in by_store}) < 2:
         return None
     # Confianza por similitud de nombre/identidad entre tiendas, no por el
@@ -588,17 +651,23 @@ def _score_pack_group(
     if entity_confidence < MIN_ENTITY_CONFIDENCE:
         return None
 
-    best_price_item = min(priced, key=_selling_price)
-    published_winner = max(priced, key=own_discount_percent)
-    verified_winner = max(priced, key=verified_discount_percent)
+    comparable = [item for item in priced if comparable_selling_price(item) and not is_payment_restricted(item)]
+    if not comparable:
+        return None
+    best_price_item = min(comparable, key=_selling_price)
+    published_winner = max(comparable, key=own_discount_percent)
+    verified_winner = max(comparable, key=verified_discount_percent)
 
     ranked: list[dict[str, Any]] = []
-    for item in priced:
+    for item in comparable:
         discount = own_discount_percent(item)
         verified_discount = verified_discount_percent(item)
         if discount < MIN_OWN_DISCOUNT and verified_discount < MIN_OWN_DISCOUNT:
             continue
-        peers = [peer for peer in priced if peer.get("store") != item.get("store") and _int(peer.get("price"))]
+        peers = [
+            peer for peer in comparable
+            if peer.get("store") != item.get("store") and comparable_selling_price(peer)
+        ]
         integrity = offer_integrity(item, peers, entity_confidence=entity_confidence)
         # Inflación de lista o precio igual al mercado: no vender el −X% comercial
         # como oferta real. Solo pasa si hay baja verificada genuina vs historial
@@ -620,7 +689,7 @@ def _score_pack_group(
             kinds.append("comparacion")
         was_on = previous_full_price_day(
             item.get("price_history"),
-            _int(item.get("price")),
+            comparable_selling_price(item) or _int(item.get("price")),
             _int(item.get("price_normal")),
         )
         # Si solo «estuvo a precio lleno» porque inflaron la lista, no cuenta.
@@ -666,26 +735,36 @@ def _same_price_listing(item: dict[str, Any], shown: list[dict[str, Any]]) -> bo
 
 
 def _cheapest_other(item: dict[str, Any], rows: list[dict[str, Any]]) -> dict[str, Any] | None:
-    others = [row for row in rows if row.get("store") != item.get("store") and _int(row.get("price"))]
+    others = [
+        row for row in rows
+        if row.get("store") != item.get("store")
+        and (comparable_selling_price(row) or _int(row.get("price")))
+        and not is_payment_restricted(row)
+    ]
     if not others:
         return None
     return min(others, key=lambda row: _selling_price(row) or 10**12)
 
 
 def _selling_price(item: dict[str, Any]) -> int:
-    return _int(item.get("_comparison_price")) or _int(item.get("price")) or 0
+    """Precio de comparación: landed si aplica, si no todo medio."""
+    if item.get("_comparison_price"):
+        return _int(item.get("_comparison_price")) or 0
+    return comparable_selling_price(item) or _int(item.get("price")) or 0
 
 
 def _peers_at_list(item: dict[str, Any], peers: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Otra tienda que *cobra* cerca del precio normal de esta (no el 'antes' de vitrina)."""
     normal = _int(item.get("price_normal"))
-    price = _int(item.get("price"))
+    price = comparable_selling_price(item) or _int(item.get("price"))
     if not normal or not price:
         return []
     floor_list = normal * PEER_AT_LIST
     floor_gap = price * (1 + MIN_SELLING_GAP)
     found = []
     for peer in peers:
+        if is_payment_restricted(peer):
+            continue
         selling = _selling_price(peer)
         if selling >= floor_list and selling >= floor_gap:
             found.append(peer)
@@ -697,7 +776,10 @@ def _peers_more_expensive(item: dict[str, Any], peers: list[dict[str, Any]]) -> 
     if not price:
         return []
     floor = price * (1 + MIN_SELLING_GAP)
-    return [peer for peer in peers if _selling_price(peer) >= floor]
+    return [
+        peer for peer in peers
+        if not is_payment_restricted(peer) and _selling_price(peer) >= floor
+    ]
 
 
 def _card(
@@ -715,9 +797,9 @@ def _card(
     verified_winner: dict[str, Any],
     integrity: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    price = _int(item.get("price")) or 0
+    price = comparable_selling_price(item) or _int(item.get("price")) or 0
     normal = _int(item.get("price_normal"))
-    rival_price = _int(rival.get("price")) or 0
+    rival_price = comparable_selling_price(rival) or _int(rival.get("price")) or 0
     rival_comparison = _selling_price(rival)
     vs_rival = round(gap * 100 / rival_comparison, 1) if rival_comparison else 0.0
     stores = [
@@ -731,7 +813,10 @@ def _card(
                 and verified_discount_percent(verified_winner) > 0
             ),
         )
-        for row in sorted(peers, key=lambda row: _int(row.get("price")) or 10**12)
+        for row in sorted(
+            peers,
+            key=lambda row: comparable_selling_price(row) or _int(row.get("price")) or 10**12,
+        )
     ]
     verified_discount = verified_discount_percent(item)
     market_best = _product_key(item) == _product_key(best_price_item)
@@ -742,6 +827,8 @@ def _card(
     signals = integrity or {}
     real_savings = float(signals.get("real_savings_percent") or verified_discount or 0)
     commercial = float(signals.get("commercial_discount") or discount or 0)
+    card = card_price(item)
+    all_pay = all_payment_price(item) or price
     score = round(
         (40.0 if market_best else 0.0)
         + 30.0 * min(1.0, real_savings / 30.0)
@@ -763,6 +850,11 @@ def _card(
         "url": item.get("url"),
         "has_thumb": bool(item.get("has_thumb")),
         "price": price,
+        "price_all_payment": all_pay,
+        "price_card": card,
+        "payment_card_name": item.get("payment_card_name"),
+        "payment_restricted": False,
+        "price_basis": "all_payment",
         "total_price": _selling_price(item) if item.get("_comparison_price") else None,
         "price_normal": normal,
         "discount": discount,
@@ -778,7 +870,7 @@ def _card(
         "comparison_basis": "landed_price" if item.get("_comparison_price") else "product_price",
         "market_best": market_best,
         "best_price_store": best_price_item.get("store"),
-        "best_price": _int(best_price_item.get("price")),
+        "best_price": comparable_selling_price(best_price_item) or _int(best_price_item.get("price")),
         "best_total_price": _selling_price(best_price_item) if best_price_item.get("_comparison_price") else None,
         "strongest_published_store": published_winner.get("store"),
         "strongest_published_discount": own_discount_percent(published_winner),
@@ -803,11 +895,18 @@ def _store_row(
     item: dict[str, Any], *, win: bool, best_price: bool = False,
     strongest_published: bool = False, strongest_verified: bool = False,
 ) -> dict[str, Any]:
+    price = comparable_selling_price(item) or _int(item.get("price"))
+    restricted = is_payment_restricted(item)
     return {
         "store": item.get("store"),
         "product_id": item.get("product_id"),
         "url": item.get("url"),
-        "price": _int(item.get("price")),
+        "price": price,
+        "price_all_payment": all_payment_price(item) or (None if restricted else price),
+        "price_card": card_price(item),
+        "payment_card_name": item.get("payment_card_name"),
+        "payment_restricted": restricted,
+        "price_basis": "card" if restricted else "all_payment",
         "total_price": _selling_price(item) if item.get("_comparison_price") else None,
         "shipping_cost": _int(item.get("shipping_cost")),
         "price_normal": _int(item.get("price_normal")),
@@ -837,13 +936,15 @@ def _reason(
 ) -> str:
     store = item.get("store") or "esta tienda"
     other = rival.get("store") or "otra tienda"
-    price = _int(item.get("price"))
+    price = comparable_selling_price(item) or _int(item.get("price"))
     normal = _int(item.get("price_normal"))
-    rival_price = _int(rival.get("price"))
+    rival_price = comparable_selling_price(rival) or _int(rival.get("price"))
     parts = []
     signals = integrity or {}
     commercial = float(signals.get("commercial_discount") or discount or 0)
     real = float(signals.get("real_savings_percent") or 0)
+    card = card_price(item)
+    card_name = item.get("payment_card_name") or "tarjeta de la tienda"
     if signals.get("suspicion_labels"):
         parts.append(
             "Cuidado: "
@@ -852,11 +953,15 @@ def _reason(
         )
     if "comparacion" in kinds:
         parts.append(
-            f"En {store} cuesta {_clp(price)} "
+            f"En {store} cuesta {_clp(price)} para todo medio de pago "
             f"(descuento comercial {commercial:.0f}% sobre {_clp(normal)}; "
             f"ahorro real ~{real:.0f}%). "
             f"El mismo producto en {other} se vende a {_clp(rival_price)}."
         )
+        if card and card < price:
+            parts.append(
+                f"Con {card_name} baja a {_clp(card)}; ese precio no cuenta como oferta real comparable."
+            )
     if "historial" in kinds:
         when = f"el {was_on}" if was_on and was_on != "antes" else "antes"
         parts.append(

@@ -12,7 +12,15 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from retail.compare import cluster_offer_rows
-from retail.reales import MIN_ENTITY_CONFIDENCE, is_agotado, pick_real_offer
+from retail.reales import (
+    MIN_ENTITY_CONFIDENCE,
+    all_payment_price,
+    card_price,
+    comparable_selling_price,
+    is_agotado,
+    is_payment_restricted,
+    pick_real_offer,
+)
 
 CHILE = ZoneInfo("America/Santiago")
 CRITERION_VERSION = "real-offer-v2"
@@ -167,15 +175,23 @@ def classify_claimed(repo: Any, jobs: list[dict[str, Any]]) -> dict[str, int]:
         try:
             product = next((row for row in docs if row.get("_id") == job["product_id"]), None)
             is_real, card, reason = results[job["product_id"]]
-            evaluated_price = int((product or {}).get("price") or job.get("price") or 0)
+            evaluated_price = int(
+                comparable_selling_price(product or {})
+                or (product or {}).get("price")
+                or job.get("price")
+                or 0
+            )
             marker = {
                 "product_id": job["product_id"],
                 "day": job["day"],
                 "is_real": is_real,
                 "evaluated_price": evaluated_price,
                 "evaluated_price_normal": int((product or {}).get("price_normal") or job.get("price_normal") or 0),
+                "evaluated_price_all_payment": all_payment_price(product or {}),
+                "evaluated_price_card": card_price(product or {}),
+                "payment_restricted": is_payment_restricted(product or {}),
                 "price_signature": job["price_signature"],
-                "reason": reason,
+                "reason": reason if not is_payment_restricted(product or {}) or is_real else "payment_restricted",
                 "criterion_version": CRITERION_VERSION,
                 "evaluated_at": now,
                 "job_id": job["_id"],

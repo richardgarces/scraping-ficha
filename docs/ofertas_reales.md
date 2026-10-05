@@ -56,8 +56,10 @@ Constantes en `retail/reales.py`: `MIN_OWN_DISCOUNT=10`, `PEER_AT_LIST=0.90`, `M
 
 - **Comercial (publicado):** `(price_normal − price) / price_normal`. Es el cartel de la tienda.
 - **Ahorro real:** baja respecto a la mediana de precios **realmente vistos** y/o vs mediana/mínimo de otras tiendas con identidad ≥ 80%. No depende del “antes” inflado.
+- **Precio comparable:** siempre el **precio para todo medio de pago** (`price_all_payment` / internet). El precio con tarjeta o cupón (`price_card`) se muestra aparte y **no** define el score ni la brecha de oferta real.
+- **Solo tarjeta (`payment_restricted`):** si el aviso no tiene precio todo medio y solo cotiza con tarjeta/cupón, se marca y **se excluye** de «oferta real» (no comparable entre tiendas).
 
-Para entrar hace falta comercial ≥ 10% **o** verificado ≥ 10%, y además superar los filtros anti-vitrina de abajo.
+Para entrar hace falta comercial ≥ 10% **o** verificado ≥ 10% sobre el precio todo medio, y además superar los filtros anti-vitrina de abajo.
 
 ### Señales anti-vitrina (criterio `real-offer-v2`)
 
