@@ -259,7 +259,8 @@ Flujo mínimo tras cambios de batch:
 ```bash
 # soyo
 cd ~/precios && git pull
-source .venv/bin/activate && pip install -r requirements.txt
+source .venv/bin/activate && pip install -e '.[scrapling]'   # piloto HTML frágil
+# opcional en .env: SCRAPLING_STORES=hites,santaritaonline  (docs/SCRAPLING.md)
 # reiniciar nada si solo hay cron+venv; si usas contenedor worker: compose up -d --build
 ```
 

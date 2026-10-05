@@ -28,6 +28,10 @@ documents = [
 screenshots = [
     "playwright>=1.40.0",
 ]
+# Solo batch/soyo: no instalar en la imagen web de BMAX.
+scrapling = [
+    "scrapling>=0.2.99",
+]
 
 [project.scripts]
 retail = "retail.cli:unified_main"

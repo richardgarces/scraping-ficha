@@ -241,6 +241,11 @@ class HitesStore(StoreClient):
                 break
 
     def _html(self, url: str, params: dict[str, Any] | None = None) -> str:
+        from retail.scrapling_html import fetch_html_optional
+
+        scrapling_body = fetch_html_optional("hites", url, params=params, timeout=self.timeout)
+        if scrapling_body:
+            return scrapling_body
         last_error: Exception | None = None
         http = self.http
         if http is None:

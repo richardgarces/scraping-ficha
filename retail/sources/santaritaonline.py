@@ -569,6 +569,13 @@ class SantaritaonlineStore(StoreClient):
         raise ValueError(f"No se puede scrapear el objetivo: {target}")
 
     def _get(self, url: str) -> str:
+        from retail.scrapling_html import fetch_html_optional
+
+        scrapling_body = fetch_html_optional(
+            STORE_ID, url, timeout=self.timeout
+        )
+        if scrapling_body:
+            return scrapling_body
         status, _ct, text = self._request("GET", url)
         if status != 200 or not text:
             raise HttpError(f"HTTP {status} en {TITLE}: {url}", status)
