@@ -10,6 +10,7 @@ from retail.reales import (
     is_payment_restricted,
     offer_integrity,
     pick_real_offer,
+    same_product_for_real_offer,
 )
 
 
@@ -247,3 +248,61 @@ def test_card_coupon_basis_without_all_payment_excluded():
         comparacion=True,
         historial=False,
     ) is None
+
+def test_solar_led_extreme_price_gap_is_not_real_offer():
+    """Easy $14.990 vs Paris $115.990: mismo texto Importclick, no es súper oferta."""
+    deal = pick_real_offer(
+        [
+            _offer(
+                store="easy",
+                product_id="e1",
+                name="Foco Solar LED 6 Placas 100 Watt",
+                brand="Importclick",
+                price=14990,
+                price_all_payment=14990,
+                price_normal=22990,
+            ),
+            _offer(
+                store="paris",
+                product_id="p1",
+                name="Foco Solar LED 6 Placas 100 Watt",
+                brand="Importclick",
+                price=115990,
+                price_all_payment=115990,
+                price_normal=174990,
+            ),
+        ],
+        comparacion=True,
+        historial=True,
+    )
+    assert deal is None
+    assert same_product_for_real_offer(
+        _offer(
+            store="easy",
+            product_id="e1",
+            name="Foco Solar LED 6 Placas 100 Watt",
+            brand="Importclick",
+            price=14990,
+        ),
+        _offer(
+            store="paris",
+            product_id="p1",
+            name="Foco Solar LED 6 Placas 100 Watt",
+            brand="Importclick",
+            price=115990,
+        ),
+    ) is False
+
+
+def test_moderate_cross_store_gap_still_qualifies_as_real_offer():
+    deal = pick_real_offer(
+        [
+            _offer(store="falabella", product_id="a", price=6000, price_all_payment=6000, price_normal=10000),
+            _offer(store="ripley", product_id="b", price=10000, price_all_payment=10000, price_normal=10000),
+        ],
+        comparacion=True,
+        historial=False,
+    )
+    assert deal is not None
+    assert deal["store"] == "falabella"
+    assert deal["price"] == 6000

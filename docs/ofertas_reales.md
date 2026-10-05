@@ -37,6 +37,8 @@ Para ofertas reales el agregador:
 
 Así dos fichas del mismo shampoo con SKUs distintos sí se comparan; dos nombres genéricos o productos distintos no.
 
+Además, en `/reales` un par con identidad solo textual **no** cuenta si el ratio de precios todo medio supera **3×** (p. ej. $14.990 vs $115.990). Con gaps >2× se exigen señales duras (modelo, watts/placas, envase medido). GTIN / override manual / código de fabricante sí pueden sostener brechas mayores. Constantes: `MAX_CROSS_STORE_PRICE_RATIO`, `same_product_for_real_offer` en `retail/reales.py`. Watts y placas (`100w`, `6placa`) entran en la huella de identidad (`retail/compare.py`).
+
 El **historial** de la misma tienda no cambia: sigue usando `price_history` del propio aviso (no necesita códigos cruzados).
 
 ### Tipos de oferta (checks)

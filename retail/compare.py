@@ -223,6 +223,9 @@ _PACK_N_PACK_RE = re.compile(r"\b(\d{1,4})\s*(?:(?:multi)?packs?)\b")
 # "x6" / "x 60" al final o suelto; no es "iPhone 16" ni "TV 65".
 _PACK_X_RE = re.compile(r"\bx\s*(\d{1,4})\b")
 _PACK_UNIT_TOKEN_RE = re.compile(r"^\d+un$|^\d+x\d")
+# Potencia y placas/paneles: "100 W", "6 placas" no deben perderse como dígitos sueltos.
+_WATT_RE = re.compile(r"\b(\d{1,5})\s*(?:watts?|watios?|w)\b", re.I)
+_PLACA_RE = re.compile(r"\b(\d{1,3})\s*(?:placas?|paneles?)\b", re.I)
 _PACK_WORDS = {
     "unidades",
     "unidad",
@@ -332,6 +335,23 @@ def pack_tokens(text: str) -> tuple[str, ...]:
     return tuple(sorted(found))
 
 
+def power_tokens(text: str) -> tuple[str, ...]:
+    """Watts y placas/paneles con su cantidad (100w, 6placa)."""
+    page = _fold(text)
+    found: list[str] = []
+    for match in _WATT_RE.finditer(page):
+        token = f"{int(match.group(1))}w"
+        if token not in found:
+            found.append(token)
+    for match in _PLACA_RE.finditer(page):
+        word = match.group(0)[len(match.group(1)):].strip()
+        label = "panel" if "panel" in word else "placa"
+        token = f"{int(match.group(1))}{label}"
+        if token not in found:
+            found.append(token)
+    return tuple(sorted(found))
+
+
 def _identity_text(product: Product) -> str:
     """Nombre + marca + specs: a veces la cantidad solo viene en atributos."""
     parts = [product.brand or "", product.name or ""]
@@ -385,6 +405,7 @@ class Identity:
     ram: tuple[str, ...]
     inches: str | None
     pack: tuple[str, ...]
+    power: tuple[str, ...]
     condition: str
     bundle: bool
     leftovers: tuple[str, ...]
@@ -410,6 +431,8 @@ def identity_of(product: Product) -> Identity:
     storage = _main_storage(raw_storage)
     ram = tuple(sorted({f"{match.group(1)}gb" for pattern in _RAM_PATTERNS for match in pattern.finditer(text)}))
     pack = pack_tokens(text)
+    power = power_tokens(text)
+    power_set = set(power)
     leftovers = [
         word
         for word in re.findall(r"[a-z0-9]{3,}", text)
@@ -417,6 +440,8 @@ def identity_of(product: Product) -> Identity:
         and word not in models
         and word not in storage
         and word not in pack
+        and word not in power_set
+        and word not in {"watt", "watts", "watio", "watios", "placa", "placas", "panel", "paneles"}
         and word not in _PACK_WORDS
         and word != brand
         and not word.isdigit()
@@ -429,6 +454,7 @@ def identity_of(product: Product) -> Identity:
         ram=ram,
         inches=screen_size(text),
         pack=pack,
+        power=power,
         condition=condition_group(product.condition),
         bundle=bool(_BUNDLE_RE.search(text)),
         leftovers=tuple(leftovers),
@@ -445,13 +471,14 @@ def identity_fingerprint(product: Product, *, include_ram: bool = True) -> str:
     if ident.inches:
         core.append(f"{ident.inches}in")
     core.extend(ident.pack)
+    core.extend(ident.power)
     if ident.condition != "new_or_unknown":
         core.append(f"condition:{ident.condition}")
     if ident.bundle:
         core.append("bundle")
-    if not ident.models and not ident.storage:
+    if not ident.models and not ident.storage and not ident.power:
         core.extend(ident.leftovers[:5])
-    elif ident.leftovers and not ident.models:
+    elif ident.leftovers and not ident.models and not ident.power:
         core.extend(ident.leftovers[:3])
     return "|".join(part for part in core if part)
 
@@ -499,6 +526,7 @@ def same_model_family(left: Identity, right: Identity) -> bool:
         or left.storage != right.storage
         or (left.ram and right.ram and left.ram != right.ram)
         or left.pack != right.pack
+        or left.power != right.power
         or left.condition != right.condition
         or left.bundle != right.bundle
     ):
@@ -542,6 +570,8 @@ def identity_match_confidence(left: Product, right: Product) -> tuple[float, str
     one, two = identity_of(left), identity_of(right)
     if one.condition != two.condition or one.pack != two.pack or one.bundle != two.bundle:
         return 0.0, "strict_mismatch"
+    if one.power and two.power and one.power != two.power:
+        return 0.0, "power_mismatch"
     if one.brand and two.brand and one.brand != two.brand:
         return 0.0, "brand_mismatch"
     for first, second, reason in (

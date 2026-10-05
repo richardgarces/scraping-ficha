@@ -13,6 +13,7 @@ from retail.compare import (
     STORE_FAMILY,
     collapse_variants,
     identity_match_confidence,
+    identity_of,
     pack_of,
     same_product_identity,
 )
@@ -34,6 +35,13 @@ FULL_PRICE_RATIO = 0.95
 # Super oferta: supera el 50% vs historial (descuento propio) o vs otra tienda.
 MIN_SUPER_PERCENT = 50.0
 MIN_ENTITY_CONFIDENCE = 0.80
+# Ratio máximo entre precios de tiendas para considerar el mismo producto en
+# ofertas reales cuando la identidad no viene de GTIN/manual. 14990 vs 115990
+# (~7.7×) queda fuera; un 50–60% off genuino (~2–2.5×) sigue pasando.
+MAX_CROSS_STORE_PRICE_RATIO = 3.0
+# Con gaps >2×, un match solo por leftovers (sin modelo/potencia/GTIN) no basta.
+WEAK_IDENTITY_PRICE_RATIO = 2.0
+STRONG_IDENTITY_METHODS = frozenset({"gtin", "manual", "manufacturer_code"})
 # Inflación de lista: el «antes» subió fuerte y el precio vuelve cerca del previo.
 LIST_INFLATION_WINDOW_DAYS = 30
 LIST_INFLATION_RECENT_DAYS = 7
@@ -535,6 +543,47 @@ def group_entity_confidence(items: list[dict[str, Any]]) -> float:
     return round(min(best_per_item), 3) if best_per_item else 0.0
 
 
+def cross_store_price_ratio(left: dict[str, Any], right: dict[str, Any]) -> float | None:
+    """max/min de precios todo medio; None si falta alguno."""
+    first = comparable_selling_price(left) or _int(left.get("price")) or 0
+    second = comparable_selling_price(right) or _int(right.get("price")) or 0
+    if first < 1 or second < 1:
+        return None
+    return max(first, second) / min(first, second)
+
+
+def same_product_for_real_offer(left: dict[str, Any], right: dict[str, Any]) -> bool:
+    """Identidad de nombre + plausibilidad de precio para ofertas reales.
+
+    Un gap absurdo (p. ej. 7.7×) con match textual débil no es el mismo producto.
+    GTIN / override manual / código de fabricante sí pueden sostener gaps grandes.
+    """
+    if not same_product_identity(left, right):
+        return False
+    one = Product.from_dict(left)
+    two = Product.from_dict(right)
+    _confidence, method = identity_match_confidence(one, two)
+    if method in STRONG_IDENTITY_METHODS:
+        return True
+    ratio = cross_store_price_ratio(left, right)
+    if ratio is None:
+        return True
+    if ratio > MAX_CROSS_STORE_PRICE_RATIO:
+        return False
+    if ratio > WEAK_IDENTITY_PRICE_RATIO:
+        ident = identity_of(one)
+        hard_pack = tuple(token for token in ident.pack if token != "1un")
+        # Exige señal dura: modelo, potencia/placas, EAN/código, o envase medido.
+        if not (
+            ident.models
+            or ident.power
+            or ident.manufacturer_codes
+            or hard_pack
+        ):
+            return False
+    return True
+
+
 def previous_full_price_day(
     history: list[dict[str, Any]] | None,
     current_price: int | None,
@@ -645,7 +694,7 @@ def pick_real_offer(
             target = next(
                 (
                     cluster for cluster in identity_groups
-                    if any(same_product_identity(item, peer) for peer in cluster)
+                    if any(same_product_for_real_offer(item, peer) for peer in cluster)
                 ),
                 None,
             )
