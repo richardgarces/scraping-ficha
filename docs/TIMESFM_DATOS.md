@@ -4,6 +4,8 @@ El proceso usa por defecto `google/timesfm-2.5-200m-pytorch` (pesos Apache 2.0).
 Instalar sus dependencias en el entorno del host BMAX con
 `.venv/bin/python -m pip install -r requirements-timesfm.txt`.
 El proceso carga `.env` del proyecto para acceder a MongoDB con autenticación.
+Si la URI del host no incluye autenticación, toma la conexión vigente de
+`precios-web` y adapta su dirección a la red del contenedor MongoDB.
 Antes de la primera carga del modelo ejecutar el verificador de recursos de
 `timesfm/timesfm-forecasting/scripts/check_system.py` en BMAX.
 TimesFM 3 se conserva para configuraciones explícitas mediante `TIMESFM_CHECKPOINT`;

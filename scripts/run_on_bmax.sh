@@ -34,6 +34,19 @@ if [ -z "${MONGODB_URI:-}" ] && [ -f "$MONGODB_CREDS_FILE" ]; then
   source "$MONGODB_CREDS_FILE"
 fi
 
+# En BMAX las credenciales vigentes se inyectan al contenedor web. Si la
+# configuración del host no autentica, reutilizar esa URI sin imprimirla.
+if command -v docker >/dev/null 2>&1 && docker inspect precios-web >/dev/null 2>&1; then
+  if ! "$VENV_DIR/bin/python3" -c 'import os, sys; from urllib.parse import urlsplit; sys.exit(0 if urlsplit(os.environ.get("MONGODB_URI", "")).username else 1)'; then
+    WEB_MONGODB_URI="$(docker exec precios-web python -c 'import os; print(os.environ.get("MONGODB_URI", ""))')"
+    if [ -n "$WEB_MONGODB_URI" ]; then
+      MONGODB_URI="$WEB_MONGODB_URI"
+      MONGODB_DB="${MONGODB_DB:-$(docker exec precios-web python -c 'import os; print(os.environ.get("MONGODB_DB", "scraping"))')}"
+    fi
+    unset WEB_MONGODB_URI
+  fi
+fi
+
 MONGODB_URI="${MONGODB_URI:-mongodb://localhost:27017}"
 MONGODB_CONTAINER="${MONGODB_CONTAINER:-precios-mongo}"
 if command -v docker >/dev/null 2>&1 && docker inspect "$MONGODB_CONTAINER" >/dev/null 2>&1; then
