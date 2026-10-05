@@ -2,6 +2,26 @@ from retail.price_alerts import price_change_message, price_deltas
 from retail.price_alerts import notify_price_changes
 
 
+def test_delete_price_alert_is_scoped_to_owner():
+    from retail.mongo import ProductRepository
+
+    captured = {}
+
+    class Alerts:
+        def delete_one(self, query):
+            captured.update(query)
+
+            class Result:
+                deleted_count = 1
+
+            return Result()
+
+    repo = object.__new__(ProductRepository)
+    repo.price_alerts = Alerts()
+    assert repo.delete_price_alert("user-1", "lider", "sku-1") is True
+    assert captured == {"user_id": "user-1", "store": "lider", "product_id": "sku-1"}
+
+
 class _Product:
     def __init__(self, store, product_id, price, name="Auriculares", image_url=None):
         self.store = store

@@ -34,6 +34,20 @@ def test_real_offer_filter_requires_a_measurable_saving() -> None:
     assert "row.cheaper_elsewhere" not in rule
 
 
+def test_search_cards_toggle_price_alerts_and_restore_after_error() -> None:
+    script = Path("retail/web/static/app.js").read_text(encoding="utf-8")
+    toggle = script[script.index("function setWatchButtonState"):script.index("function cacheLabel")]
+    assert 'method: wasFollowing ? "DELETE" : "POST"' in toggle
+    assert "setWatchButtonState(button, nextFollowing)" in toggle
+    assert toggle.count("setWatchButtonState(button, wasFollowing)") >= 2
+    assert 'button.dataset.busy === "true"' in toggle
+    assert 'button.disabled = true' in toggle
+    assert 'button.disabled = false' in toggle
+    assert 'setAttribute("aria-pressed"' in toggle
+    assert 'showWatchError(button' in toggle
+    assert "hydrateFollowingButtons()" in script
+
+
 def test_product_page_has_contextual_back_link() -> None:
     page = Path("retail/web/static/producto.html").read_text(encoding="utf-8")
     script = Path("retail/web/static/producto.js").read_text(encoding="utf-8")

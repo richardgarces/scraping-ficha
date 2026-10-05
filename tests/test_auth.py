@@ -73,6 +73,13 @@ def test_ofertas_and_history_are_admin_only(anonymous_repo):
     assert settings.status_code == 401
 
 
+def test_price_alert_delete_requires_authentication(anonymous_repo, monkeypatch):
+    monkeypatch.setattr("retail.web.insights_api.connect_repo", lambda: anonymous_repo)
+    client = TestClient(app)
+    response = client.delete("/api/price-alert?store=lider&id=sku-1")
+    assert response.status_code == 401
+
+
 def test_entrar_offers_public_signup():
     client = TestClient(app)
     page = client.get("/entrar")
