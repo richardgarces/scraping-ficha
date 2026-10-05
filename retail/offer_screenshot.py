@@ -9,12 +9,14 @@ Si el respaldo falla, se vuelve al `image_url` del producto.
 from __future__ import annotations
 
 import base64
+import hashlib
 import io
 import os
 import re
 import threading
 import time
 from datetime import datetime, timezone
+from html import unescape
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -239,6 +241,35 @@ def page_url_for_offer(payload: dict[str, Any] | None = None, **fields: Any) -> 
     return public_product_url(store, product_id)
 
 
+def _ripley_product_photo(data: dict[str, Any], fallback: str | None) -> str | None:
+    """Descarga la foto con identidad de navegador para adjuntarla por multipart."""
+    if not fallback or _store_id(data) != "ripley":
+        return fallback
+    parsed = urlparse(fallback)
+    if parsed.scheme != "https" or parsed.hostname != "rimage.ripley.cl":
+        return fallback
+    dest = storage_dir() / ("ripley_photo_" + hashlib.sha256(fallback.encode()).hexdigest()[:24] + ".jpg")
+    try:
+        if dest.is_file() and time.time() - dest.stat().st_mtime < 24 * 3600:
+            return str(dest)
+        from curl_cffi import requests
+        from PIL import Image
+
+        with requests.Session(impersonate="chrome", trust_env=False) as session:
+            reply = session.get(fallback, headers={"Referer": page_url_for_offer(data)}, timeout=20)
+            reply.raise_for_status()
+            with Image.open(io.BytesIO(reply.content)) as image:
+                image.load()
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                temporary = dest.with_suffix(".tmp")
+                image.convert("RGB").save(temporary, format="JPEG", quality=90)
+                temporary.replace(dest)
+        return str(dest)
+    except Exception as exc:
+        print(f"Foto de producto Ripley: no se pudo descargar ({exc}); se conserva image_url.")
+        return fallback
+
+
 def resolve_alert_image(
     payload: dict[str, Any] | None = None,
     *,
@@ -262,8 +293,8 @@ def resolve_alert_image(
         captured = capture_offer_screenshot(data)
     except Exception as exc:
         print(f"Captura de oferta: error inesperado ({exc}); se usa image_url.")
-        return fallback
-    return captured or fallback
+        return _ripley_product_photo(data, fallback)
+    return captured or _ripley_product_photo(data, fallback)
 
 
 def apply_offer_screenshot(payload: dict[str, Any]) -> dict[str, Any]:
@@ -434,6 +465,17 @@ def bot_check_provider(
     return ""
 
 
+def _ripley_block_page(content: str, title: str) -> bool:
+    """Reconoce el bloqueo personalizado de Ripley con dos señales de contexto."""
+    if title.strip() == "error en ripley.com | blocked":
+        return True
+    text = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", unescape(content))).lower()
+    return "alto, no puedes acceder" in text and (
+        "por qué me han bloqueado" in text
+        or "desencadenó la solución de seguridad" in text
+    )
+
+
 def is_bot_check_page(
     html: str | None,
     title: str | None = None,
@@ -449,6 +491,8 @@ def is_bot_check_page(
     rendered_text = re.sub(r"\s+", " ", str(text_content or "")).strip().lower()
     if not page_title:
         page_title = _title_from_html(lowered)
+    if _ripley_block_page(lowered + " " + rendered_text, page_title):
+        return True
     combined = " ".join((lowered[:16_000], rendered_text[:8_000]))
     if _hold_challenge(combined, page_title):
         return True

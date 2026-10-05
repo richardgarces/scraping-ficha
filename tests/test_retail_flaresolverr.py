@@ -72,6 +72,11 @@ def solver_service(monkeypatch):
                         "<html><title>Café Colombia | Falabella</title><h1>Café Colombia</h1>"
                         "<script src='/cdn-cgi/challenge-platform/scripts/jsd/main.js'></script></html>"
                     )
+                if "/ripley-block" in payload["url"]:
+                    result["solution"]["response"] = (
+                        "<title>Error en Ripley.com | Blocked</title>"
+                        "<h1>¡Alto, no puedes acceder!</h1><p>¿Por qué me han bloqueado?</p>"
+                    )
                 if payload.get("returnScreenshot"):
                     from PIL import Image
 
@@ -174,3 +179,30 @@ def test_falabella_capture_with_passive_js_detection(solver_service, tmp_path):
     assert destination.is_file()
     html = solve(endpoint + "/passive-jsd", endpoint)["response"]
     assert is_challenge(200, {"Server": "cloudflare"}, html) is False
+
+
+def test_ripley_unresolved_block_uses_product_photo(
+    solver_service, monkeypatch, tmp_path
+):
+    import retail.offer_screenshot as shots
+
+    _, endpoint, _ = solver_service
+    destination = tmp_path / "ripley.png"
+    # Representa la navegación de captura que detectó la pantalla de bloqueo.
+    monkeypatch.setattr(
+        shots,
+        "capture_offer_screenshot",
+        lambda payload: (
+            str(destination)
+            if shots._capture_with_solver(payload["url"], destination)
+            else None
+        ),
+    )
+    photo = "https://cdn.example/ripley-product.jpg"
+    assert (
+        shots.resolve_alert_image(
+            {"store": "ripley", "url": endpoint + "/ripley-block", "image_url": photo}
+        )
+        == photo
+    )
+    assert not destination.exists()

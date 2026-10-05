@@ -290,3 +290,13 @@ def test_falabella_passive_cloudflare_script_is_not_a_challenge():
     </body></html>"""
     assert shots.is_bot_check_page(html) is False
     assert shots.is_bot_check_page(html, "Just a moment...") is True
+
+
+def test_ripley_custom_block_page_and_product_copy():
+    blocked = """<html><title>Error en Ripley.com | Blocked</title>
+    <h1>&iexcl;Alto, no puedes acceder!</h1><h2>vuelve a intentarlo</h2>
+    <p>&iquest;Por qu&eacute; me han bloqueado?</p></html>"""
+    assert shots.is_bot_check_page(blocked)
+    assert shots.is_bot_check_page("<main></main>", "Ripley", "¡Alto, no puedes acceder! ¿Por qué me han bloqueado?")
+    assert not shots.is_bot_check_page("<title>Libro Alto, no puedes acceder | Ripley</title><p>Libro importado</p>")
+    assert not shots.is_bot_check_page("<title>Mochila | Ripley</title><p>Si no puedes acceder a tu cuenta, vuelve a intentarlo.</p>")

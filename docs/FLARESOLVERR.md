@@ -72,3 +72,17 @@ recurso por sí solo no indica una intersticial. Se mantiene la detección por
 títulos de desafío, marcadores de la intersticial y texto de verificación.
 En la prueba desde soyo, Playwright recibió un 403 y FlareSolverr obtuvo la
 ficha con foto y precio. Esto verifica esa ficha, no garantiza acceso a todas.
+
+## Ripley: bloqueo personalizado y foto de respaldo
+
+El detector reconoce la intersticial «Error en Ripley.com | Blocked» y el
+mensaje «¡Alto, no puedes acceder!» con contexto de bloqueo. Esto activa el
+respaldo FlareSolverr y evita adjuntar la pantalla morada como oferta.
+
+Si la captura no se obtiene, se descarga la foto de `rimage.ripley.cl` con
+identidad de navegador, se valida y se convierte a JPEG local para adjuntarla
+a Telegram por multipart. Se conserva una caché de 24 horas. Si tampoco se
+puede descargar, se mantiene la URL original de la imagen.
+
+La prueba sobre la mochila 2000408216551 obtuvo una ficha válida con FlareSolverr
+y descargó la foto original; el acceso puede variar entre solicitudes.
