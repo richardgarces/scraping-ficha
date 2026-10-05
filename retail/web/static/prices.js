@@ -417,6 +417,21 @@ function thumbDataAttrs(meta) {
   return ` data-thumb-store="${attr(meta.store)}" data-thumb-id="${attr(meta.id)}"`;
 }
 
+/** Texto «actualizado hace X» a partir de ISO / Date. Vacío si no hay fecha. */
+function updatedAgo(value, now = Date.now()) {
+  if (!value) return "";
+  const stamp = value instanceof Date ? value.getTime() : Date.parse(value);
+  if (!Number.isFinite(stamp)) return "";
+  const seconds = Math.max(0, Math.floor((now - stamp) / 1000));
+  if (seconds < 45) return "actualizado hace un momento";
+  if (seconds < 90) return "actualizado hace 1 min";
+  if (seconds < 3600) return `actualizado hace ${Math.floor(seconds / 60)} min`;
+  if (seconds < 5400) return "actualizado hace 1 h";
+  if (seconds < 86400) return `actualizado hace ${Math.floor(seconds / 3600)} h`;
+  const days = Math.floor(seconds / 86400);
+  return days === 1 ? "actualizado hace 1 día" : `actualizado hace ${days} días`;
+}
+
 /** Si /api/thumb falla, el <img> roto se cambia por el placeholder (un img no puede mostrar ::after). */
 function emptyThumb(img) {
   if (!img || !img.replaceWith) return;

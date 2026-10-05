@@ -210,12 +210,13 @@ function dealCard(item) {
   const analysis = item.analysis_discount_pct
     ? `<p class="muted">${Number(item.analysis_discount_pct).toLocaleString("es-CL")}% bajo su precio habitual (${money(item.analysis_reference_price)}); esta referencia histórica no es el precio normal publicado.</p>`
     : "";
+  const fresh = typeof updatedAgo === "function" ? updatedAgo(item.updated_at || item.created_at) : "";
   return `
     <article class="panel deal">
       ${image}
       <div class="deal-body">
         ${title}
-        <p class="muted">${attr(item.category || "")}</p>
+        <p class="muted">${attr(item.category || "")}${fresh ? ` · ${attr(fresh)}` : ""}</p>
         <div class="deal-meta">
           ${storeLogo(item.display_store || item.store, item.store_title || item.store)}
           ${cta}

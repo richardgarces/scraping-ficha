@@ -77,6 +77,16 @@ def test_ttl_lasts_until_chile_midnight():
     assert ttl_until_midnight(now) == 2 * 3600
 
 
+def test_ttl_caps_long_days_for_fresher_search(monkeypatch):
+    import retail.search_cache as cache_mod
+
+    monkeypatch.setattr(cache_mod, "MAX_RESULT_TTL", 14400)
+    noon = datetime(2026, 9, 14, 12, 0, tzinfo=ZoneInfo("America/Santiago"))
+    assert ttl_until_midnight(noon) == 14400
+    monkeypatch.setattr(cache_mod, "MAX_RESULT_TTL", 0)
+    assert ttl_until_midnight(noon) == 12 * 3600
+
+
 def test_store_cache_hits_same_query_today():
     cache = SearchCache(MemoryRedis())
     cache.store_stores(
@@ -187,9 +197,12 @@ def test_cache_read_crossing_midnight_rejects_yesterdays_result(monkeypatch):
 
 
 @pytest.mark.parametrize("day", [datetime(2026, 4, 4, 12), datetime(2026, 9, 6, 0)])
-def test_midnight_ttl_uses_real_seconds_across_chile_dst(day):
+def test_midnight_ttl_uses_real_seconds_across_chile_dst(day, monkeypatch):
     from datetime import timedelta
 
+    import retail.search_cache as cache_mod
+
+    monkeypatch.setattr(cache_mod, "MAX_RESULT_TTL", 0)
     local = day.replace(tzinfo=ZoneInfo("America/Santiago"))
     midnight = (local + timedelta(days=1)).replace(hour=0, minute=0, second=0)
     assert ttl_until_midnight(local) == int(midnight.timestamp() - local.timestamp())

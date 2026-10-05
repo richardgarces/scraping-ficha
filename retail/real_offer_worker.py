@@ -15,7 +15,7 @@ from retail.compare import cluster_offer_rows
 from retail.reales import MIN_ENTITY_CONFIDENCE, is_agotado, pick_real_offer
 
 CHILE = ZoneInfo("America/Santiago")
-CRITERION_VERSION = "real-offer-v1"
+CRITERION_VERSION = "real-offer-v2"
 MAX_ATTEMPTS = 4
 LEASE_SECONDS = 300
 BATCH_SIZE = 10

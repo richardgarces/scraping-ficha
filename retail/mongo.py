@@ -2612,6 +2612,8 @@ class ProductRepository:
                 "store_title": extra.get("store_title"),
                 "display_store": extra.get("display_store"),
                 "seller": extra.get("seller"),
+                "created_at": _json_time(item.get("created_at")),
+                "updated_at": _json_time(item.get("created_at")),
             }
             if min_discount and (row.get("discount") or 0) < float(min_discount):
                 continue

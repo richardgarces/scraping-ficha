@@ -110,13 +110,17 @@ function dealCard(item) {
   const market = item.market_best
     ? '<span class="badge off">Es el menor precio actual</span>'
     : `<span class="badge ghost">No es el menor precio · ${attr(item.best_price_store || "otra tienda")} tiene ${money(item.best_price)}</span>`;
-  const discountSummary = `Publicado: ${Math.round(item.published_discount || 0)}% · comprobado con historial: ${Math.round(item.verified_discount || 0)}%`;
+  const discountSummary = `Comercial: ${Math.round(item.commercial_discount || item.published_discount || 0)}% · ahorro real: ${Math.round(item.real_savings_percent || item.verified_discount || 0)}%`;
+  const fresh = typeof updatedAgo === "function" ? updatedAgo(item.updated_at) : "";
+  const suspicion = (item.suspicion_labels || []).length
+    ? `<p class="muted">${attr((item.suspicion_labels || []).join(" · "))}</p>`
+    : "";
   return `
     <article class="panel deal">
       ${image}
       <div class="deal-body">
         ${title}
-        <p class="muted">${attr(item.brand || item.category || "")}</p>
+        <p class="muted">${attr(item.brand || item.category || "")}${fresh ? ` · ${attr(fresh)}` : ""}</p>
         <div class="deal-kinds">${kinds}${market}${identity}</div>
         <div class="deal-prices">
           <div>
@@ -130,6 +134,7 @@ function dealCard(item) {
         </div>
         <p class="muted">${attr(discountSummary)} · puntaje ${Number(item.offer_score || 0).toLocaleString("es-CL")}/100</p>
         <p class="deal-reason">${attr(item.reason || "")}</p>
+        ${suspicion}
         ${timesfmSignal(item)}
         ${history}
         <ul class="compare-stores">${stores}</ul>

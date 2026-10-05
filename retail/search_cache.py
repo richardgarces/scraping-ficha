@@ -15,6 +15,10 @@ from retail.relevance import _SPEC_RE, fold, tokenize
 
 DEFAULT_URL = os.environ.get("REDIS_URL", "redis://127.0.0.1:6379/0")
 MIN_SCORE = float(os.environ.get("RETAIL_SEARCH_CACHE_MIN_SCORE", "0.72"))
+# Tope de frescura: la clave sigue siendo diaria (no rompe Redis del día),
+# pero el TTL efectivo no vive hasta medianoche si el día es largo.
+# Default 4 h. 0 = solo medianoche Chile (comportamiento previo).
+MAX_RESULT_TTL = int(os.environ.get("RETAIL_SEARCH_CACHE_MAX_TTL", "14400"))
 TZ = ZoneInfo("America/Santiago")
 
 
@@ -47,7 +51,10 @@ def ttl_until_midnight(now: datetime | None = None) -> int:
     local = stamp.astimezone(TZ)
     tomorrow = (local + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
     # Restar timestamps respeta los días de 23/25 horas por cambio de horario.
-    return max(1, math.ceil(tomorrow.timestamp() - local.timestamp()))
+    until_midnight = max(1, math.ceil(tomorrow.timestamp() - local.timestamp()))
+    if MAX_RESULT_TTL > 0:
+        return max(1, min(until_midnight, MAX_RESULT_TTL))
+    return until_midnight
 
 
 def start_of_today_ts(now: datetime | None = None) -> float:

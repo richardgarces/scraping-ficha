@@ -210,6 +210,9 @@ function renderCard(data) {
           : `Más barato en ${storeLogo(cheaper.display_store || cheaper.store, cheaper.store_title || cheaper.store)} · ${money(cheaper.price)}`
       }</p>`
     : "";
+  const fresh = typeof updatedAgo === "function" && item.updated_at
+    ? `<p class="muted" id="price-freshness">${attr(updatedAgo(item.updated_at))}</p>`
+    : `<p class="muted" id="price-freshness" hidden></p>`;
   $("card").innerHTML = `
     <div class="product-head">
       ${image}
@@ -219,17 +222,55 @@ function renderCard(data) {
         ${soldBy(item)}
         ${evaluation}
         <p class="price big">${money(item.price)}</p>
+        ${fresh}
         ${(item.stock != null || item.availability) ? `<p class="availability">Disponibilidad: ${attr(availability)}${quantity != null ? ` · ${quantity.toLocaleString("es-CL")} unidades` : ""}</p>` : ''}
         ${commercialDetails(item)}
         ${payments(item)}
         <p class="verdict ${stats.level || "unknown"}">${stats.verdict || ""}</p>
         ${timing(item.timing)}
         ${cheapest}
-        <div class="product-cta">${storeOutLink(item, "Ver oferta")} <a id="compare-link" class="btn" href="${attr(compareUrl(item))}" data-auth hidden>Comparar</a></div>
+        <div class="product-cta">${storeOutLink(item, "Ver oferta")} <button type="button" class="btn secondary" id="refresh-price">Actualizar precio</button> <a id="compare-link" class="btn" href="${attr(compareUrl(item))}" data-auth hidden>Comparar</a></div>
       </div>
     </div>`;
   mountPriceAlert(item);
   mountCompareAccess();
+  mountRefreshPrice(item);
+}
+
+function mountRefreshPrice(item) {
+  const button = $("refresh-price");
+  if (!button || !item?.store || !item?.product_id) return;
+  button.addEventListener("click", async () => {
+    button.disabled = true;
+    button.textContent = "Encolando…";
+    try {
+      const response = await fetch(
+        `/api/product/refresh?store=${encodeURIComponent(item.store)}&id=${encodeURIComponent(item.product_id)}`,
+        { method: "POST" },
+      );
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        flash(typeof data.detail === "string" ? data.detail : "No se pudo encolar la actualización.");
+        button.disabled = false;
+        button.textContent = "Actualizar precio";
+        return;
+      }
+      button.textContent = data.queued === false ? "En curso" : "Encolado";
+      const freshness = $("price-freshness");
+      if (freshness) {
+        freshness.hidden = false;
+        freshness.textContent = data.detail || "Se actualizará en breve; recarga en unos segundos.";
+      }
+      setTimeout(() => {
+        button.disabled = false;
+        button.textContent = "Actualizar precio";
+      }, 8000);
+    } catch (error) {
+      flash(error.message || "No se pudo encolar la actualización.");
+      button.disabled = false;
+      button.textContent = "Actualizar precio";
+    }
+  });
 }
 
 let fullOfferHistory = [];

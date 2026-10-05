@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from datetime import datetime, timedelta, timezone
 from statistics import median
 from typing import Any
 
@@ -16,7 +17,7 @@ from retail.compare import (
     same_product_identity,
 )
 from retail.models import Product
-from retail.pricing import series
+from retail.pricing import parse_moment, series
 
 # El ejemplo del shampoo: 10.000 → 6.000 es 40%. Pedimos al menos 10% para
 # no llenar la lista con rebajas de un peso.
@@ -32,6 +33,23 @@ FULL_PRICE_RATIO = 0.95
 # Super oferta: supera el 50% vs historial (descuento propio) o vs otra tienda.
 MIN_SUPER_PERCENT = 50.0
 MIN_ENTITY_CONFIDENCE = 0.80
+# Inflación de lista: el «antes» subió fuerte y el precio vuelve cerca del previo.
+LIST_INFLATION_WINDOW_DAYS = 30
+LIST_INFLATION_RECENT_DAYS = 7
+LIST_INFLATION_MIN_RISE = 0.15
+LIST_INFLATION_RETURN_RATIO = 0.05
+# Ancla cross-store: oferta ≥ mediana/mínimo de pares → no es gran ahorro real.
+CROSS_STORE_SIMILAR_RATIO = 0.03
+# Pre-evento / Cyber CL: alza sistemática en la ventana previa al evento.
+PRE_EVENT_LOOKBACK_DAYS = 14
+PRE_EVENT_MIN_RISE = 0.10
+# Ventanas habituales Chile (heurística; no calendario oficial cerrado).
+# Mayo–junio: Cyber Day / Cyber Mayo. Fin sep–oct: Cyber Monday. Fin nov: Black Friday.
+CHILE_EVENT_WINDOWS: tuple[tuple[int, int, int, int, str], ...] = (
+    (5, 20, 6, 15, "Cyber Day / Cyber Mayo"),
+    (9, 25, 10, 10, "Cyber Monday / Cyber Octubre"),
+    (11, 20, 12, 5, "Black Friday / Cyber Noviembre"),
+)
 # Texto que delata sin stock en nombre/estado (scrapers a veces lo meten en el título).
 _AGOTADO_FIELDS = ("name", "title", "availability", "status", "stock_status", "availability_status")
 
@@ -88,6 +106,291 @@ def verified_discount_percent(item: dict[str, Any]) -> float:
     if reference <= current:
         return 0.0
     return round((reference - current) * 100 / reference, 1)
+
+
+def normal_series(points: list[dict[str, Any]] | None) -> list[tuple[datetime | None, int]]:
+    """Pares (fecha, precio_normal) del historial, sin inventar listados."""
+    rows: list[tuple[datetime | None, int]] = []
+    for entry in points or []:
+        if not isinstance(entry, dict):
+            continue
+        normal = _int(entry.get("price_normal"))
+        if not normal:
+            continue
+        rows.append((parse_moment(entry.get("scraped_at")), normal))
+    rows.sort(key=lambda item: item[0] or datetime.min.replace(tzinfo=timezone.utc))
+    return rows
+
+
+def chile_event_label(moment: datetime | None = None) -> str | None:
+    """Etiqueta de ventana Cyber/Black Friday CL si ``moment`` cae dentro."""
+    from zoneinfo import ZoneInfo
+
+    stamp = moment or datetime.now(timezone.utc)
+    if stamp.tzinfo is None:
+        stamp = stamp.replace(tzinfo=timezone.utc)
+    local = stamp.astimezone(ZoneInfo("America/Santiago"))
+    month, day = local.month, local.day
+    for start_m, start_d, end_m, end_d, label in CHILE_EVENT_WINDOWS:
+        after_start = (month > start_m) or (month == start_m and day >= start_d)
+        before_end = (month < end_m) or (month == end_m and day <= end_d)
+        if start_m <= end_m:
+            if after_start and before_end:
+                return label
+        elif after_start or before_end:
+            return label
+    return None
+
+
+def detect_list_inflation(
+    item: dict[str, Any],
+    *,
+    now: datetime | None = None,
+) -> dict[str, Any] | None:
+    """Lista inflada: el «antes» subió fuerte y el precio vuelve cerca del previo.
+
+    Ejemplo: normal 10.000 → 14.000 en <30 días, oferta a 10.200 (−27% comercial)
+    pero vs el precio de venta habitual el ahorro real ≈ 0.
+    """
+    current = _int(item.get("price"))
+    current_normal = _int(item.get("price_normal"))
+    if not current or not current_normal or current_normal <= current:
+        return None
+    stamp = now or datetime.now(timezone.utc)
+    if stamp.tzinfo is None:
+        stamp = stamp.replace(tzinfo=timezone.utc)
+    window_start = stamp - timedelta(days=LIST_INFLATION_WINDOW_DAYS)
+    recent_cut = stamp - timedelta(days=LIST_INFLATION_RECENT_DAYS)
+
+    normals = [
+        (moment or stamp, value)
+        for moment, value in normal_series(item.get("price_history"))
+        if value and (moment is None or moment >= window_start)
+    ]
+    if current_normal:
+        normals.append((stamp, current_normal))
+    if len(normals) < 2:
+        return None
+
+    older = [value for moment, value in normals if moment < recent_cut]
+    recent = [value for moment, value in normals if moment >= recent_cut]
+    if len(older) < 1 or not recent:
+        # Sin corte de 7 días: usa la primera mitad del historial de lista.
+        midpoint = max(1, len(normals) // 2)
+        older = [value for _, value in normals[:midpoint]]
+        recent = [value for _, value in normals[midpoint:]]
+    if not older or not recent:
+        return None
+
+    baseline_normal = int(round(median(older)))
+    peak_normal = max(recent)
+    if baseline_normal <= 0 or peak_normal < baseline_normal * (1 + LIST_INFLATION_MIN_RISE):
+        return None
+    if current_normal < baseline_normal * (1 + LIST_INFLATION_MIN_RISE):
+        return None
+
+    selling = series(item.get("price_history"))
+    prior_selling = [
+        price
+        for moment, price in selling
+        if price and (moment is None or moment < recent_cut)
+    ]
+    if len(prior_selling) < 1:
+        prior_selling = [price for moment, price in selling[:-1] if price] if len(selling) > 1 else []
+    if not prior_selling:
+        prior_selling = [baseline_normal]
+    prior_ref = int(round(median(prior_selling[-30:])))
+    # El «descuento» vuelve cerca del precio de venta previo (o del normal viejo).
+    near_prior = abs(current - prior_ref) / max(prior_ref, 1) <= LIST_INFLATION_RETURN_RATIO
+    near_old_list = abs(current - baseline_normal) / max(baseline_normal, 1) <= LIST_INFLATION_RETURN_RATIO
+    if not near_prior and not near_old_list:
+        # Todavía más barato de verdad vs el previo: no es solo vitrina.
+        if current < prior_ref * (1 - LIST_INFLATION_RETURN_RATIO):
+            return None
+        return None
+
+    commercial = round((current_normal - current) * 100 / current_normal, 1)
+    if near_prior or near_old_list:
+        real_vs_prior = 0.0
+    elif prior_ref > current:
+        real_vs_prior = round((prior_ref - current) * 100 / prior_ref, 1)
+    else:
+        real_vs_prior = 0.0
+    return {
+        "kind": "list_inflation",
+        "baseline_normal": baseline_normal,
+        "inflated_normal": peak_normal,
+        "prior_selling": prior_ref,
+        "rise_percent": round((peak_normal - baseline_normal) * 100 / baseline_normal, 1),
+        "commercial_discount": commercial,
+        "real_savings_percent": real_vs_prior,
+        "label": "infló el precio de lista",
+    }
+
+
+def detect_pre_event_inflation(
+    item: dict[str, Any],
+    *,
+    now: datetime | None = None,
+) -> dict[str, Any] | None:
+    """Subida de lista o de venta en los ~14 días previos a una ventana Cyber CL."""
+    stamp = now or datetime.now(timezone.utc)
+    if stamp.tzinfo is None:
+        stamp = stamp.replace(tzinfo=timezone.utc)
+    event = chile_event_label(stamp)
+    # Mira ~28 días: baseline temprana vs pico previo al «descuento» actual.
+    window_start = stamp - timedelta(days=PRE_EVENT_LOOKBACK_DAYS + 14)
+    inflate_start = stamp - timedelta(days=PRE_EVENT_LOOKBACK_DAYS)
+    inflate_end = stamp - timedelta(days=2)
+
+    def _points(kind: str) -> list[tuple[datetime, int]]:
+        raw = normal_series(item.get("price_history")) if kind == "normal" else series(item.get("price_history"))
+        rows = [
+            (moment or stamp, value)
+            for moment, value in raw
+            if value and (moment is None or moment >= window_start)
+        ]
+        current_value = _int(item.get("price_normal" if kind == "normal" else "price"))
+        if current_value:
+            rows.append((stamp, current_value))
+        return rows
+
+    def _rise(rows: list[tuple[datetime, int]]) -> dict[str, Any] | None:
+        if len(rows) < 2:
+            return None
+        early = [value for moment, value in rows if moment < inflate_start]
+        if not early:
+            early = [rows[0][1]]
+        peak_rows = [
+            value for moment, value in rows
+            if inflate_start <= moment <= inflate_end
+        ]
+        if not peak_rows:
+            peak_rows = [value for moment, value in rows if moment < stamp][-3:] or [rows[-1][1]]
+        base = int(round(median(early)))
+        peak = max(peak_rows)
+        if base <= 0 or peak < base * (1 + PRE_EVENT_MIN_RISE):
+            return None
+        return {
+            "baseline": base,
+            "peak": peak,
+            "rise_percent": round((peak - base) * 100 / base, 1),
+        }
+
+    normal_rise = _rise(_points("normal"))
+    selling_rise = _rise(_points("selling"))
+    chosen = normal_rise or selling_rise
+    if not chosen:
+        return None
+    current = _int(item.get("price"))
+    current_normal = _int(item.get("price_normal"))
+    prior = chosen["baseline"]
+    if current and current < prior * (1 - LIST_INFLATION_RETURN_RATIO):
+        return None
+    commercial = 0.0
+    if current and current_normal and current_normal > current:
+        commercial = round((current_normal - current) * 100 / current_normal, 1)
+    if commercial < MIN_OWN_DISCOUNT and not event:
+        return None
+    label = event or "precio subió antes del descuento"
+    return {
+        "kind": "pre_event_inflation",
+        "event": event,
+        "baseline": chosen["baseline"],
+        "peak": chosen["peak"],
+        "rise_percent": chosen["rise_percent"],
+        "commercial_discount": commercial,
+        "label": f"subió {chosen['rise_percent']:.0f}% antes de {label}",
+    }
+
+
+def cross_store_anchor(
+    item: dict[str, Any],
+    peers: list[dict[str, Any]],
+    *,
+    entity_confidence: float,
+) -> dict[str, Any] | None:
+    """Ancla el «ahorro real» vs mediana/mínimo de otras tiendas (confianza ≥ 80%)."""
+    if entity_confidence < MIN_ENTITY_CONFIDENCE:
+        return None
+    price = _selling_price(item)
+    others = [_selling_price(peer) for peer in peers if _selling_price(peer)]
+    if not price or len(others) < 1:
+        return None
+    peer_min = min(others)
+    peer_med = int(round(median(others)))
+    vs_min = peer_min - price
+    vs_med = peer_med - price
+    similar_to_min = price >= peer_min * (1 - CROSS_STORE_SIMILAR_RATIO)
+    similar_to_median = price >= peer_med * (1 - CROSS_STORE_SIMILAR_RATIO)
+    similar = similar_to_min or similar_to_median
+    return {
+        "peer_min": peer_min,
+        "peer_median": peer_med,
+        "gap_vs_min": vs_min,
+        "gap_vs_median": vs_med,
+        "real_savings_vs_median": max(0, vs_med),
+        "real_savings_percent": round(vs_med * 100 / peer_med, 1) if peer_med and vs_med > 0 else 0.0,
+        "similar_to_market": similar,
+        "label": (
+            "precio similar a otras tiendas"
+            if similar
+            else f"ahorro real vs mediana de otras tiendas: {max(0, vs_med):,}".replace(",", ".")
+        ),
+    }
+
+
+def offer_integrity(
+    item: dict[str, Any],
+    peers: list[dict[str, Any]],
+    *,
+    entity_confidence: float,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Señales de vitrina vs ahorro real; no inventa datos si falta historial/pares."""
+    commercial = own_discount_percent(item)
+    verified = verified_discount_percent(item)
+    list_inflate = detect_list_inflation(item, now=now)
+    pre_event = detect_pre_event_inflation(item, now=now)
+    anchor = cross_store_anchor(item, peers, entity_confidence=entity_confidence)
+    flags: list[str] = []
+    if list_inflate:
+        flags.append("list_inflation")
+    if pre_event:
+        flags.append("pre_event_inflation")
+    if anchor and anchor.get("similar_to_market"):
+        flags.append("similar_to_market")
+    real_savings_percent = verified
+    if anchor and not anchor.get("similar_to_market"):
+        real_savings_percent = max(real_savings_percent, float(anchor.get("real_savings_percent") or 0))
+    if list_inflate:
+        real_savings_percent = min(
+            real_savings_percent,
+            float(list_inflate.get("real_savings_percent") or 0),
+        )
+    suspicious = bool(flags) and (
+        list_inflate is not None
+        or (anchor and anchor.get("similar_to_market") and commercial >= MIN_OWN_DISCOUNT)
+        or (pre_event is not None and commercial >= MIN_OWN_DISCOUNT and verified < MIN_OWN_DISCOUNT)
+    )
+    reasons = []
+    if list_inflate:
+        reasons.append(list_inflate["label"])
+    if pre_event:
+        reasons.append(pre_event["label"])
+    if anchor and anchor.get("similar_to_market"):
+        reasons.append(anchor["label"])
+    return {
+        "commercial_discount": commercial,
+        "verified_discount": verified,
+        "real_savings_percent": round(real_savings_percent, 1),
+        "list_inflation": list_inflate,
+        "pre_event_inflation": pre_event,
+        "cross_store": anchor,
+        "suspicion_flags": flags,
+        "suspicious": suspicious,
+        "suspicion_labels": reasons,
+    }
 
 
 def entity_confidence_of(item: dict[str, Any]) -> float:
@@ -296,18 +599,37 @@ def _score_pack_group(
         if discount < MIN_OWN_DISCOUNT and verified_discount < MIN_OWN_DISCOUNT:
             continue
         peers = [peer for peer in priced if peer.get("store") != item.get("store") and _int(peer.get("price"))]
+        integrity = offer_integrity(item, peers, entity_confidence=entity_confidence)
+        # Inflación de lista o precio igual al mercado: no vender el −X% comercial
+        # como oferta real. Solo pasa si hay baja verificada genuina vs historial
+        # y además queda bajo la mediana de otras tiendas.
+        if integrity.get("list_inflation") or integrity.get("pre_event_inflation"):
+            genuine = (
+                float(integrity.get("real_savings_percent") or 0) >= MIN_OWN_DISCOUNT
+                and not (integrity.get("cross_store") or {}).get("similar_to_market")
+            )
+            if not genuine:
+                continue
+        if (integrity.get("cross_store") or {}).get("similar_to_market"):
+            # Sin brecha real vs el mercado: el cartel no basta.
+            if verified_discount < MIN_OWN_DISCOUNT:
+                continue
         kinds: list[str] = []
         list_peers = _peers_at_list(item, peers)
-        cheaper_peers = _peers_more_expensive(item, peers)
-        if comparacion and list_peers:
+        if comparacion and list_peers and not (integrity.get("cross_store") or {}).get("similar_to_market"):
             kinds.append("comparacion")
         was_on = previous_full_price_day(
             item.get("price_history"),
             _int(item.get("price")),
             _int(item.get("price_normal")),
         )
-        if historial and (was_on or verified_discount >= MIN_OWN_DISCOUNT):
-            kinds.append("historial")
+        # Si solo «estuvo a precio lleno» porque inflaron la lista, no cuenta.
+        history_ok = bool(was_on) and not integrity.get("list_inflation")
+        if historial and (history_ok or verified_discount >= MIN_OWN_DISCOUNT):
+            if integrity.get("list_inflation") and verified_discount < MIN_OWN_DISCOUNT:
+                pass
+            else:
+                kinds.append("historial")
         if iguales and not kinds and _same_price_listing(item, by_store):
             kinds.append("iguales")
         if not kinds:
@@ -323,9 +645,10 @@ def _score_pack_group(
         ranked.append(
             _card(
                 item, peers=by_store, kinds=kinds, rival=rival, gap=gap,
-                was_on=was_on, discount=discount, entity_confidence=entity_confidence,
+                was_on=was_on if history_ok else None,
+                discount=discount, entity_confidence=entity_confidence,
                 best_price_item=best_price_item, published_winner=published_winner,
-                verified_winner=verified_winner,
+                verified_winner=verified_winner, integrity=integrity,
             )
         )
 
@@ -390,6 +713,7 @@ def _card(
     best_price_item: dict[str, Any],
     published_winner: dict[str, Any],
     verified_winner: dict[str, Any],
+    integrity: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     price = _int(item.get("price")) or 0
     normal = _int(item.get("price_normal"))
@@ -415,12 +739,17 @@ def _card(
         item.get("stock") not in (None, "") and not is_agotado(item)
     ) else 5.0 if not is_agotado(item) else 0.0
     history_points = len(series(item.get("price_history")))
+    signals = integrity or {}
+    real_savings = float(signals.get("real_savings_percent") or verified_discount or 0)
+    commercial = float(signals.get("commercial_discount") or discount or 0)
     score = round(
         (40.0 if market_best else 0.0)
-        + 30.0 * min(1.0, verified_discount / 30.0)
+        + 30.0 * min(1.0, real_savings / 30.0)
         + 15.0 * entity_confidence
         + stock_score
-        + 5.0 * min(1.0, history_points / 5.0),
+        + 5.0 * min(1.0, history_points / 5.0)
+        - (25.0 if signals.get("suspicious") else 0.0)
+        - (15.0 if "similar_to_market" in (signals.get("suspicion_flags") or []) else 0.0),
         1,
     )
     return {
@@ -437,8 +766,10 @@ def _card(
         "total_price": _selling_price(item) if item.get("_comparison_price") else None,
         "price_normal": normal,
         "discount": discount,
-        "published_discount": discount,
+        "published_discount": commercial,
+        "commercial_discount": commercial,
         "verified_discount": verified_discount,
+        "real_savings_percent": real_savings,
         "gap": gap,
         "gap_percent": vs_rival,
         "rival_store": rival.get("store"),
@@ -458,7 +789,12 @@ def _card(
         "offer_score": score,
         "was_full_price_on": was_on if "historial" in kinds else None,
         "stores": stores,
-        "reason": _reason(item, rival, kinds, was_on, discount),
+        "list_inflation": signals.get("list_inflation"),
+        "pre_event_inflation": signals.get("pre_event_inflation"),
+        "cross_store": signals.get("cross_store"),
+        "suspicion_flags": signals.get("suspicion_flags") or [],
+        "suspicion_labels": signals.get("suspicion_labels") or [],
+        "reason": _reason(item, rival, kinds, was_on, discount, integrity=signals),
         "updated_at": _iso(item.get("updated_at")),
     }
 
@@ -477,6 +813,7 @@ def _store_row(
         "price_normal": _int(item.get("price_normal")),
         "discount": own_discount_percent(item),
         "published_discount": own_discount_percent(item),
+        "commercial_discount": own_discount_percent(item),
         "verified_discount": verified_discount_percent(item),
         "best_price": best_price,
         "strongest_published": strongest_published,
@@ -495,6 +832,8 @@ def _reason(
     kinds: list[str],
     was_on: str | None,
     discount: float,
+    *,
+    integrity: dict[str, Any] | None = None,
 ) -> str:
     store = item.get("store") or "esta tienda"
     other = rival.get("store") or "otra tienda"
@@ -502,9 +841,20 @@ def _reason(
     normal = _int(item.get("price_normal"))
     rival_price = _int(rival.get("price"))
     parts = []
+    signals = integrity or {}
+    commercial = float(signals.get("commercial_discount") or discount or 0)
+    real = float(signals.get("real_savings_percent") or 0)
+    if signals.get("suspicion_labels"):
+        parts.append(
+            "Cuidado: "
+            + "; ".join(signals["suspicion_labels"])
+            + f". Descuento comercial {commercial:.0f}% ≠ ahorro real {real:.0f}%."
+        )
     if "comparacion" in kinds:
         parts.append(
-            f"En {store} cuesta {_clp(price)} ({discount:.0f}% off sobre {_clp(normal)}). "
+            f"En {store} cuesta {_clp(price)} "
+            f"(descuento comercial {commercial:.0f}% sobre {_clp(normal)}; "
+            f"ahorro real ~{real:.0f}%). "
             f"El mismo producto en {other} se vende a {_clp(rival_price)}."
         )
     if "historial" in kinds:
@@ -516,7 +866,13 @@ def _reason(
     if "iguales" in kinds and "comparacion" not in kinds:
         parts.append(
             f"En {store} y {other} el precio de venta es el mismo ({_clp(price)}). "
-            f"El {discount:.0f}% off es el 'antes' de vitrina, no una brecha entre tiendas."
+            f"El {commercial:.0f}% off es el 'antes' de vitrina, no una brecha entre tiendas."
+        )
+    cross = signals.get("cross_store") or {}
+    if cross.get("similar_to_market") and "iguales" not in kinds:
+        parts.append(
+            f"Precio similar a otras tiendas (mediana {_clp(cross.get('peer_median'))}, "
+            f"mínimo {_clp(cross.get('peer_min'))})."
         )
     return " ".join(parts)
 

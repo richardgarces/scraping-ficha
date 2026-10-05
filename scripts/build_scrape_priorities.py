@@ -101,6 +101,14 @@ def main() -> None:
             "generated_at": now.isoformat(),
         }
         repo.save_app_setting(PRIORITY_SETTING_KEY, status)
+        try:
+            from retail.scrape_priority_boost import boost_watched_and_offer_priorities
+
+            boost = boost_watched_and_offer_priorities(repo, now=now)
+            status["watch_offer_boost"] = boost
+            print(json.dumps({"watch_offer_boost": boost}, ensure_ascii=False, default=str))
+        except Exception as exc:
+            status["watch_offer_boost_error"] = str(exc)
         print(json.dumps(status, ensure_ascii=False, default=str))
     finally:
         repo.close()

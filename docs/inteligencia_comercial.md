@@ -20,19 +20,21 @@ inventan precios, stock ni despacho.
   variantes diferentes o restablecer la decisión automática desde la página de
   análisis. La corrección queda guardada en la base de datos.
 
-La evaluación de una oferta conserva tres conceptos separados:
+La evaluación de una oferta conserva conceptos separados:
 
-- **Descuento publicado:** compara el precio normal informado por la tienda con
-  su precio actual.
-- **Baja verificada:** compara el precio actual con observaciones anteriores del
-  mismo producto y no depende del porcentaje anunciado por la tienda.
+- **Descuento comercial / publicado:** compara el precio normal informado por la
+  tienda con su precio actual (puede ser vitrina inflada).
+- **Ahorro real / baja verificada:** compara el precio actual con observaciones
+  anteriores del mismo producto y/o con la mediana de otras tiendas (identidad
+  ≥ 80%). No depende del porcentaje anunciado.
 - **Mejor precio del mercado:** compara el costo actual entre las tiendas que
   venden la misma entidad. Cuando el despacho es comparable usa el total con
   envío.
 
 Por eso una tienda puede mostrar el mayor porcentaje de descuento y, al mismo
-tiempo, no tener el precio más bajo. La interfaz muestra ambas conclusiones y un
-puntaje que también considera identidad, stock e historial.
+tiempo, no tener el precio más bajo ni un ahorro real. La interfaz de `/reales`
+muestra comercial vs ahorro real, motivos (infló lista, similar a otras tiendas,
+pre-Cyber) y un puntaje que también considera identidad, stock e historial.
 
 ## 2. Condición
 

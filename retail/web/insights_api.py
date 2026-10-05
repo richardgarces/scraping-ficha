@@ -315,6 +315,21 @@ def product_sweep(request: Request, store: str = Query(...), id: str = Query(...
     )
 
 
+@router.post("/api/product/refresh")
+def product_refresh(store: str = Query(...), id: str = Query(...)) -> dict:
+    """Encola un scrape puntual de la ficha (no espera el resultado largo)."""
+    repo = _repo_or_404()
+    try:
+        document = repo.product_detail(store, id)
+        if document is None:
+            raise HTTPException(status_code=404, detail="No tenemos ese producto guardado.")
+    finally:
+        repo.close()
+    from retail.product_refresh import launch_product_refresh
+
+    return launch_product_refresh(connect_repo, store, id)
+
+
 @router.get("/api/thumb")
 def thumb(store: str = Query(...), id: str = Query(...)) -> Response:
     repo = connect_repo()

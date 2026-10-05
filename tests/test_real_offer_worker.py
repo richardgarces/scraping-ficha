@@ -75,7 +75,7 @@ def test_worker_marks_real_and_reales_reads_today_marker_without_recalculation(r
     marker = repo.daily_real_offers.find_one({})
     assert marker["is_real"] is True
     assert marker["evaluated_price"] == 6000
-    assert marker["criterion_version"] == "real-offer-v1"
+    assert marker["criterion_version"] == "real-offer-v2"
 
     monkeypatch.setattr("retail.reales.pick_real_offer", lambda *args, **kwargs: pytest.fail("recalculó"))
     found = repo.real_offers()

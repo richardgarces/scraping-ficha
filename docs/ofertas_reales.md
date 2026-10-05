@@ -52,16 +52,24 @@ Hay que activar al menos uno. Un aviso puede llevar varios `kinds` a la vez.
 
 Constantes en `retail/reales.py`: `MIN_OWN_DISCOUNT=10`, `PEER_AT_LIST=0.90`, `MIN_SELLING_GAP=0.10`, `SAME_PRICE_RATIO=0.03`, `FULL_PRICE_RATIO=0.95`, `MIN_SUPER_PERCENT=50`, `MIN_ENTITY_CONFIDENCE=0.80`.
 
-### Descuento publicado vs verificado
+### Descuento comercial vs ahorro real
 
-- **Publicado:** `(price_normal − price) / price_normal`.
-- **Verificado:** baja respecto a la mediana de precios **realmente vistos** (excluye el precio actual; mediana de hasta los últimos 30 puntos previos). No depende del “antes” de la tienda.
+- **Comercial (publicado):** `(price_normal − price) / price_normal`. Es el cartel de la tienda.
+- **Ahorro real:** baja respecto a la mediana de precios **realmente vistos** y/o vs mediana/mínimo de otras tiendas con identidad ≥ 80%. No depende del “antes” inflado.
 
-Para entrar hace falta publicado ≥ 10% **o** verificado ≥ 10%.
+Para entrar hace falta comercial ≥ 10% **o** verificado ≥ 10%, y además superar los filtros anti-vitrina de abajo.
+
+### Señales anti-vitrina (criterio `real-offer-v2`)
+
+1. **Inflación de lista:** si `price_normal` subió ≥ 15% en 7–30 días y el precio de venta vuelve cerca (±5%) del precio previo, **no** es oferta real. Ejemplo: normal 10.000 → 14.000, “−29%” a 10.000 → ahorro real ≈ 0.
+2. **Ancla cross-store:** si el precio en oferta está a ≤ 3% de la mediana o del mínimo de otras tiendas (confianza ≥ 80%), no califica como gran oferta; el motivo habla de “similar a otras tiendas”.
+3. **Pre-evento / Cyber CL:** ventanas heurísticas Mayo–Jun, fin Sep–Oct y fin Nov. Si el precio (lista o venta) subió ≥ 10% en ~14 días previos y el “descuento” no deja un ahorro real ≥ 10%, se descarta. Constantes: `CHILE_EVENT_WINDOWS` en `retail/reales.py`.
+
+El worker diario (`retail/real_offer_worker.py`, versión `real-offer-v2`) persiste estas marcas en `daily_real_offers.analysis`. `/reales` **lee** las marcas; no recalcula en el request.
 
 ### Qué no filtra esta página
 
-- **No** usa `ignore_fake_discounts` / `fake_discount()` de las alertas del batch. El criterio aquí es comparación entre tiendas + historial propio.
+- **No** usa `ignore_fake_discounts` / `fake_discount()` de las alertas del batch (esa lógica mira alzas del *precio de venta*). Aquí la inflación de *lista* y el ancla cross-store son propias de ofertas reales.
 - Easy/Paris (o Falabella/Sodimac) al **mismo** precio se colapsan en un aviso; solos no generan comparación (hace falta un rival de otra familia más caro, o el check «Mismo precio»).
 
 ### Envío
