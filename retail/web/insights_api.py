@@ -19,7 +19,15 @@ from retail.ficha_extra import (
 )
 from retail.ficha_sweep import iter_ficha_sweep
 from retail.models import normalize_product_url
-from retail.pricing import buy_or_wait, chart_history, classified_drop_events, parse_moment, price_stats, series
+from retail.pricing import (
+    buy_or_wait,
+    chart_history,
+    classified_drop_events,
+    parse_moment,
+    price_observations,
+    price_stats,
+    series,
+)
 from retail.offer_screenshot import (
     annotate_store_bot_checks,
     bot_check_api_rows,
@@ -65,13 +73,22 @@ def _points(document: dict[str, Any], field: str = "price") -> list[dict[str, An
 def _card(document: dict[str, Any]) -> dict[str, Any]:
     from retail.store_display import display_store
 
-    points = _points(document)
-    normal_points = _points(document, "price_normal")
-    current_normal = document.get("price_normal")
-    if current_normal:
-        current_stamp = _iso(document.get("updated_at"))
-        if not normal_points or normal_points[-1].get("price") != current_normal:
-            normal_points.append({"price": int(current_normal), "scraped_at": current_stamp})
+    observations = price_observations(
+        document.get("price_history"),
+        current_offer=document.get("price"),
+        current_normal=document.get("price_normal"),
+        current_at=document.get("updated_at"),
+    )
+    points = [
+        {"price": row["offer"], "scraped_at": row["scraped_at"], "day": row["day"]}
+        for row in observations
+        if row.get("offer") is not None
+    ]
+    normal_points = [
+        {"price": row["normal"], "scraped_at": row["scraped_at"], "day": row["day"]}
+        for row in observations
+        if row.get("normal") is not None
+    ]
     display_id, display_title = display_store(document)
     return {
         "store": document.get("store"),
@@ -125,6 +142,7 @@ def _card(document: dict[str, Any]) -> dict[str, Any]:
         "history": points,
         "history_offer": points,
         "history_normal": normal_points,
+        "price_observations": observations,
         "stats": price_stats(points, document.get("price")),
         "timing": buy_or_wait(points, document.get("price")),
     }

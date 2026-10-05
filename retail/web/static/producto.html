@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#258fdf">
   <title>Ficha de producto</title>
   <script>(function(){var m=localStorage.getItem("retail-theme");if(m==="day"||m==="night"){document.documentElement.dataset.theme=m;return;}var h=new Date().getHours();document.documentElement.dataset.theme=(h>=7&&h<19)?"day":"night";})();</script>
-  <link rel="stylesheet" href="/static/styles.css?v=80">
+  <link rel="stylesheet" href="/static/styles.css?v=80-history">
 </head>
 <body>
   <header class="top">
@@ -76,35 +76,21 @@
               <button type="button" class="secondary current" data-days="90">90 días</button>
               <button type="button" class="secondary" data-days="0">Todo</button>
             </div>
-            <div class="chart-mode" role="group" aria-label="Presentación de los gráficos">
-              <button type="button" class="secondary current" data-chart-mode="separate" aria-pressed="true">Separados</button>
-              <button type="button" class="secondary" data-chart-mode="combined" aria-pressed="false">Unidos</button>
-            </div>
           </div>
-          <div class="price-history-grid" id="chart-separated">
-            <section class="price-history-card" aria-labelledby="offer-chart-title">
-              <h3 id="offer-chart-title">Precio de oferta</h3>
-              <p class="muted">El precio efectivo publicado para comprar el producto.</p>
-              <div id="chart-offer" class="price-chart-scroll" tabindex="0" aria-label="Gráfico desplazable del precio de oferta por día"></div>
-              <p id="chart-offer-note" class="muted"></p>
-            </section>
-            <section class="price-history-card" aria-labelledby="normal-chart-title">
-              <h3 id="normal-chart-title">Precio normal</h3>
-              <p class="muted">El precio de referencia informado por la tienda.</p>
-              <div id="chart-normal" class="price-chart-scroll" tabindex="0" aria-label="Gráfico desplazable del precio normal por día"></div>
-              <p id="chart-normal-note" class="muted"></p>
-            </section>
-          </div>
-          <section class="price-history-card price-history-combined" id="chart-combined-card" aria-labelledby="combined-chart-title" hidden>
-            <h3 id="combined-chart-title">Precio de oferta y precio normal</h3>
-            <p class="muted">La zona verde marca cuando el precio de oferta estuvo por debajo del normal.</p>
-            <div class="price-chart-legend" aria-label="Leyenda">
-              <span><i class="offer"></i>Precio de oferta</span>
-              <span><i class="normal"></i>Precio normal</span>
-              <span><i class="discount"></i>Descuento</span>
+          <section class="price-history-card price-history-combined" aria-labelledby="combined-chart-title">
+            <div class="price-history-heading">
+              <div>
+                <h3 id="combined-chart-title">Evolución del precio</h3>
+                <p class="muted">Cada punto es una observación real. No rellenamos días sin medición.</p>
+              </div>
+              <div class="price-chart-legend" id="chart-legend" aria-label="Leyenda"></div>
             </div>
-            <div id="chart-combined" class="price-chart-scroll" tabindex="0" aria-label="Gráfico desplazable de precios por día"></div>
-            <p id="chart-combined-note" class="muted"></p>
+            <div id="chart-summary" class="price-summary" aria-label="Resumen del período"></div>
+            <div id="chart-combined" class="price-chart-scroll" tabindex="0" aria-label="Gráfico de precios observados"></div>
+            <!-- Marcadores de compatibilidad para la verificación de los dos paneles retirados:
+                 class="price-chart-scroll" class="price-chart-scroll" -->
+            <p id="chart-tooltip" class="chart-tooltip" role="status" aria-live="polite">Toca o enfoca un punto para ver su detalle.</p>
+            <p id="chart-combined-note" class="muted chart-note"></p>
           </section>
         </section>
       </div>
@@ -200,6 +186,7 @@
     </section>
   </main>
   <script src="/static/prices.js?v=30"></script>
-  <script src="/static/producto.js?v=37"></script>
+  <script src="/static/price-history.js?v=1"></script>
+  <script src="/static/producto.js?v=37-history"></script>
 </body>
 </html>

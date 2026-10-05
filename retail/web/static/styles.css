@@ -1298,6 +1298,18 @@ button.secondary:hover { border-color: color-mix(in srgb, var(--accent) 40%, var
 .price-history-card h3 { margin: 0; }
 .price-history-card > p { margin: 5px 0 10px; font-size: 13px; }
 .price-history-card:nth-child(2) .chart { color: var(--warn); }
+.price-history-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; flex-wrap: wrap; }
+.price-history-heading h3, .price-history-heading p { margin: 0; }
+.price-history-heading p { margin-top: 5px; font-size: 13px; }
+.price-summary { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; margin: 14px 0 8px; }
+.price-summary > div { min-width: 0; padding: 10px 11px; border: 1px solid var(--line); border-radius: 11px; background: var(--panel); }
+.price-summary span, .price-summary strong { display: block; }
+.price-summary span { color: var(--muted); font-size: 11px; font-weight: 750; }
+.price-summary strong { margin-top: 3px; font-size: 15px; overflow-wrap: anywhere; }
+#chart-combined { width: 100%; min-width: 0; touch-action: pan-y; overflow: hidden; }
+#chart-combined .chart { width: 100%; max-width: 100%; min-width: 0; }
+.chart-tooltip { min-height: 22px; margin: 5px 0 0; padding: 7px 10px; border-radius: 8px; background: var(--panel); font-size: 12px; }
+.chart-note { margin-top: 7px !important; }
 .price-chart-scroll { max-width: 100%; overflow-x: auto; overscroll-behavior-inline: contain; scrollbar-gutter: stable; padding-right: 2px; }
 .price-chart-scroll:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 8px; }
 /* max-width:none evita que .chart { max-width:100% } encoja el SVG y deje sin margen la última fecha. */
@@ -1329,6 +1341,13 @@ button.secondary:hover { border-color: color-mix(in srgb, var(--accent) 40%, var
   fill: color-mix(in srgb, var(--saving) 34%, transparent);
   stroke: none;
 }
+.chart-grid { stroke: var(--line); stroke-width: 1; }
+.chart-touch-target { fill: transparent; cursor: pointer; }
+.chart-hit:focus { outline: none; }
+.chart-hit:focus .chart-point { stroke: var(--text); stroke-width: 3; }
+.chart-marker { fill: none; stroke-width: 2.5; pointer-events: none; }
+.chart-marker.minimum { stroke: var(--saving); }
+.chart-marker.current { stroke: var(--accent); }
 .chart-point { fill: currentColor; stroke: var(--panel); stroke-width: 1.5; }
 .chart-point.offer { fill: var(--accent); }
 .chart-point.offer.discounted { fill: var(--saving); stroke: color-mix(in srgb, var(--saving) 55%, var(--panel)); }
@@ -1341,8 +1360,16 @@ button.secondary:hover { border-color: color-mix(in srgb, var(--accent) 40%, var
 @media (max-width: 780px) {
   .price-history-grid { grid-template-columns: 1fr; }
   .chart-controls { align-items: stretch; }
+  #windows { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); width: 100%; gap: 6px; }
+  #windows .secondary { min-width: 0; padding-inline: 5px; white-space: nowrap; }
   .chart-mode { width: 100%; }
   .chart-mode .secondary { flex: 1 1 50%; }
+  .price-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .price-summary > div:first-child { grid-column: 1 / -1; }
+  .price-history-card { padding: 11px; }
+  #chart-combined { margin-inline: -5px; width: calc(100% + 10px); }
+  .chart .axis { font-size: 12px; }
+  .chart .price-axis { font-size: 10px; }
 }
 .forecast-panel > summary.forecast-title,
 .others-panel > summary.others-title {
@@ -3054,11 +3081,11 @@ html[data-theme="day"] .deal:nth-child(4n) .deal-img { background: #fff6dd; }
   #chart-panel > h2,
   #others-panel h2 { margin: 0; font-size: 22px; }
   #chart-panel .price-history-card {
-    background: color-mix(in srgb, #dff7f1 72%, var(--panel));
-    border-color: color-mix(in srgb, #42bca0 30%, var(--line));
+    background: var(--panel-2);
+    border-color: var(--line);
   }
   html[data-theme="night"] #chart-panel .price-history-card {
-    background: color-mix(in srgb, #123e43 52%, var(--panel));
+    background: var(--panel-2);
   }
 
   #others-panel { min-width: 0; max-width: 100%; overflow: hidden; padding: 18px; }

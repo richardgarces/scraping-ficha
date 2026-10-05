@@ -96,6 +96,99 @@ def chart_drawable(points: list[dict[str, Any]] | None, now: datetime | None = N
     return len(chart_history(points, now=now)) >= 2
 
 
+def price_observations(
+    points: list[dict[str, Any]] | None,
+    *,
+    current_offer: Any = None,
+    current_normal: Any = None,
+    current_at: Any = None,
+) -> list[dict[str, Any]]:
+    """Observaciones comparables, ordenadas y con una sola fila por día de Santiago.
+
+    Conserva el historial crudo en MongoDB. Para la API elige la última oferta
+    válida del día y el último precio normal válido de ese mismo día, sin
+    rellenar días sin medición ni arrastrar referencias de fechas anteriores.
+    """
+
+    entries = [entry for entry in points or [] if isinstance(entry, dict)]
+    if any(entry.get("price_basis") == "all_payment" for entry in entries):
+        entries = [entry for entry in entries if entry.get("price_basis") == "all_payment"]
+
+    def valid_price(value: Any) -> int | None:
+        if value in (None, "", 0):
+            return None
+        try:
+            price = int(value)
+        except (TypeError, ValueError):
+            return None
+        return price if price > 0 else None
+
+    parsed: list[tuple[datetime, dict[str, Any]]] = []
+    for entry in entries:
+        moment = parse_moment(entry.get("scraped_at"))
+        if moment is not None:
+            parsed.append((moment, entry))
+    current_moment = parse_moment(current_at)
+    parsed.sort(key=lambda item: item[0])
+    latest = parsed[-1][1] if parsed else {}
+    latest_offer = valid_price(latest.get("price_offer"))
+    if latest_offer is None:
+        latest_offer = valid_price(latest.get("price"))
+    latest_normal = valid_price(latest.get("price_normal"))
+    append_current = (
+        valid_price(current_offer) is not None
+        and (latest_offer != valid_price(current_offer) or latest_normal != valid_price(current_normal))
+    )
+    if current_moment is not None and append_current:
+        parsed.append(
+            (
+                current_moment,
+                {
+                    "price": current_offer,
+                    "price_offer": current_offer,
+                    "price_normal": current_normal,
+                    "price_basis": "current",
+                    "scraped_at": current_moment.isoformat(),
+                },
+            )
+        )
+    parsed.sort(key=lambda item: item[0])
+
+    by_day: dict[date, dict[str, Any]] = {}
+    for moment, entry in parsed:
+        offer = valid_price(entry.get("price_offer"))
+        if offer is None:
+            offer = valid_price(entry.get("price"))
+        normal = valid_price(entry.get("price_normal"))
+        if offer is None and normal is None:
+            continue
+        day = santiago_day(moment)
+        row = by_day.setdefault(
+            day,
+            {
+                "day": day.isoformat(),
+                "scraped_at": moment.isoformat(),
+                "offer": None,
+                "normal": None,
+                "price_basis": entry.get("price_basis") or "published",
+            },
+        )
+        row["scraped_at"] = moment.isoformat()
+        row["price_basis"] = entry.get("price_basis") or row["price_basis"]
+        if offer is not None:
+            row["offer"] = offer
+        # Un duplicado posterior sin precio normal no borra una referencia
+        # válida observada ese mismo día.
+        if normal is not None:
+            row["normal"] = normal
+
+    observations = [by_day[day] for day in sorted(by_day)]
+    for row in observations:
+        offer, normal = row["offer"], row["normal"]
+        row["saving"] = normal - offer if offer is not None and normal is not None and offer < normal else 0
+    return observations
+
+
 def _within(rows: list[tuple[datetime | None, int]], days: int, now: datetime) -> list[int]:
     limit = now - timedelta(days=days)
     inside = [price for moment, price in rows if moment is not None and moment >= limit]
