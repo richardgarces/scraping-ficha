@@ -10,17 +10,14 @@ from urllib.request import ProxyHandler, Request, build_opener
 
 def is_challenge(status: int, headers, body: str) -> bool:
     headers = {key.lower(): value.lower() for key, value in headers.items()}
-    return headers.get("cf-mitigated") == "challenge" or (
+    if headers.get("cf-mitigated") == "challenge":
+        return True
+    from retail.offer_screenshot import is_bot_check_page
+
+    return (
         status in (200, 403, 429, 503)
         and "cloudflare" in headers.get("server", "")
-        and any(
-            marker in body[:262144].lower()
-            for marker in (
-                "/cdn-cgi/challenge-platform/",
-                "cf-chl-",
-                "just a moment...",
-            )
-        )
+        and is_bot_check_page(body)
     )
 
 
@@ -54,9 +51,7 @@ def solve(url: str, endpoint: str, *, screenshot: bool = False) -> dict:
     if not isinstance(solution, dict) or not isinstance(solution.get("response"), str):
         raise RuntimeError("FlareSolverr devolvió una solución inválida")
     status = int(solution.get("status", 200))
-    if status >= 400 or is_challenge(
-        status, {"server": "cloudflare"}, solution["response"]
-    ):
+    if status >= 400:
         raise RuntimeError("FlareSolverr no resolvió el desafío")
     from retail.offer_screenshot import is_bot_check_page
 

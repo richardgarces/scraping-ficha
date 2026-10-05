@@ -280,3 +280,13 @@ def test_product_page_still_saves_png(monkeypatch, tmp_path):
     )
     assert path
     assert Path(path).is_file()
+
+
+def test_falabella_passive_cloudflare_script_is_not_a_challenge():
+    html = """<html><title>Café Colombia | Falabella</title>
+    <body><h1>Café Colombia</h1><p>$8.590</p>
+    <script>var a=document.createElement('script');
+    a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';</script>
+    </body></html>"""
+    assert shots.is_bot_check_page(html) is False
+    assert shots.is_bot_check_page(html, "Just a moment...") is True

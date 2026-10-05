@@ -63,3 +63,12 @@ una nueva sesión Playwright que volvería a perder las cookies.
 Si el respaldo falla o sigue bloqueado, se mantiene la imagen del producto.
 No se envía una captura de la intersticial ni se da por resuelto un desafío
 solo porque FlareSolverr devuelve `status: ok`.
+
+## Capturas de Falabella
+
+El mismo respaldo de capturas cubre Falabella. Su ficha puede incluir el script
+pasivo de Cloudflare `/cdn-cgi/challenge-platform/scripts/jsd/main.js`; ese
+recurso por sí solo no indica una intersticial. Se mantiene la detección por
+títulos de desafío, marcadores de la intersticial y texto de verificación.
+En la prueba desde soyo, Playwright recibió un 403 y FlareSolverr obtuvo la
+ficha con foto y precio. Esto verifica esa ficha, no garantiza acceso a todas.

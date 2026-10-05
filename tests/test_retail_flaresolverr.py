@@ -7,7 +7,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import pytest
 
 from retail.http import HttpError, HttpSession
-from retail.flaresolverr import solve
+from retail.flaresolverr import is_challenge, solve
 from retail.offer_screenshot import _capture_with_solver
 
 
@@ -66,6 +66,11 @@ def solver_service(monkeypatch):
                     result["solution"]["response"] = (
                         "<html><title>Robot or human?</title><main id='px-captcha'>"
                         "Activate and hold to confirm that you're human. PRESS & HOLD</main></html>"
+                    )
+                if "/passive-jsd" in payload["url"]:
+                    result["solution"]["response"] = (
+                        "<html><title>Café Colombia | Falabella</title><h1>Café Colombia</h1>"
+                        "<script src='/cdn-cgi/challenge-platform/scripts/jsd/main.js'></script></html>"
                     )
                 if payload.get("returnScreenshot"):
                     from PIL import Image
@@ -160,3 +165,12 @@ def test_bad_solver_capture_discarded(solver_service, tmp_path, path):
     destination.write_bytes(b"old blocked capture")
     assert _capture_with_solver(endpoint + path, destination) is False
     assert not destination.exists()
+
+
+def test_falabella_capture_with_passive_js_detection(solver_service, tmp_path):
+    _, endpoint, _ = solver_service
+    destination = tmp_path / "falabella.png"
+    assert _capture_with_solver(endpoint + "/passive-jsd", destination) is True
+    assert destination.is_file()
+    html = solve(endpoint + "/passive-jsd", endpoint)["response"]
+    assert is_challenge(200, {"Server": "cloudflare"}, html) is False

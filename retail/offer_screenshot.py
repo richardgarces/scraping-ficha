@@ -280,13 +280,12 @@ def apply_offer_screenshot(payload: dict[str, Any]) -> dict[str, Any]:
     return payload
 
 
-# Marcadores del HTML de la intersticial. Un widget Turnstile embebido en un
-# formulario no basta: hace falta la página de comprobación.
+# Marcadores del HTML de la intersticial. Un widget Turnstile o el script
+# pasivo /scripts/jsd/main.js no bastan: hace falta la página de comprobación.
 _STRUCTURAL_MARKERS = (
     "cf-browser-verification",
     "cf-challenge-running",
     "cf-im-under-attack",
-    "/cdn-cgi/challenge-platform/",
     "_cf_chl_opt",
     "cf-chl-widget",
     'id="challenge-running"',
