@@ -99,6 +99,14 @@ consulta sube de prioridad si contiene precios volátiles, patrones temporales o
 una baja TimesFM que también se sostiene en el límite superior del pronóstico.
 Los productos estables pasan gradualmente de revisión diaria a cada 3 o 7 días.
 
+Tras armar el plan, `boost_watched_and_offer_priorities` adelanta catálogos con
+productos en Siguiendo (`watches` + `price_alerts` de usuarios *approved*) con
+score 95 e intervalo de 6 h, por encima del catálogo genérico y de candidatos de
+oferta del día (score 85). Es idempotente: no dispara un scrape aparte; el batch
+adaptativo solo reordena y respeta presupuesto / «Continuar». La métrica diaria
+queda en `app_settings` bajo `scrape_following_boost:AAAA-MM-DD`
+(`following_boosted` = catálogos seguidos boosteados ese día).
+
 El batch solo aplica este plan cuando TimesFM ha superado la validación general.
 Los productos sin plan se revisan normalmente y un plan de más de 48 horas se
 descarta automáticamente, ejecutando el catálogo completo. `ADAPTIVE_SCRAPING=0`

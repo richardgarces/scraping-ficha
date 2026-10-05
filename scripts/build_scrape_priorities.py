@@ -106,6 +106,8 @@ def main() -> None:
 
             boost = boost_watched_and_offer_priorities(repo, now=now)
             status["watch_offer_boost"] = boost
+            status["following_boosted"] = boost.get("following_boosted", 0)
+            status["following_products"] = boost.get("following_products", 0)
             print(json.dumps({"watch_offer_boost": boost}, ensure_ascii=False, default=str))
         except Exception as exc:
             status["watch_offer_boost_error"] = str(exc)

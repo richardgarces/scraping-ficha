@@ -39,6 +39,9 @@ Rutas clave:
 
 ## Scraping, alertas, UX, seguridad
 
+- [x] Priorizar scrape diario de productos en Siguiendo (`watches` + `price_alerts` de usuarios approved) vía `scrape_priority_boost` + métrica `scrape_following_boost:AAAA-MM-DD`.
+- [x] Piloto Scrapling en 2 fuentes HTML frágiles (`hites`, `santaritaonline`); ver [`docs/SCRAPLING.md`](SCRAPLING.md). Extra opcional `.[scrapling]` solo batch/soyo.
+
 Ver [`PENDIENTES.md`](../PENDIENTES.md) para el detalle de scraping/cron, push, catálogo, interfaz móvil, anti-scraping y dependencias externas.
 
 ## Criterio de cierre
