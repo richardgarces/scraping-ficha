@@ -840,6 +840,7 @@ html.is-searching .search-bar > span {
 }
 .down { color: var(--accent); }
 .up { color: var(--danger); }
+td.down, td.up { font-weight: 700; }
 .spark { display: block; color: var(--accent); }
 .nav { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
 .nav a, .nav summary {

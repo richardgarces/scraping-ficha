@@ -36,7 +36,8 @@ def test_cyber_day_static_assets_exist():
     assert "Reiniciar" in html
     assert "cyber-list-select" in html
     assert "Nueva lista" in html
-    assert "cyber-day.js?v=9" in html
+    assert "cyber-day.js?v=10" in html
+    assert "<h1>Cyber</h1>" in html
     assert "<th>Matches</th>" not in html
     assert "last_match_count" not in js  # columna UI quitada; sigue en API/export
     assert "Precio más alto normal" in html
@@ -56,11 +57,13 @@ def test_cyber_day_static_assets_exist():
     assert "applyActionButtons" in js
     assert "stores_scraped" in js
     assert "best_offer_url" in js
+    assert "priceCellHtml" in js
+    assert 'nameEl.textContent = "Cyber"' in js
     assert "status === \"running\"" in js or 'status === "running"' in js
     assert (root / "cyber_junio2026.json").is_file()
     prices = (root / "prices.js").read_text(encoding="utf-8")
     assert 'href = "/cyber-day"' in prices or 'href="/cyber-day"' in prices
-    assert 'textContent = "Cyber Day"' in prices
+    assert 'textContent = "Cyber"' in prices
     cron_js = (root / "cron.js").read_text(encoding="utf-8")
     assert "queries" in cron_js
     assert "query_list" in cron_js

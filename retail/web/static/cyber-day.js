@@ -90,6 +90,19 @@
     return `$${Math.round(n).toLocaleString("es-CL")}`;
   }
 
+  /** Celda de mejor precio: verde si bajó, rojo si subió (según prev_best_price). */
+  function priceCellHtml(row) {
+    const text = formatPrice(row?.last_price);
+    const dir = row?.price_direction
+      || (row?.prev_best_price != null && row?.last_price != null
+        ? (Number(row.last_price) < Number(row.prev_best_price) ? "down"
+          : Number(row.last_price) > Number(row.prev_best_price) ? "up" : "")
+        : "");
+    if (dir === "down") return `<td class="down" title="Bajó vs ${formatPrice(row.prev_best_price)}">${text}</td>`;
+    if (dir === "up") return `<td class="up" title="Subió vs ${formatPrice(row.prev_best_price)}">${text}</td>`;
+    return `<td>${text}</td>`;
+  }
+
   function listQuery(path) {
     if (!currentListId) return path;
     const sep = path.includes("?") ? "&" : "?";
@@ -143,9 +156,8 @@
         <td>—</td>
         <td>—</td>
         <td>—</td>
-        <td>—</td>
         <td class="muted">seed local</td>
-      </tr>`).join("") || `<tr><td colspan="11" class="err">Sin seed local.</td></tr>`;
+      </tr>`).join("") || `<tr><td colspan="10" class="err">Sin seed local.</td></tr>`;
       }
       if (meta) {
         meta.textContent = `Error API: ${message}. Seed local: ${items.length} queries (solo lectura; reintentá Iniciar o recargá).`;
@@ -153,7 +165,7 @@
     } catch (seedError) {
       const body = el("cyber-products-body");
       if (body) {
-        body.innerHTML = `<tr><td colspan="11" class="err">Error al cargar: ${escapeHtml(message)} · seed: ${escapeHtml(seedError.message)}</td></tr>`;
+        body.innerHTML = `<tr><td colspan="10" class="err">Error al cargar: ${escapeHtml(message)} · seed: ${escapeHtml(seedError.message)}</td></tr>`;
       }
     }
     // Seed local: no arrancar worker; botones de control deshabilitados.
@@ -199,9 +211,10 @@
     const nameEl = el("cyber-name");
     const slugEl = el("cyber-slug");
     if (slugEl) slugEl.textContent = currentListId || "—";
-    if (nameEl) nameEl.textContent = listMeta.name || listMeta.title || currentListId || "Cyber Day";
+    // Título de sección fijo; el nombre de lista vive en select + card de progreso.
+    if (nameEl) nameEl.textContent = "Cyber";
     const liveTitle = el("cyber-live-title");
-    if (liveTitle) liveTitle.textContent = listMeta.name || listMeta.title || currentListId || "Cyber Day";
+    if (liveTitle) liveTitle.textContent = listMeta.name || listMeta.title || currentListId || "Cyber";
 
     const exportCsv = el("cyber-export-csv");
     const exportJson = el("cyber-export-json");
@@ -289,7 +302,7 @@
           >
         </td>
         <td>${escapeHtml(row.category || "—")}</td>
-        <td>${formatPrice(row.last_price)}</td>
+        ${priceCellHtml(row)}
         <td>${escapeHtml(row.stores_scraped != null ? row.stores_scraped : 0)}</td>
         <td>${formatPrice(row.max_price_normal)}</td>
         <td>${formatPrice(row.min_price_normal)}</td>

@@ -4,15 +4,15 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#258fdf">
-  <title>Cyber Day</title>
+  <title>Cyber</title>
   <script>(function(){var m=localStorage.getItem("retail-theme");if(m==="day"||m==="night"){document.documentElement.dataset.theme=m;return;}var h=new Date().getHours();document.documentElement.dataset.theme=(h>=7&&h<19)?"day":"night";})();</script>
-  <link rel="stylesheet" href="/static/styles.css?v=84">
+  <link rel="stylesheet" href="/static/styles.css?v=85">
 </head>
 <body>
   <header class="top">
     <div>
       <p class="eyebrow">Retail Chile</p>
-      <h1>Cyber Day</h1>
+      <h1>Cyber</h1>
     </div>
     <form class="desktop-quick-search" action="/catalogo" method="get" role="search">
       <label class="desktop-search-field"><span class="sr-only">Buscar un producto</span><input name="q" type="search" placeholder="Busca un producto…"></label>
@@ -36,7 +36,7 @@
         <summary class="current" data-user-label>Cuenta</summary>
         <div class="nav-menu-list">
           <a href="/siguiendo">Siguiendo</a>
-          <a href="/cyber-day" class="current" data-admin hidden>Cyber Day</a>
+          <a href="/cyber-day" class="current" data-admin hidden>Cyber</a>
           <a href="/cron" data-admin hidden>Cron / lotes</a>
           <a href="/analisis-producto" data-admin hidden>Análisis de producto</a>
           <a href="/estadisticas" data-admin hidden>Estadísticas</a>
@@ -57,7 +57,7 @@
     <section class="panel" id="cyber-day-panel">
       <div class="cron-head">
         <div>
-          <h2 id="cyber-title"><span id="cyber-name">Cyber Day</span> <span class="muted" id="cyber-slug">—</span></h2>
+          <h2 id="cyber-title"><span id="cyber-name">Cyber</span> <span class="muted" id="cyber-slug">—</span></h2>
           <p class="muted">Loop continuo por lista. Por cada query busca/refresca top ofertas; al terminar reinicia. Telegram + push si cambia el precio u oferta. Cada lista tiene estado y progreso propios.</p>
         </div>
         <div class="cron-controls">
@@ -139,7 +139,7 @@
       </div>
     </section>
   </main>
-  <script src="/static/prices.js?v=33"></script>
-  <script src="/static/cyber-day.js?v=9"></script>
+  <script src="/static/prices.js?v=34"></script>
+  <script src="/static/cyber-day.js?v=10"></script>
 </body>
 </html>

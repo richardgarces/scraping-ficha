@@ -231,6 +231,30 @@ def _summary_patch(summary: dict[str, Any] | None) -> dict[str, Any]:
     }
 
 
+def _prev_best_price_patch(item: dict[str, Any] | None, new_price: Any) -> dict[str, Any]:
+    """Si el mejor precio cambia, guarda el anterior para colorear en UI.
+
+    Primera observación: sin prev. Si el precio se mantiene, no toca prev
+    (el color sigue mientras prev ≠ current).
+    """
+    old = _as_int((item or {}).get("last_price"))
+    new = _as_int(new_price)
+    if old is not None and new is not None and old != new:
+        return {"prev_best_price": old}
+    if old is None:
+        return {"prev_best_price": None}
+    return {}
+
+
+def price_direction(last_price: Any, prev_best_price: Any) -> str | None:
+    """'down' si bajó, 'up' si subió; None si no hay previo comparable."""
+    current = _as_int(last_price)
+    previous = _as_int(prev_best_price)
+    if current is None or previous is None or current == previous:
+        return None
+    return "down" if current < previous else "up"
+
+
 def slugify_list(name: str) -> str:
     text = (name or "").strip().lower().replace("-", "_")
     text = _SLUG_RE.sub("_", text)
@@ -506,6 +530,7 @@ def product_row_view(row: dict[str, Any]) -> dict[str, Any]:
     last_normal = _as_int(row.get("last_price_normal"))
     if last_normal is None:
         last_normal = derived.get("last_price_normal")
+    prev_best = _as_int(row.get("prev_best_price"))
     return {
         "id": str(row.get("id") or row.get("_id") or ""),
         "n": row.get("n"),
@@ -515,6 +540,8 @@ def product_row_view(row: dict[str, Any]) -> dict[str, Any]:
         "category": row.get("category") or "",
         "last_match_count": int(row.get("last_match_count") or 0),
         "last_price": last_price,
+        "prev_best_price": prev_best,
+        "price_direction": price_direction(last_price, prev_best),
         "last_price_normal": last_normal,
         "stores_scraped": int(stores or 0),
         "max_price_normal": max_normal,
@@ -554,10 +581,12 @@ def enrich_row_from_catalog(repo: Any, row: dict[str, Any], *, persist: bool = T
         return product_row_view(row)
     sigs, _changes, summary = detect_changes(None, matches, query=query)
     now = _now()
+    new_price = summary.get("last_price") if summary else None
     patch = {
         "last_matches": sigs,
         "last_match_count": len(sigs),
         **_summary_patch(summary),
+        **_prev_best_price_patch(row, new_price),
         "last_observed_at": now,
         "last_error": None,
         "resolved": True,
@@ -666,6 +695,7 @@ def update_item(
             "last_matches": {},
             "last_match_count": 0,
             "last_price": None,
+            "prev_best_price": None,
             "last_price_normal": None,
             "last_signature": None,
             "stores_scraped": 0,
@@ -1636,6 +1666,7 @@ def process_one(repo: Any, *, delay: float = 0.0, list_id: str | None = None) ->
         if changed:
             run["notified_count"] = int(run.get("notified_count") or 0) + changed
 
+        new_best = summary.get("last_price") if summary else None
         coll.update_one(
             {"_id": item["_id"]},
             {
@@ -1647,6 +1678,7 @@ def process_one(repo: Any, *, delay: float = 0.0, list_id: str | None = None) ->
                     "last_matches": current_sigs,
                     "last_match_count": len(current_sigs),
                     **_summary_patch(summary),
+                    **_prev_best_price_patch(item, new_best),
                     "last_observed_at": now,
                     "last_error": None if tracked else "Sin matches en catálogo/scrape.",
                     "updated_at": now,

@@ -688,12 +688,12 @@ function applySession(user) {
       if (!cyber) {
         cyber = document.createElement("a");
         cyber.href = "/cyber-day";
-        cyber.textContent = "Cyber Day";
         cyber.setAttribute("data-admin", "");
         const quotes = menu.querySelector('a[href="/cotizaciones"]');
         if (quotes) quotes.after(cyber);
         else menu.prepend(cyber);
       }
+      cyber.textContent = "Cyber";
       cyber.hidden = false;
       if (location.pathname === "/cyber-day" || location.pathname === "/cyber") {
         cyber.classList.add("current");

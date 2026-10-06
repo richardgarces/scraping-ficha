@@ -299,6 +299,15 @@ def test_notify_on_change_mocked(repo, monkeypatch):
     assert second["changed"] == 1
     assert sent["n"] == 1
 
+    from retail.cyber_day import products_collection
+
+    stored = products_collection(repo).find_one({"n": first.get("n") or 1})
+    assert stored is not None
+    assert stored.get("last_price") == 700000
+    assert stored.get("prev_best_price") == 800000
+    view = product_row_view({**stored, "id": str(stored["_id"])})
+    assert view["price_direction"] == "down"
+
 
 def test_parse_import_json_and_csv():
     rows = parse_products_payload(
