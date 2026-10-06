@@ -599,17 +599,26 @@
     button.disabled = true;
     button.textContent = "Importando…";
     try {
-      const body = new FormData();
-      body.append("file", file);
-      if (currentListId) body.append("list_id", currentListId);
-      const response = await fetch(listQuery("/api/admin/cyber-day/import"), { method: "POST", body });
+      // Enviar cuerpo raw (JSON/CSV), no FormData: evita depender de python-multipart
+      // en el contenedor (FormData → 500 «multipart must be installed»).
+      const text = await file.text();
+      const lower = (file.name || "").toLowerCase();
+      const isJson = lower.endsWith(".json") || text.trimStart().startsWith("[") || text.trimStart().startsWith("{");
+      const headers = {
+        "Content-Type": isJson ? "application/json; charset=utf-8" : "text/csv; charset=utf-8",
+      };
+      const response = await fetch(listQuery("/api/admin/cyber-day/import"), {
+        method: "POST",
+        headers,
+        body: text,
+      });
       const payload = await response.json().catch(() => ({}));
       if (response.status === 401 || response.status === 403) {
         location.href = `/entrar?next=${encodeURIComponent("/cyber-day")}`;
         return;
       }
       if (!response.ok) {
-        throw new Error(typeof payload.detail === "string" ? payload.detail : response.statusText);
+        throw new Error(typeof payload.detail === "string" ? payload.detail : response.statusText || `HTTP ${response.status}`);
       }
       showFlash(payload.message || `Lista actualizada: ${payload.imported || 0} queries.`);
       input.value = "";

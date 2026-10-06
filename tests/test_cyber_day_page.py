@@ -41,7 +41,9 @@ def test_cyber_day_static_assets_exist():
     assert "Eliminar lista" in html
     assert "Importar / actualizar lista activa" in html
     assert "reemplaza las queries" in html
-    assert "cyber-day.js?v=12" in html
+    assert "cyber-day.js?v=13" in html
+    assert "application/json; charset=utf-8" in js  # import raw JSON (no FormData/multipart)
+    assert "new FormData()" not in js
     assert "<h1>Cyber</h1>" in html
     assert "cyber_junio2026" not in html  # branding genérico; slug solo backend/lista
     assert "<th>Matches</th>" not in html
@@ -157,6 +159,16 @@ def test_cyber_day_delete_and_reimport_api_admin(monkeypatch, mongo_uri):
         assert payload["imported"] == 1
         assert payload["list_id"] == "cyber_junio2026"
         assert payload["list"]["name"]
+
+        # Array JSON raw (mismo shape que el archivo del usuario / UI v13).
+        raw_array = client.post(
+            "/api/admin/cyber-day/import?list=cyber_junio2026",
+            content='[{"n":1,"query":"TV OLED 55\\"","category":"TV"},'
+            '{"n":2,"query":"Lavadora 9–12 kg","category":"Línea blanca"}]',
+            headers={"Content-Type": "application/json; charset=utf-8"},
+        )
+        assert raw_array.status_code == 200
+        assert raw_array.json()["imported"] == 2
     finally:
         repo.close = real_close
         real_close()

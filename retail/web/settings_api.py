@@ -633,7 +633,18 @@ async def cyber_day_import(request: Request) -> dict:
     content_type = request.headers.get("content-type") or ""
     try:
         if "multipart/form-data" in content_type:
-            form = await request.form()
+            try:
+                form = await request.form()
+            except (AssertionError, RuntimeError) as exc:
+                # Starlette exige python-multipart; sin él FormData → 500 opaco.
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "Import multipart no disponible (falta python-multipart). "
+                        "Subí el archivo de nuevo (el cliente envía JSON/CSV raw) "
+                        "o instalá python-multipart en la imagen."
+                    ),
+                ) from exc
             list_id = str(form.get("list_id") or form.get("list") or list_id or "").strip() or list_id
             upload = form.get("file") or form.get("lista")
             if upload is not None and hasattr(upload, "read"):
