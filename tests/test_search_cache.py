@@ -146,10 +146,23 @@ def test_result_cache_hits_same_query_until_midnight(monkeypatch):
     assert cache.lookup_result("notebook", source="both", stores=["lider", "tottus"], max_items=8, price_band=True) is None
 
 
-def test_result_cache_keeps_completed_empty_search():
+def test_result_cache_skips_empty_search():
+    """Un cero del día no debe reutilizarse: tipografía/timeouts lo convertían en falso vacío."""
+    from retail.search_cache import rewrite_search_query
+
     cache = SearchCache(MemoryRedis())
-    cache.store_result("tv", source="both", stores=["lider"], max_items=8, price_band=True, result={"rows": []})
-    assert cache.lookup_result("tv", source="both", stores=["lider"], max_items=8, price_band=True)["rows"] == []
+    cache.store_result(
+        "tv",
+        source="both",
+        stores=["lider"],
+        max_items=8,
+        price_band=True,
+        result={"rows": [], "progress": [{"id": "lider", "state": "ok", "count": 0}]},
+    )
+    assert cache.lookup_result("tv", source="both", stores=["lider"], max_items=8, price_band=True) is None
+    assert rewrite_search_query("azúcar ianza") == "azúcar iansa"
+    assert rewrite_search_query("azucar  ianza") == "azucar iansa"
+    assert rewrite_search_query("azúcar granulada") == "azúcar granulada"
 
 
 @pytest.mark.parametrize("extra", [
@@ -185,7 +198,7 @@ def test_cache_read_crossing_midnight_rejects_yesterdays_result(monkeypatch):
     redis = MemoryRedis()
     cache = SearchCache(redis)
     scope = dict(source="scrape", stores=["lider"], max_items=5, price_band=True)
-    cache.store_result("sal", result={"rows": []}, **scope)
+    cache.store_result("sal", result={"rows": [{"name": "Sal", "price": 500}]}, **scope)
     read = redis.get
 
     def cross_midnight(key):
@@ -266,10 +279,10 @@ def test_typo_uses_cached_result_before_routing_or_scraping(monkeypatch):
     monkeypatch.setattr("retail.search.connect_repo", lambda: pytest.fail("No debe consultar Mongo ni tiendas"))
     try:
         events = list(iter_search_events("ssal", source="scrape", persist=False))
-        assert [event["type"] for event in events] == ["start", "done"]
-        assert events[-1]["result"]["query"] == "sal"
-        assert events[-1]["result"]["requested_query"] == "ssal"
-        assert events[-1]["result"]["stores"] == selected
+        assert [event["type"] for event in events] == ["start", "done", "end"]
+        assert events[1]["result"]["query"] == "sal"
+        assert events[1]["result"]["requested_query"] == "ssal"
+        assert events[1]["result"]["stores"] == selected
     finally:
         qdrant.client.close()
 
@@ -460,9 +473,45 @@ def test_search_stream_returns_cached_result(monkeypatch):
     monkeypatch.setattr("retail.search.lookup_search_result", lambda *args, **kwargs: cached)
     monkeypatch.setattr("retail.search.connect_repo", lambda: None)
     events = list(iter_search_events("tv", source="scrape", stores=["falabella"], persist=False))
-    assert [item["type"] for item in events] == ["start", "done"]
-    assert events[-1]["result"]["rows"][0]["name"] == "TV LG"
+    assert [item["type"] for item in events] == ["start", "done", "end"]
+    assert events[1]["result"]["rows"][0]["name"] == "TV LG"
     assert events[0]["progress"][0]["cached"] is True
+
+
+def test_ianza_typo_rewrites_before_cache_and_scope(monkeypatch):
+    from retail.search import iter_search_events
+    from retail.search_cache import rewrite_search_query
+
+    assert rewrite_search_query("azúcar ianza") == "azúcar iansa"
+    seen = []
+
+    def fake_lookup(query, **kwargs):
+        seen.append(query)
+        return {
+            "query": query,
+            "offer_count": 2,
+            "rows": [{"name": "Azúcar Iansa", "price": 1290, "store": "lider"}],
+            "progress": [{"id": "lider", "state": "ok", "count": 1}],
+            "cache": {"hit": "result"},
+        }
+
+    monkeypatch.setattr("retail.search.lookup_search_result", fake_lookup)
+    monkeypatch.setattr("retail.search.resolve_search_query", lambda query: query)
+    monkeypatch.setattr("retail.search.connect_repo", lambda: None)
+    monkeypatch.setattr("retail.search.launch_other_store_sweep", lambda *args, **kwargs: None)
+    events = list(
+        iter_search_events(
+            "azúcar ianza",
+            source="scrape",
+            stores=["lider"],
+            persist=False,
+            fresh=False,
+        )
+    )
+    assert seen == ["azúcar iansa"]
+    assert events[0]["query"] == "azúcar iansa"
+    assert events[1]["requested_query"] == "azúcar ianza"
+    assert [item["type"] for item in events] == ["start", "done", "end"]
 
 
 def test_summarize_search_cache_lists_today_queries(monkeypatch):

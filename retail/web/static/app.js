@@ -1411,10 +1411,14 @@ function runSearch(query) {
   }
   const source = new EventSource(`/api/search/stream?${params}`);
   currentSource = source;
+  // EventSource dispara onerror también al cerrar bien el stream. Sin esta
+  // marca, un `done` con 0 filas se mostraba como «Se cortó la consulta».
+  let searchSettled = false;
   source.onmessage = (event) => {
     if (currentSource !== source) return;
     const payload = JSON.parse(event.data);
     if (payload.type === "error") {
+      searchSettled = true;
       setSearching(false);
       $("summary").innerHTML = `<p class="err">${payload.detail}</p>`;
       source.close();
@@ -1445,12 +1449,14 @@ function runSearch(query) {
       // Algunas búsquedas emiten `done` antes de terminar tiendas opcionales.
       // Solo cerrar el spinner cuando el progreso realmente esté completo.
       if (hasActiveStores(payload.result)) return;
+      searchSettled = true;
       setSearching(false);
       offerExpandedSearch();
       json("/api/history").then(fillHistory).catch(() => {});
       return;
     }
     if (payload.type === "end") {
+      searchSettled = true;
       setSearching(false);
       source.close();
       if (currentSource === source) {
@@ -1463,11 +1469,12 @@ function runSearch(query) {
   };
   source.onerror = () => {
     if (currentSource !== source) return;
+    const settled = searchSettled;
     source.close();
     currentSource = null;
     currentSearchId = "";
     setSearching(false);
-    if (!currentRows.length) {
+    if (!settled && !currentRows.length) {
       $("summary").innerHTML = "<p class='err'>Se cortó la consulta. Vuelve a buscar.</p>";
     }
   };

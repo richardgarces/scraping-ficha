@@ -806,6 +806,10 @@ def search_stream(
         except GeneratorExit:
             cancel.set()
             raise
+        except Exception as exc:
+            # Evita cortar el SSE sin evento: el navegador interpreta el cierre
+            # como «Se cortó la consulta» cuando aún no hay filas.
+            yield f"data: {json.dumps({'type': 'error', 'detail': f'No se pudo completar la búsqueda: {exc}'})}\n\n"
         finally:
             drop_search_cancel(ident)
 

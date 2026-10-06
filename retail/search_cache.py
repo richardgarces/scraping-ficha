@@ -71,6 +71,25 @@ def canonical_query(text: str) -> str:
     return " ".join(re.findall(r"[a-z0-9]+", fold(text)))
 
 
+# Erratas frecuentes de marcas/productos chilenos. Solo sustituciones baratas
+# y explícitas: no aproximar medidas ni modelos (ver typo_equivalent).
+QUERY_TOKEN_ALIASES = {
+    "ianza": "iansa",
+}
+
+
+def rewrite_search_query(query: str) -> str:
+    """Colapsa espacios y aplica alias de tokens (p. ej. ianza→iansa)."""
+    text = " ".join(str(query or "").split())
+    if not text:
+        return text
+    parts: list[str] = []
+    for token in text.split():
+        alias = QUERY_TOKEN_ALIASES.get(fold(token))
+        parts.append(alias if alias else token)
+    return " ".join(parts)
+
+
 def query_digest(text: str) -> str:
     return hashlib.sha256(canonical_query(text).encode()).hexdigest()[:24]
 
@@ -199,6 +218,9 @@ class SearchCache:
         result = payload.get("result") if isinstance(payload, dict) else None
         if not isinstance(result, dict) or not isinstance(result.get("rows"), list):
             return None
+        # Ignorar ceros ya guardados (p. ej. typo del día) para no bloquear reintentos.
+        if not result.get("rows"):
+            return None
         result = dict(result)
         result["groups"] = result.get("groups") or []
         result["saved"] = None
@@ -229,14 +251,18 @@ class SearchCache:
             and not result.get("scraped_count")
             and not stores_completed
         )
+        rows = result.get("rows")
         if (
-            not isinstance(result.get("rows"), list)
+            not isinstance(rows, list)
+            or not rows
             or result.get("cancelled")
             or result.get("store_errors")
             or result.get("warnings")
             or unavailable
             or any(item.get("state") not in {"ok", "skip"} for item in progress)
         ):
+            # No cachear ceros: un vacío del día (typo, timeout parcial) bloqueaba
+            # reintentos y disparaba el falso «Se cortó la consulta» en el SSE.
             return
         stamp = _now()
         day, ttl = chile_today(stamp), ttl_until_midnight(stamp)
@@ -249,8 +275,7 @@ class SearchCache:
             ttl,
             json.dumps(payload, ensure_ascii=False, default=str),
         )
-        if result.get("rows"):
-            self._remember_query(query, day=day, ttl=ttl)
+        self._remember_query(query, day=day, ttl=ttl)
 
     def lookup_stores(
         self,
@@ -345,6 +370,10 @@ class SearchCache:
         if cached_max < max_items:
             return None
         products = _products(payload.get("products") or [])[:max_items]
+        # Un scrape vacío del día no debe marcar «11 de hoy» y saltar tiendas:
+        # puede ser typo/timeout y bloquea reintentos con la query corregida.
+        if not products:
+            return None
         return {"products": products}
 
     def _similar(self, query: str) -> dict[str, Any] | None:
@@ -375,23 +404,24 @@ class SearchCache:
 
 def resolve_search_query(query: str) -> str:
     """Usa Qdrant para corregir una errata hacia una búsqueda de hoy en Redis."""
+    text = rewrite_search_query(query)
     client = connect_redis()
     if client is None:
-        return query
+        return text
     try:
-        if client.get(query_redis_key(query_digest(query))):
-            return query
+        if client.get(query_redis_key(query_digest(text))):
+            return text
         if not client.get(f"search:{chile_today()}:queries-ready"):
-            return query
+            return text
         from retail.qdrant_index import connect_qdrant
 
         qdrant = connect_qdrant()
         if qdrant is None:
-            return query
-        match = SearchCache(client, qdrant)._similar(query)
-        return match["query"] if match else query
+            return text
+        match = SearchCache(client, qdrant)._similar(text)
+        return match["query"] if match else text
     except Exception:
-        return query
+        return text
 
 
 def describe_cache(

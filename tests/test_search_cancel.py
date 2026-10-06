@@ -121,9 +121,10 @@ def test_cache_hit_ignores_cancel(monkeypatch):
     cancel = threading.Event()
     cancel.set()
     events = list(iter_search_events("tv", source="scrape", stores=["falabella"], persist=False, cancel=cancel))
-    assert [item["type"] for item in events] == ["start", "done"]
+    assert [item["type"] for item in events] == ["start", "done", "end"]
+    assert events[1]["result"]["rows"][0]["name"] == "TV LG"
+    assert events[1]["result"].get("cancelled") is False
     assert events[-1]["result"]["rows"][0]["name"] == "TV LG"
-    assert events[-1]["result"].get("cancelled") is False
 
 
 def test_request_cancel_sets_event():

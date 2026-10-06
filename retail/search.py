@@ -24,7 +24,16 @@ from retail.pricing import cheaper_before, cheaper_elsewhere, mark_false_list_di
 from retail.qdrant_index import connect_qdrant
 from retail.registry import GROUP_TITLES, get_client, group_of, list_stores
 from retail.relevance import filter_relevant, fold
-from retail.search_cache import cache_warnings, describe_cache, lookup_search_result, lookup_store_products, resolve_search_query, store_search_result, store_store_products
+from retail.search_cache import (
+    cache_warnings,
+    describe_cache,
+    lookup_search_result,
+    lookup_store_products,
+    resolve_search_query,
+    rewrite_search_query,
+    store_search_result,
+    store_store_products,
+)
 from retail import thumbs
 
 SOURCES = ("scrape", "db", "both")
@@ -899,9 +908,10 @@ def iter_search_events(
     excluded_stores: list[str] | None = None,
     recover_underfilled_db: bool = True,
 ) -> Iterator[dict[str, Any]]:
-    requested_query = query.strip()
-    if requested_query and not fresh:
-        query = resolve_search_query(requested_query)
+    requested_query = " ".join(str(query or "").split())
+    query = rewrite_search_query(requested_query)
+    if query and not fresh:
+        query = resolve_search_query(query)
     text, chosen, titles, product_index = _resolve_scope(query, source, stores)
     available = [spec.id for spec in list_stores()]
     excluded = {item for item in (excluded_stores or []) if item in available}
@@ -1030,6 +1040,9 @@ def _run_search_events(
             yield {"type": "start", "query": text, "progress": progress, "product_index": product_index}
             logger.info("Redis: resultado de «%s» del día en Chile.", text)
             yield {"type": "done", "result": cached_result}
+            # El EventSource del navegador dispara onerror al cerrar el stream;
+            # sin `end` y con 0 filas la UI mostraba «Se cortó la consulta».
+            yield {"type": "end", "result": cached_result}
             return
 
     repo = connect_repo()

@@ -511,8 +511,10 @@ def catalog(
         if store and brand:
             # Brands dependen del store elegido; una sola reconsulta si hace falta.
             facets = repo.browse_facets(category=category, store=store, include_counts=want_counts)
+        from retail.search_cache import rewrite_search_query
+
         found = repo.browse(
-            text=q,
+            text=rewrite_search_query(q) if q else q,
             category=category,
             store=store,
             brand=brand,
