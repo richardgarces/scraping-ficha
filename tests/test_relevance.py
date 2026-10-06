@@ -1,6 +1,9 @@
+import pytest
+
 from retail.models import Product, sane_discount
 from retail.qdrant_index import embed_text
-from retail.relevance import filter_relevant, score_product
+from retail.relevance import equivalent_tokens, filter_relevant, score_product, text_search_clause
+from retail.search_cache import rewrite_search_query
 
 
 def _product(name: str, **kwargs) -> Product:
@@ -38,6 +41,24 @@ def test_keeps_matching_phone_and_drops_unrelated():
 def test_storage_is_optional_but_model_is_required():
     assert score_product("celular s25 512gb", _product("Galaxy S25 256GB")).accepted is True
     assert score_product("celular s25 512gb", _product("Celular POCO F9 Ultra")).accepted is False
+
+
+@pytest.mark.parametrize("query", ["ianza", "Ianza", "IANZA", "iansa", "azúcar ianza", "azúcar Iansa"])
+def test_iansa_brand_aliases_match_case_insensitively(query):
+    """iansa ↔ ianza son alias de marca; el caso no importa."""
+    sugar = _product("Azúcar granulada Iansa, 400 g", brand="Iansa", product_id="sugar-iansa", store="alvi", price=890)
+    other = _product("Arroz grado 1", brand="Tucapel", product_id="rice", store="alvi", price=990)
+    assert score_product(query, sugar).accepted is True
+    assert "iansa" in equivalent_tokens("ianza")
+    assert "ianza" in equivalent_tokens("iansa")
+    assert text_search_clause("azúcar ianza") == "azucar (iansa OR ianza)"
+    for raw in ("ianza", "Ianza", "IANZA", "iansa"):
+        assert rewrite_search_query(raw) == "iansa"
+    assert rewrite_search_query("azúcar ianza") == "azúcar iansa"
+    assert rewrite_search_query("azúcar Iansa") == "azúcar iansa"
+    kept, discarded, _ = filter_relevant(query, [sugar, other], price_band=False)
+    assert any(item.product_id == "sugar-iansa" for item in kept)
+    assert all(item.product_id != "rice" for item in kept)
 
 
 def test_brand_and_category_query():

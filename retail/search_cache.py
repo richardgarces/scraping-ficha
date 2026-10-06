@@ -11,7 +11,7 @@ from zoneinfo import ZoneInfo
 
 from retail.intent import parse
 from retail.models import Product
-from retail.relevance import _SPEC_RE, fold, tokenize
+from retail.relevance import _SPEC_RE, canonical_search_token, equivalent_tokens, fold, tokenize
 
 DEFAULT_URL = os.environ.get("REDIS_URL", "redis://127.0.0.1:6379/0")
 MIN_SCORE = float(os.environ.get("RETAIL_SEARCH_CACHE_MIN_SCORE", "0.72"))
@@ -71,22 +71,23 @@ def canonical_query(text: str) -> str:
     return " ".join(re.findall(r"[a-z0-9]+", fold(text)))
 
 
-# Erratas frecuentes de marcas/productos chilenos. Solo sustituciones baratas
-# y explícitas: no aproximar medidas ni modelos (ver typo_equivalent).
-QUERY_TOKEN_ALIASES = {
-    "ianza": "iansa",
-}
-
-
 def rewrite_search_query(query: str) -> str:
-    """Colapsa espacios y aplica alias de tokens (p. ej. ianza→iansa)."""
+    """Colapsa espacios y normaliza alias de marca (iansa ↔ ianza → canónica).
+
+    Case-insensitive: Ianza/IANZA/ianza quedan en la grafía canónica de catálogo
+    para caché y scrape; el matching acepta ambas vía ``equivalent_tokens``.
+    """
     text = " ".join(str(query or "").split())
     if not text:
         return text
     parts: list[str] = []
     for token in text.split():
-        alias = QUERY_TOKEN_ALIASES.get(fold(token))
-        parts.append(alias if alias else token)
+        key = fold(token)
+        # Si el token tiene alias de marca, siempre usar la canónica (case-insensitive).
+        if len(equivalent_tokens(key)) > 1:
+            parts.append(canonical_search_token(key))
+        else:
+            parts.append(token)
     return " ".join(parts)
 
 
@@ -218,7 +219,7 @@ class SearchCache:
         result = payload.get("result") if isinstance(payload, dict) else None
         if not isinstance(result, dict) or not isinstance(result.get("rows"), list):
             return None
-        # Ignorar ceros ya guardados (p. ej. typo del día) para no bloquear reintentos.
+        # Ignorar ceros ya guardados (alias/timeout del día) para no bloquear reintentos.
         if not result.get("rows"):
             return None
         result = dict(result)
@@ -261,7 +262,7 @@ class SearchCache:
             or unavailable
             or any(item.get("state") not in {"ok", "skip"} for item in progress)
         ):
-            # No cachear ceros: un vacío del día (typo, timeout parcial) bloqueaba
+            # No cachear ceros: un vacío del día (alias, timeout parcial) bloqueaba
             # reintentos y disparaba el falso «Se cortó la consulta» en el SSE.
             return
         stamp = _now()
@@ -371,7 +372,7 @@ class SearchCache:
             return None
         products = _products(payload.get("products") or [])[:max_items]
         # Un scrape vacío del día no debe marcar «11 de hoy» y saltar tiendas:
-        # puede ser typo/timeout y bloquea reintentos con la query corregida.
+        # puede ser alias/timeout y bloquea reintentos con la query normalizada.
         if not products:
             return None
         return {"products": products}

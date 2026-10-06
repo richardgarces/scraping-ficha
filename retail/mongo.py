@@ -1584,9 +1584,14 @@ class ProductRepository:
         name/brand/sku_id, ids exactos. El regex multi-campo sin anclar queda
         solo como fallback si no hubo hits (misma semántica antigua).
         """
-        text = query.strip()
+        from retail.relevance import equivalent_tokens, fold, text_search_clause, tokenize
+        from retail.search_cache import rewrite_search_query
+
+        text = " ".join(str(query or "").split())
         if not text:
             return []
+        rewritten = rewrite_search_query(text)
+        text_clause = text_search_clause(rewritten) or text_search_clause(text) or rewritten
         limit = max(1, min(int(limit), 500))
         seen: dict[tuple[str, str], dict[str, Any]] = {}
 
@@ -1613,21 +1618,26 @@ class ProductRepository:
             take(cursor)
 
         # 1) Repeticiones del día / scrapes previos: índice last_search_query+updated_at.
-        try:
-            run({"last_search_query": text}, sort=[("updated_at", -1)])
-        except Exception:
-            pass
-
-        # 2) Índice de texto (name/brand/sku_id) — evita el COLLSCAN del regex.
-        if len(seen) < limit:
+        for candidate in dict.fromkeys([text, rewritten]):
             try:
-                run(
-                    {"$text": {"$search": text}},
-                    sort=[("score", {"$meta": "textScore"})],
-                    projection={**SEARCH_FIND_PROJECTION, "score": {"$meta": "textScore"}},
-                )
+                run({"last_search_query": candidate}, sort=[("updated_at", -1)])
             except Exception:
                 pass
+
+        # 2) Índice de texto (name/brand/sku_id) — evita el COLLSCAN del regex.
+        #    Incluye OR de alias de marca: azúcar (iansa OR ianza).
+        if len(seen) < limit:
+            for clause in dict.fromkeys([text_clause, rewritten, text]):
+                if not clause:
+                    continue
+                try:
+                    run(
+                        {"$text": {"$search": clause}},
+                        sort=[("score", {"$meta": "textScore"})],
+                        projection={**SEARCH_FIND_PROJECTION, "score": {"$meta": "textScore"}},
+                    )
+                except Exception:
+                    pass
 
         # 3) Código/sku exacto (consultas de una sola ficha).
         if " " not in text and len(text) >= 3 and len(seen) < limit:
@@ -1639,24 +1649,30 @@ class ProductRepository:
             except Exception:
                 pass
 
-        # 4) Fallback: misma $or regex de antes, solo si no hubo candidatos.
+        # 4) Fallback: cada token (con alias) en name/brand/sku — case-insensitive.
         if not seen:
-            escaped = re.escape(text)
-            try:
-                run(
-                    {
-                        "$or": [
-                            {"last_search_query": {"$regex": escaped, "$options": "i"}},
+            tokens = tokenize(rewritten) or tokenize(text) or [fold(text)]
+            and_parts: list[dict[str, Any]] = []
+            for token in tokens:
+                field_ors: list[dict[str, Any]] = []
+                for alt in sorted(equivalent_tokens(token)):
+                    escaped = re.escape(alt)
+                    field_ors.extend(
+                        [
                             {"name": {"$regex": escaped, "$options": "i"}},
                             {"brand": {"$regex": escaped, "$options": "i"}},
                             {"sku_id": {"$regex": escaped, "$options": "i"}},
                             {"product_id": {"$regex": escaped, "$options": "i"}},
+                            {"last_search_query": {"$regex": escaped, "$options": "i"}},
                         ]
-                    },
-                    sort=[("updated_at", -1)],
-                )
-            except Exception:
-                return []
+                    )
+                if field_ors:
+                    and_parts.append({"$or": field_ors})
+            if and_parts:
+                try:
+                    run({"$and": and_parts}, sort=[("updated_at", -1)])
+                except Exception:
+                    return []
 
         rows = list(seen.values())
         rows.sort(key=lambda row: row.get("updated_at") or "", reverse=True)
@@ -1794,7 +1810,32 @@ class ProductRepository:
         """Catálogo navegable sobre los productos ya guardados."""
         match: dict[str, Any] = catalog_browse_filter(category)
         if text:
-            match["name"] = {"$regex": re.escape(text.strip()), "$options": "i"}
+            from retail.relevance import equivalent_tokens, fold, tokenize
+            from retail.search_cache import rewrite_search_query
+
+            # Cualquier palabra del producto: name/brand/sku, case-insensitive,
+            # con alias de marca (iansa ↔ ianza).
+            tokens = tokenize(rewrite_search_query(text)) or tokenize(text) or [fold(text)]
+            and_parts: list[dict[str, Any]] = []
+            for token in tokens:
+                field_ors: list[dict[str, Any]] = []
+                for alt in sorted(equivalent_tokens(token)):
+                    escaped = re.escape(alt)
+                    field_ors.extend(
+                        [
+                            {"name": {"$regex": escaped, "$options": "i"}},
+                            {"brand": {"$regex": escaped, "$options": "i"}},
+                            {"sku_id": {"$regex": escaped, "$options": "i"}},
+                            {"product_id": {"$regex": escaped, "$options": "i"}},
+                        ]
+                    )
+                if field_ors:
+                    and_parts.append({"$or": field_ors})
+            if and_parts:
+                existing = match.pop("$and", None)
+                clauses = list(existing or [])
+                clauses.extend(and_parts)
+                match["$and"] = clauses
         if store:
             match["store"] = store
         if brand:
@@ -3214,10 +3255,14 @@ class ProductRepository:
                 if len(seen) >= limit:
                     return
 
+        from retail.relevance import text_search_clause
+        from retail.search_cache import rewrite_search_query
+
         query = " ".join(str(text or "").split())
         if query:
+            clause = text_search_clause(rewrite_search_query(query)) or query
             try:
-                text_filter: dict[str, Any] = {"$text": {"$search": query}}
+                text_filter: dict[str, Any] = {"$text": {"$search": clause}}
                 if only_comparable:
                     text_filter["specifications"] = {"$type": "object", "$ne": {}}
                 take(

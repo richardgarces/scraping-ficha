@@ -58,6 +58,17 @@ _ALIASES: dict[str, set[str]] = {
     "polera": {"polera", "poleras", "poleron", "polerones"},
 }
 
+# Grafías equivalentes de marca/token (bidireccional, case-insensitive vía fold).
+# Canónica = la forma dominante en catálogo chileno (Iansa con s).
+_TOKEN_EQUIV: dict[str, frozenset[str]] = {
+    "iansa": frozenset({"iansa", "ianza"}),
+    "ianza": frozenset({"iansa", "ianza"}),
+}
+_TOKEN_CANONICAL: dict[str, str] = {
+    "iansa": "iansa",
+    "ianza": "iansa",
+}
+
 _SPEC_RE = re.compile(r"^\d{2,5}(gb|g|tb|mb|mah|w|hz|cm|mm|pulgadas|litros|in)$")
 _TOKEN_RE = re.compile(r"[a-z0-9]+")
 _MEASURE_RE = re.compile(r"(\d{1,4})\s*(?:pulgadas?|pulg\.?|\"|'')")
@@ -126,6 +137,33 @@ def tokenize(query: str) -> list[str]:
     return tokens
 
 
+def equivalent_tokens(token: str) -> set[str]:
+    """Todas las grafías equivalentes de un token (p. ej. iansa ↔ ianza)."""
+    key = fold(token)
+    return set(_TOKEN_EQUIV.get(key, {key}))
+
+
+def canonical_search_token(token: str) -> str:
+    """Forma canónica para caché/scrape; conserva el token si no hay alias."""
+    key = fold(token)
+    return _TOKEN_CANONICAL.get(key, token)
+
+
+def text_search_clause(query: str) -> str:
+    """Expresión Mongo ``$text`` con OR entre alias de cada palabra."""
+    parts: list[str] = []
+    for raw in str(query or "").split():
+        key = fold(raw)
+        if not key:
+            continue
+        alts = sorted(equivalent_tokens(key))
+        if len(alts) == 1:
+            parts.append(alts[0])
+        else:
+            parts.append("(" + " OR ".join(alts) + ")")
+    return " ".join(parts)
+
+
 def _kind(token: str) -> str:
     if _SPEC_RE.match(token):
         return "spec"
@@ -138,6 +176,7 @@ def _kind(token: str) -> str:
 
 def _expansions(token: str) -> set[str]:
     found = {token, _normalize_spec(token)}
+    found.update(equivalent_tokens(token))
     if token in _ALIASES:
         found.update(_ALIASES[token])
     for canonical, aliases in _ALIASES.items():

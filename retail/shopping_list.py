@@ -1,17 +1,23 @@
 """Lista de compra multi-tienda: matriz lista × tiendas desde el catálogo Mongo.
 
-No scrapea en la petición HTTP. Rellena celdas con el mejor match ≥80% por
-tienda del grupo (p. ej. supermercados) y resume la canasta.
+No scrapea en la petición HTTP. Rellena celdas con el mejor match por tienda
+del grupo (identidad ≥80% o, si la línea es corta/genérica, query ⊆ nombre/marca)
+y resume la canasta. Los matches por subconjunto quedan sin confirmar para revisión.
 """
 from __future__ import annotations
 
 import csv
 import io
+import math
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from retail.quotes import QuoteLine, candidate_for
+from retail.pricing import buy_or_wait, parse_moment
+from retail.quotes import QuoteLine, candidate_for, column_key, product_from_document
+from retail.quote_units import unit_price_for_quote
+from retail.relevance import equivalent_tokens, fold, score_product, tokenize
+from retail.search_cache import rewrite_search_query
 from retail.store_categories import list_store_categories, stores_for_group
 
 MODE_QUOTE = "quote"
@@ -19,6 +25,9 @@ MODE_SHOPPING_LIST = "shopping_list"
 EMPTY_CELL_LABEL = "sin stock o sin match"
 LIST_REFRESH_SCORE = 90
 LIST_FOLLOWING_SCORE = 96
+# Confianza mostrada cuando el ítem de la lista es un subconjunto del nombre/marca
+# (p. ej. «azúcar» → «Azúcar granulada Iansa»). Bajo el umbral de identidad 80%.
+LIST_QUERY_SUBSET_CONFIDENCE = 0.72
 
 
 def is_shopping_list(quote: dict) -> bool:
@@ -53,19 +62,151 @@ def resolve_list_stores(quote: dict, *, repo: Any | None = None) -> list[str]:
     return stores
 
 
+def _line_search_query(line: QuoteLine) -> str:
+    """Nombre (+ marca) normalizado: acentos/caso/alias (iansa↔ianza)."""
+    parts = [rewrite_search_query(line.name)]
+    if line.brand:
+        parts.append(rewrite_search_query(line.brand))
+    return " ".join(part for part in parts if part).strip()
+
+
 def _search_documents(repo: Any, line: QuoteLine) -> list[dict]:
-    queries = [line.name]
+    primary = _line_search_query(line)
+    queries = [primary] if primary else []
     if line.gtin:
         queries.insert(0, line.gtin)
-    words = [word for word in re.findall(r"[\w+-]+", line.name) if len(word) >= 3]
-    queries.extend(words[:2])
+    # Tokens sueltos ayudan cuando la frase completa no pega en $text.
+    queries.extend(tokenize(primary)[:3])
     documents: dict[tuple[str, str], dict] = {}
-    for query in queries[:4]:
+    for query in list(dict.fromkeys(queries))[:5]:
+        if not query:
+            continue
         for doc in repo.find_by_query(query, limit=100):
             key = (str(doc.get("store") or ""), str(doc.get("product_id") or ""))
             if key[0] and key[1]:
                 documents[key] = doc
     return list(documents.values())
+
+
+def _token_positively_present(token: str, name: str, brand: str) -> bool:
+    """True si el token aparece en marca o en el nombre fuera de «sin {token}»."""
+    brand_fold = fold(brand)
+    name_fold = fold(name)
+    for alt in equivalent_tokens(token):
+        if alt in brand_fold.split() or brand_fold == alt:
+            return True
+        if alt not in name_fold:
+            continue
+        stripped = re.sub(rf"\bsin\s+{re.escape(alt)}\b", " ", name_fold)
+        words = stripped.split()
+        if alt in words or any(word.startswith(alt) and len(word) <= len(alt) + 2 for word in words):
+            return True
+    return False
+
+
+def _query_subset_rank(query: str, name: str, brand: str) -> float:
+    """Prioriza nombre que empieza por el ítem y marca; castiga «sin azúcar» etc."""
+    hay = fold(name)
+    brand_fold = fold(brand)
+    score = 0.0
+    for token in tokenize(query):
+        for alt in equivalent_tokens(token):
+            if re.search(rf"\bsin\s+{re.escape(alt)}\b", hay):
+                score -= 0.4
+            if hay.startswith(alt + " ") or hay == alt:
+                score += 0.35
+            elif f" {alt} " in f" {hay} ":
+                score += 0.12
+            if alt in brand_fold.split() or brand_fold == alt:
+                score += 0.15
+    return score
+
+
+def _query_subset_candidate(line: QuoteLine, doc: dict, now: datetime | None = None) -> dict | None:
+    """Match laxo: las palabras de la lista están en nombre/marca (case/acentos OK)."""
+    if not doc:
+        return None
+    now = now or datetime.now(timezone.utc)
+    try:
+        product = product_from_document(doc)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if not product.store or not product.product_id:
+        return None
+    query = _line_search_query(line)
+    if not query:
+        return None
+    relevance = score_product(query, product)
+    if not relevance.accepted:
+        return None
+    tokens = tokenize(query)
+    if tokens and not all(
+        _token_positively_present(token, product.name or "", product.brand or "")
+        for token in tokens
+    ):
+        # Evita «chicle sin azúcar» cuando la lista pide «azúcar».
+        return None
+    price = product.price_all_payment or product.price
+    if isinstance(price, bool) or not isinstance(price, (int, float)) or not math.isfinite(price) or price <= 0:
+        return None
+    observed = parse_moment(doc.get("updated_at") or doc.get("scraped_at"))
+    if observed and observed.tzinfo is None:
+        observed = observed.replace(tzinfo=timezone.utc)
+    fresh = bool(observed and now - timedelta(hours=48) <= observed <= now + timedelta(minutes=10))
+    availability = column_key(product.availability)
+    unavailable = product.stock == 0 or availability in {
+        "agotado", "sinstock", "outofstock", "unavailable", "nodisponible",
+    }
+    verified_stock = isinstance(product.stock, int) and not isinstance(product.stock, bool) and product.stock >= line.quantity
+    available = verified_stock or (
+        line.quantity == 1 and availability in {"disponible", "available", "instock", "enstock"}
+    )
+    unit_ok, unit_price, unit_issues = unit_price_for_quote(line.unit, int(price), product)
+    issues = list(unit_issues)
+    if not fresh:
+        issues.append("Precio sin fecha reciente (máximo 48 horas).")
+    if unavailable:
+        issues.append("Producto sin stock.")
+    elif not available:
+        issues.append("Cantidad disponible por confirmar.")
+    if product.currency != "CLP":
+        issues.append("La moneda del catálogo no es CLP.")
+    comparable_price = unit_price if unit_ok and unit_price else int(price)
+    rank = _query_subset_rank(query, product.name or "", product.brand or "")
+    confidence = round(
+        min(0.79, max(LIST_QUERY_SUBSET_CONFIDENCE, 0.55 + 0.25 * float(relevance.score) + max(0.0, rank) * 0.1)),
+        3,
+    )
+    return {
+        "store": product.store,
+        "product_id": product.product_id,
+        "name": product.name,
+        "price": comparable_price,
+        "currency": product.currency,
+        "confidence": confidence,
+        "match_method": "query_subset",
+        "rank_boost": rank,
+        "observed_at": observed.isoformat() if observed else None,
+        "shipping_cost": product.shipping_cost,
+        "shipping_region": product.shipping_region,
+        "stock": product.stock,
+        "issues": issues,
+        "usable": not issues and product.currency == "CLP",
+        "advice": buy_or_wait(doc.get("price_history"), int(price), now=now),
+        "unit": line.unit,
+        "unit_compatible": unit_ok,
+        "catalog_pack_price": int(price),
+    }
+
+
+def list_candidate_for(line: QuoteLine, doc: dict, now=None) -> dict | None:
+    """Identidad ≥80% si aplica; si no, subconjunto de nombre/marca (lista corta)."""
+    if not doc:
+        return None
+    strict = candidate_for(line, doc, now=now)
+    if strict:
+        return strict
+    return _query_subset_candidate(line, doc, now=now)
 
 
 def best_match_for_store(line: QuoteLine, documents: list[dict], store: str, now=None) -> dict | None:
@@ -75,12 +216,19 @@ def best_match_for_store(line: QuoteLine, documents: list[dict], store: str, now
     for doc in documents:
         if str(doc.get("store") or "").lower() != store:
             continue
-        candidate = candidate_for(line, doc, now=now)
+        candidate = list_candidate_for(line, doc, now=now)
         if candidate:
             ranked.append(candidate)
     if not ranked:
         return None
-    ranked.sort(key=lambda row: (not row["usable"], -row["confidence"], row["price"]))
+    ranked.sort(
+        key=lambda row: (
+            not row["usable"],
+            -float(row.get("rank_boost") or 0.0),
+            -row["confidence"],
+            row["price"],
+        )
+    )
     return ranked[0]
 
 
@@ -225,7 +373,7 @@ def shopping_matrix_report(
             confirmed = False
             if selected:
                 key = selected["store"], selected["product_id"]
-                candidate = candidate_for(line, documents.get(key, {}), now=now)
+                candidate = list_candidate_for(line, documents.get(key, {}), now=now)
                 confirmed = bool(selected.get("confirmed"))
             cell = _cell_from_candidate(candidate)
             cell["confirmed"] = confirmed
@@ -310,7 +458,7 @@ def shopping_matrix_report(
         ),
         "note": (
             "Matriz lista × tiendas con precios del catálogo Mongo (máx. 48 h). "
-            "Sin despacho. Celdas vacías = sin match ≥80% o sin stock usable. "
+            "Sin despacho. Celdas vacías = sin match (identidad o nombre) o sin stock usable. "
             "Confirma coincidencias dudosas antes de decidir la compra."
         ),
         "shipping_included": False,

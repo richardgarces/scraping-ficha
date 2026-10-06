@@ -147,7 +147,7 @@ def test_result_cache_hits_same_query_until_midnight(monkeypatch):
 
 
 def test_result_cache_skips_empty_search():
-    """Un cero del día no debe reutilizarse: tipografía/timeouts lo convertían en falso vacío."""
+    """Un cero del día no debe reutilizarse: alias/timeouts lo convertían en falso vacío."""
     from retail.search_cache import rewrite_search_query
 
     cache = SearchCache(MemoryRedis())
@@ -163,6 +163,7 @@ def test_result_cache_skips_empty_search():
     assert rewrite_search_query("azúcar ianza") == "azúcar iansa"
     assert rewrite_search_query("azucar  ianza") == "azucar iansa"
     assert rewrite_search_query("azúcar granulada") == "azúcar granulada"
+    assert rewrite_search_query("Ianza") == "iansa"
 
 
 @pytest.mark.parametrize("extra", [
@@ -478,11 +479,13 @@ def test_search_stream_returns_cached_result(monkeypatch):
     assert events[0]["progress"][0]["cached"] is True
 
 
-def test_ianza_typo_rewrites_before_cache_and_scope(monkeypatch):
+@pytest.mark.parametrize("raw", ["azúcar ianza", "azúcar Iansa", "Ianza", "ianza"])
+def test_iansa_brand_alias_rewrites_before_cache_and_scope(raw, monkeypatch):
     from retail.search import iter_search_events
     from retail.search_cache import rewrite_search_query
 
-    assert rewrite_search_query("azúcar ianza") == "azúcar iansa"
+    expected = rewrite_search_query(raw)
+    assert "iansa" in expected
     seen = []
 
     def fake_lookup(query, **kwargs):
@@ -490,7 +493,7 @@ def test_ianza_typo_rewrites_before_cache_and_scope(monkeypatch):
         return {
             "query": query,
             "offer_count": 2,
-            "rows": [{"name": "Azúcar Iansa", "price": 1290, "store": "lider"}],
+            "rows": [{"name": "Azúcar Iansa", "brand": "Iansa", "price": 1290, "store": "lider"}],
             "progress": [{"id": "lider", "state": "ok", "count": 1}],
             "cache": {"hit": "result"},
         }
@@ -501,16 +504,17 @@ def test_ianza_typo_rewrites_before_cache_and_scope(monkeypatch):
     monkeypatch.setattr("retail.search.launch_other_store_sweep", lambda *args, **kwargs: None)
     events = list(
         iter_search_events(
-            "azúcar ianza",
+            raw,
             source="scrape",
             stores=["lider"],
             persist=False,
             fresh=False,
         )
     )
-    assert seen == ["azúcar iansa"]
-    assert events[0]["query"] == "azúcar iansa"
-    assert events[1]["requested_query"] == "azúcar ianza"
+    assert seen == [expected]
+    assert events[0]["query"] == expected
+    if raw != expected:
+        assert events[1]["requested_query"] == raw
     assert [item["type"] for item in events] == ["start", "done", "end"]
 
 

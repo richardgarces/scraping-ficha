@@ -4,6 +4,8 @@ from datetime import datetime, timezone
 from retail.quotes import QuoteLine, parse_csv_quote
 from retail.shopping_list import (
     EMPTY_CELL_LABEL,
+    best_match_for_store,
+    list_candidate_for,
     matrix_export_csv,
     shopping_matrix_report,
 )
@@ -146,3 +148,51 @@ def test_quote_line_optional_unit_price_still_validates_name():
     line = QuoteLine(name="Café instantáneo 100 g")
     assert line.unit_price is None
     assert line.quantity == 1
+
+
+def test_short_azucar_matches_iansa_sugar_via_query_subset():
+    """Una sola palabra genérica debe sugerir azúcares del catálogo (no exige identidad 80%)."""
+    line = QuoteLine(name="azúcar")
+    sugar = _doc(
+        "alvi",
+        "sugar-1",
+        "Azúcar granulada Iansa, 400 g",
+        890,
+        brand="Iansa",
+        availability="disponible",
+    )
+    gum = _doc(
+        "alvi",
+        "gum-1",
+        "Chicle energy con cafeína sin azúcar",
+        490,
+        brand="Trident",
+        availability="disponible",
+    )
+    detergent = _doc("alvi", "det-1", "Detergente líquido 3 L", 4990, brand="Skip", availability="disponible")
+    hit = list_candidate_for(line, sugar, now=NOW)
+    miss = list_candidate_for(line, detergent, now=NOW)
+    negated = list_candidate_for(line, gum, now=NOW)
+    assert hit is not None
+    assert hit["match_method"] == "query_subset"
+    assert hit["confidence"] >= 0.7
+    assert "Iansa" in hit["name"]
+    assert miss is None
+    assert negated is None
+
+    line_alias = QuoteLine(name="azúcar ianza")
+    alias_hit = list_candidate_for(line_alias, sugar, now=NOW)
+    assert alias_hit is not None
+    assert "iansa" in (alias_hit.get("name") or "").casefold() or alias_hit.get("match_method") in {
+        "query_subset",
+        "identity",
+        "hybrid_text",
+    }
+
+    best = best_match_for_store(line, [gum, sugar, detergent], "alvi", now=NOW)
+    assert best is not None
+    assert best["product_id"] == "sugar-1"
+
+    # Case / acentos
+    for raw in ("azucar", "AZÚCAR", "Azúcar"):
+        assert list_candidate_for(QuoteLine(name=raw), sugar, now=NOW) is not None
