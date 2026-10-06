@@ -66,7 +66,7 @@
       </div>
       <div class="cron-store-form" style="margin-bottom:1rem;display:flex;flex-wrap:wrap;gap:.75rem;align-items:end">
         <label>Lista activa
-          <select id="cyber-list-select" aria-label="Seleccionar lista Cyber Day">
+          <select id="cyber-list-select" aria-label="Seleccionar lista Cyber">
             <option value="">Cargando listas…</option>
           </select>
         </label>
@@ -92,11 +92,11 @@
       <p id="cyber-meta" class="muted">Cargando…</p>
       <div id="cyber-live" class="cron-store-live" hidden>
         <div class="cron-store-live-head">
-          <strong id="cyber-live-title">Cyber Day</strong>
+          <strong id="cyber-live-title">Cyber</strong>
           <span id="cyber-live-status" class="badge">En espera</span>
         </div>
         <div id="cyber-live-label" class="cron-progress-label">Sin corrida</div>
-        <div class="search-bar cron-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="Avance de la vuelta Cyber Day">
+        <div class="search-bar cron-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="Avance de la vuelta Cyber">
           <span id="cyber-live-bar"></span>
         </div>
         <p id="cyber-live-counts" class="muted cron-basic-counts"></p>
@@ -115,7 +115,7 @@
         <a id="cyber-export-csv" class="btn secondary" href="/api/admin/cyber-day/export.csv">Exportar CSV</a>
         <a id="cyber-export-json" class="btn secondary" href="/api/admin/cyber-day/export.json">Exportar JSON</a>
       </form>
-      <p id="cyber-import-hint" class="muted">Cada lista es independiente. Import/export: n, query, category (+ matches, precios, tiendas, link en export). Podés editar la <strong>Query</strong> inline (también con el loop en curso). La lista oficial <code>cyber_junio2026</code> también aparece en <a href="/cron">Cron / lotes</a>.</p>
+      <p id="cyber-import-hint" class="muted">Cada lista es independiente. Import/export: n, query, category (+ matches, precios, tiendas, link en export). Podés editar la <strong>Query</strong> inline (también con el loop en curso). La lista activa también aparece en <a href="/cron">Cron / lotes</a>.</p>
       <div class="table-wrap scroll-x" id="cyber-products-wrap">
         <table class="results cron-table">
           <thead>
@@ -140,6 +140,6 @@
     </section>
   </main>
   <script src="/static/prices.js?v=34"></script>
-  <script src="/static/cyber-day.js?v=10"></script>
+  <script src="/static/cyber-day.js?v=11"></script>
 </body>
 </html>

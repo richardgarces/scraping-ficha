@@ -360,7 +360,7 @@
     button.textContent = busyLabel;
     try {
       const result = await apiJson(listQuery(path), { method: "POST" });
-      showFlash(result.run?.status === "running" ? "Cyber Day en curso." : "Cyber Day actualizado.");
+      showFlash(result.run?.status === "running" ? "Cyber en curso." : "Cyber actualizado.");
       renderCyber(result);
       await refreshCyber();
     } catch (error) {
@@ -518,7 +518,7 @@
       .catch((error) => showFlash(error.message, false));
   });
   el("cyber-restart")?.addEventListener("click", () => {
-    if (!window.confirm("¿Reiniciar Cyber Day desde la query 1? Se pierde el progreso de la vuelta actual.")) {
+    if (!window.confirm("¿Reiniciar Cyber desde la query 1? Se pierde el progreso de la vuelta actual.")) {
       return;
     }
     cyberAction("/api/admin/cyber-day/restart", el("cyber-restart"), "Reiniciando…")

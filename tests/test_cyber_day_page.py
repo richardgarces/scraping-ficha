@@ -36,9 +36,15 @@ def test_cyber_day_static_assets_exist():
     assert "Reiniciar" in html
     assert "cyber-list-select" in html
     assert "Nueva lista" in html
-    assert "cyber-day.js?v=10" in html
+    assert "cyber-day.js?v=11" in html
     assert "<h1>Cyber</h1>" in html
+    assert "cyber_junio2026" not in html  # branding genérico; slug solo backend/lista
     assert "<th>Matches</th>" not in html
+    cron = (root / "cron.html").read_text(encoding="utf-8")
+    assert "<h2>Cyber</h2>" in cron
+    assert "Abrir Cyber" in cron
+    assert "cyber_junio2026" not in cron
+    assert "lista activa" in cron
     assert "last_match_count" not in js  # columna UI quitada; sigue en API/export
     assert "Precio más alto normal" in html
     assert "Tiendas" in html
