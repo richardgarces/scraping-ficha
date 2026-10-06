@@ -55,7 +55,7 @@ function normalizedGroupStatus(status) {
 }
 
 function groupHasStores(group) {
-  return Number(group.store_count) > 0;
+  return Number(group.store_count) > 0 || Boolean(group.query_list);
 }
 
 function statusBadge(status) {
@@ -326,7 +326,7 @@ function progressCell(group) {
   const processed = progress.processed || 0;
   const items = progress.items || 0;
   const pct = progress.percent != null ? progress.percent : items ? Math.round((100 * processed) / items) : 0;
-  const phaseLabel = progress.phase_label || (items ? "En curso" : "Arrancando");
+  const phaseLabel = progress.label || progress.phase_label || (items ? "En curso" : "Arrancando");
   const query = progress.current_query
     ? `<div class="cron-query muted">${escapeHtml(phaseLabel)}: ${escapeHtml(progress.current_query)}</div>`
     : `<div class="cron-query muted">${escapeHtml(phaseLabel)}</div>`;
@@ -334,7 +334,8 @@ function progressCell(group) {
   const stores = storeCount
     ? `<span class="muted"> · ${storeCount} ${storeCount === 1 ? "tienda" : "tiendas"}</span>`
     : "";
-  const label = items ? `${processed}/${items} productos` : "Preparando catálogo…";
+  const unit = group.query_list ? "queries" : "productos";
+  const label = items ? `${processed}/${items} ${unit}` : "Preparando catálogo…";
   return `
     <div class="cron-progress-wrap">
       <div class="cron-progress-label">${label}${stores}</div>

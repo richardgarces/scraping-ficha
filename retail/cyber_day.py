@@ -21,14 +21,29 @@ from pathlib import Path
 from typing import Any
 
 RUN_SETTING = "cyber_day_run"
+CYBER_GROUP_ID = "cyber_junio2026"
+CYBER_GROUP_TITLE = "Cyber Junio 2026"
+CYBER_LIST_ID = "cyber_junio2026"
 STATUSES = frozenset({"idle", "running", "paused", "stopped"})
 DEFAULT_DELAY = float(os.environ.get("CYBER_DAY_DELAY_SECONDS") or "2.5")
 TOP_MATCHES = max(1, int(os.environ.get("CYBER_DAY_TOP_MATCHES") or "6"))
 REFRESH_TOP = max(0, int(os.environ.get("CYBER_DAY_REFRESH_TOP") or "3"))
 SEARCH_MAX_ITEMS = max(1, int(os.environ.get("CYBER_DAY_SEARCH_MAX_ITEMS") or "4"))
 HEARTBEAT_MAX_AGE = 180
-SEED_PATH = Path(__file__).resolve().parents[1] / "data" / "cyber_day_sonic.json"
+_DATA = Path(__file__).resolve().parents[1] / "data"
+SEED_PATH = _DATA / "cyber_junio2026.json"
+if not SEED_PATH.is_file():
+    SEED_PATH = _DATA / "cyber_day_sonic.json"
 CYBER_SCORE = 92
+# Tiendas donde tiene sentido scrapear las queries Sonic.
+CYBER_STORE_GROUPS = frozenset({
+    "retail", "tecnologia", "deporte", "hogar", "belleza", "moda", "ferreteria",
+})
+
+
+def is_cyber_group(group_id: str | None) -> bool:
+    key = str(group_id or "").strip().lower()
+    return key in {CYBER_GROUP_ID, "cyber_day", "cyber"}
 
 
 class CyberDayError(Exception):
@@ -85,7 +100,9 @@ def default_run() -> dict[str, Any]:
         "notified_count": 0,
         "heartbeat_at": None,
         "worker": None,
-        "source_note": "Seed oficial Cyber Day (100 queries Sonic).",
+        "source_note": f"Lista {CYBER_LIST_ID}: 100 queries Sonic.",
+        "list_id": CYBER_LIST_ID,
+        "group_id": CYBER_GROUP_ID,
     }
 
 
@@ -234,16 +251,141 @@ def import_products(repo: Any, items: list[dict[str, Any]], *, source: str = "im
     return {"ok": True, "imported": len(docs), "total": len(docs), "source": source}
 
 
+def cyber_store_ids() -> list[str]:
+    from retail.registry import STORE_GROUP, list_stores
+
+    wanted = {
+        store_id
+        for store_id, group in STORE_GROUP.items()
+        if (group or "").lower() in CYBER_STORE_GROUPS
+    }
+    return [spec.id for spec in list_stores() if spec.id in wanted]
+
+
+def ensure_cyber_category(repo: Any) -> dict[str, Any]:
+    """Registra el grupo de corridas `cyber_junio2026` en `store_categories`."""
+    ensure_seed(repo)
+    now = _now()
+    stores = cyber_store_ids()
+    doc = {
+        "id": CYBER_GROUP_ID,
+        "title": CYBER_GROUP_TITLE,
+        "kind": "query_list",
+        "query_list": True,
+        "list_id": CYBER_LIST_ID,
+        "store_ids": stores,
+        "sort_order": 0,
+        "updated_at": now,
+    }
+    coll = getattr(repo, "store_categories", None)
+    if coll is None:
+        return {"ok": False, "detail": "sin store_categories"}
+    coll.update_one({"id": CYBER_GROUP_ID}, {"$set": doc}, upsert=True)
+    return {"ok": True, "id": CYBER_GROUP_ID, "store_count": len(stores), "queries": products_count(repo)}
+
+
 def ensure_seed(repo: Any) -> dict[str, Any]:
-    """Si la colección está vacía, carga `data/cyber_day_sonic.json`."""
+    """Si la colección está vacía, carga el seed oficial `cyber_junio2026`."""
     total = products_count(repo)
     if total > 0:
-        return {"seeded": False, "total": total}
+        return {"seeded": False, "total": total, "list_id": CYBER_LIST_ID}
     items = load_seed_items()
     if not items:
         return {"seeded": False, "total": 0, "detail": "Seed JSON ausente o vacío."}
-    result = import_products(repo, items, source="seed")
-    return {"seeded": True, **result}
+    result = import_products(repo, items, source=f"seed:{CYBER_LIST_ID}")
+    return {"seeded": True, "list_id": CYBER_LIST_ID, **result}
+
+
+def catalog_products_for_cyber(repo: Any) -> list[dict[str, Any]]:
+    """Queries Cyber como ítems de catálogo para `retail batch --grupo cyber_junio2026`."""
+    ensure_seed(repo)
+    rows = []
+    for item in list_products(repo):
+        query = str(item.get("query") or item.get("name") or "").strip()
+        if not query:
+            continue
+        n = int(item.get("n") or item.get("order") or 0) or (len(rows) + 1)
+        rows.append({
+            "id": f"{CYBER_LIST_ID}-{n:03d}",
+            "query": query,
+            "enabled": True,
+            "category": item.get("category") or "",
+            "group": CYBER_GROUP_ID,
+            "list_id": CYBER_LIST_ID,
+        })
+    return rows
+
+
+def restart_run(repo: Any) -> dict[str, Any]:
+    """Reinicia desde la query #1 (igual que Iniciar)."""
+    run = load_run(repo)
+    if run.get("status") == "running":
+        run["status"] = "stopped"
+        save_run(repo, run)
+    return start_run(repo)
+
+
+def as_cron_group(repo: Any) -> dict[str, Any]:
+    """Fila de `/cron` para el grupo cyber_junio2026 (progreso del worker)."""
+    ensure_cyber_category(repo)
+    payload = status_payload(repo)
+    run = payload.get("run") or {}
+    status = str(run.get("status") or "idle")
+    # Mapear a estados del panel de grupos.
+    if status == "running":
+        group_status = "running"
+    elif status == "paused":
+        group_status = "paused"
+    elif status == "stopped":
+        group_status = "stopped" if int(run.get("processed") or 0) > 0 else "idle"
+    else:
+        group_status = "idle"
+    processed = int(run.get("processed") or 0)
+    total = int(run.get("total") or payload.get("products_count") or 0)
+    percent = float(run.get("percent") or 0)
+    can_continue = group_status in {"stopped", "partial", "failed"} and processed > 0
+    return {
+        "id": CYBER_GROUP_ID,
+        "title": CYBER_GROUP_TITLE,
+        "store_count": len(cyber_store_ids()),
+        "query_list": True,
+        "list_id": CYBER_LIST_ID,
+        "kind": "query_list",
+        "status": group_status,
+        "can_continue": can_continue,
+        "progress": {
+            "phase": "products" if group_status == "running" else group_status,
+            "label": (
+                f"Vuelta {run.get('lap') or '—'} · {percent}% "
+                f"({processed}/{total})"
+                + (
+                    f" · {run.get('lap_elapsed_seconds')}s"
+                    if run.get("lap_elapsed_seconds") is not None
+                    else ""
+                )
+            ),
+            "processed": processed,
+            "items": total,
+            "percent": percent,
+            "lap": run.get("lap"),
+            "lap_elapsed_seconds": run.get("lap_elapsed_seconds"),
+            "lap_eta_seconds": run.get("lap_eta_seconds"),
+        } if group_status in {"running", "paused", "stopped"} else None,
+        "last_run": {
+            "status": group_status,
+            "processed": processed,
+            "items": total,
+            "percent": percent,
+            "lap": run.get("lap"),
+            "last_error": run.get("last_error"),
+            "last_change": run.get("last_change"),
+            "notified_count": run.get("notified_count"),
+            "started_at": run.get("started_at"),
+            "finished_at": run.get("last_lap_finished_at"),
+            "budget_exhausted": False,
+        },
+        "schedule": None,
+    }
 
 
 def progress_view(run: dict[str, Any], *, product_total: int | None = None) -> dict[str, Any]:

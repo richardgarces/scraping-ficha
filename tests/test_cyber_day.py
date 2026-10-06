@@ -8,18 +8,22 @@ from uuid import uuid4
 import pytest
 
 from retail.cyber_day import (
+    CYBER_GROUP_ID,
     SEED_PATH,
     CyberDayError,
     continue_run,
     detect_changes,
+    ensure_cyber_category,
     ensure_seed,
     import_products,
+    is_cyber_group,
     load_seed_items,
     normalize_import_row,
     offer_signature,
     parse_products_payload,
     process_one,
     progress_view,
+    restart_run,
     start_run,
     status_payload,
     stop_run,
@@ -45,6 +49,8 @@ def repo(mongo_uri, monkeypatch):
 def test_seed_file_has_100_queries():
     items = load_seed_items()
     assert SEED_PATH.is_file()
+    assert CYBER_GROUP_ID == "cyber_junio2026"
+    assert is_cyber_group("cyber_junio2026")
     assert len(items) == 100
     assert items[0]["query"] == "iPhone 17 / 17 Pro / 17 Pro Max"
     assert items[0]["category"] == "Celulares"
@@ -52,6 +58,33 @@ def test_seed_file_has_100_queries():
     assert items[99]["category"] == "Wearables"
     categories = {item["category"] for item in items}
     assert "Gaming" in categories and "Línea blanca" in categories
+
+
+def test_ensure_cyber_category_registers_group(repo):
+    meta = ensure_cyber_category(repo)
+    assert meta["ok"] is True
+    assert meta["id"] == "cyber_junio2026"
+    row = repo.get_store_category("cyber_junio2026")
+    assert row is not None
+    assert row["title"] == "Cyber Junio 2026"
+    assert row.get("query_list") is True
+    assert len(row.get("store_ids") or []) > 0
+
+
+def test_restart_from_mid_lap(repo):
+    ensure_seed(repo)
+    start_run(repo)
+    from retail.cyber_day import load_run, save_run
+
+    run = load_run(repo)
+    run["cursor"] = 50
+    run["processed"] = 50
+    save_run(repo, run)
+    stop_run(repo)
+    restarted = restart_run(repo)
+    assert restarted["run"]["status"] == "running"
+    assert restarted["run"]["cursor"] == 0
+    assert restarted["run"]["lap"] == 1
 
 
 def test_ensure_seed_loads_when_empty(repo):

@@ -165,6 +165,15 @@ def run_batch(
         if not products:
             raise ValueError(f"No hay consultas de catálogo para la tienda «{store_title}».")
     elif grupo:
+        from retail.cyber_day import (
+            CYBER_GROUP_ID,
+            catalog_products_for_cyber,
+            continue_run,
+            ensure_cyber_category,
+            is_cyber_group,
+            load_run,
+            start_run,
+        )
         from retail.store_categories import (
             filter_products_for_group,
             normalize_group,
@@ -173,6 +182,58 @@ def run_batch(
 
         store_categories_meta = refresh_store_categories()
         group_key = normalize_group(grupo)
+        # Cron diario / `retail batch --grupo cyber_junio2026`: enciende el loop
+        # del worker dedicado (no bloquea el proceso batch en las 100 queries).
+        if is_cyber_group(group_key):
+            from retail.search import connect_repo
+
+            cyber_repo = repo if repo is not None else connect_repo()
+            close_cyber = repo is None and cyber_repo is not None
+            try:
+                if cyber_repo is None:
+                    raise RuntimeError("MongoDB no está disponible para cyber_junio2026.")
+                ensure_cyber_category(cyber_repo)
+                run = load_run(cyber_repo)
+                if run.get("status") != "running":
+                    if run.get("status") in {"stopped", "paused"} and int(run.get("cursor") or 0) > 0:
+                        continue_run(cyber_repo)
+                    else:
+                        start_run(cyber_repo)
+                products = catalog_products_for_cyber(cyber_repo)
+                stores = stores_for_group(CYBER_GROUP_ID) or list(stores or [])
+                summary = {
+                    "started_at": datetime.now(timezone.utc).isoformat(),
+                    "catalog": CYBER_GROUP_ID,
+                    "items": len(products),
+                    "dry_run": dry_run,
+                    "searches": [],
+                    "alerts": [],
+                    "grupo": CYBER_GROUP_ID,
+                    "scope": "grupo",
+                    "query_list": True,
+                    "cyber_worker": True,
+                    "message": "cyber_junio2026 encomendado al worker (loop continuo).",
+                }
+                if batch_run_id:
+                    try:
+                        cyber_repo.finish_batch_run(
+                            batch_run_id,
+                            status="done",
+                            phase="done",
+                            items=len(products),
+                            processed=0,
+                            note="Delegado a precios-cyber-worker",
+                        )
+                    except Exception:
+                        pass
+                summary["batch_run_id"] = batch_run_id
+                return summary
+            finally:
+                if close_cyber and cyber_repo is not None:
+                    try:
+                        cyber_repo.close()
+                    except Exception:
+                        pass
         stores = stores_for_group(group_key)
         products = filter_products_for_group(products, group_key)
         if not stores:

@@ -225,10 +225,33 @@ def build_cron_batch_status(*, repo: Any | None = None, today: str | None = None
 
     groups: list[dict[str, Any]] = []
     any_running = False
+    cyber_done = False
     for cat in categories:
         gid = str(cat.get("id") or "").strip().lower()
         if not gid:
             continue
+        # Cyber Junio 2026: progreso del worker dedicado (loop de queries).
+        try:
+            from retail.cyber_day import as_cron_group, is_cyber_group
+
+            if is_cyber_group(gid) and local is not None:
+                cyber = as_cron_group(local)
+                slot = slots.get(gid) or {
+                    "hour": int(6 if schedule.get("hour") is None else schedule["hour"]),
+                    "minute": int(0 if schedule.get("minute") is None else schedule["minute"]),
+                }
+                cyber["schedule"] = {
+                    "hour": slot["hour"],
+                    "minute": slot["minute"],
+                    "label": f"{slot['hour']:02d}:{slot['minute']:02d}",
+                }
+                if cyber.get("status") in {"running", "paused"}:
+                    any_running = True
+                groups.append(cyber)
+                cyber_done = True
+                continue
+        except Exception:
+            pass
         run = runs_by_grupo.get(gid)
         status = derive_group_status(run, today=day)
         if status in {"running", "paused"}:
@@ -242,6 +265,7 @@ def build_cron_batch_status(*, repo: Any | None = None, today: str | None = None
                 "id": gid,
                 "title": cat.get("title") or gid,
                 "store_count": len(cat.get("store_ids") or []),
+                "query_list": bool(cat.get("query_list")),
                 "schedule": {
                     "hour": slot["hour"],
                     "minute": slot["minute"],
@@ -253,6 +277,26 @@ def build_cron_batch_status(*, repo: Any | None = None, today: str | None = None
                 "last_run": public_run_summary(run),
             }
         )
+    if not cyber_done and local is not None:
+        try:
+            from retail.cyber_day import CYBER_GROUP_ID, as_cron_group
+
+            if not any(item.get("id") == CYBER_GROUP_ID for item in groups):
+                cyber = as_cron_group(local)
+                slot = slots.get(CYBER_GROUP_ID) or {
+                    "hour": int(6 if schedule.get("hour") is None else schedule["hour"]),
+                    "minute": int(0 if schedule.get("minute") is None else schedule["minute"]),
+                }
+                cyber["schedule"] = {
+                    "hour": slot["hour"],
+                    "minute": slot["minute"],
+                    "label": f"{slot['hour']:02d}:{slot['minute']:02d}",
+                }
+                if cyber.get("status") in {"running", "paused"}:
+                    any_running = True
+                groups.insert(0, cyber)
+        except Exception:
+            pass
 
     titles = {spec.id: spec.title for spec in list_stores()}
     store_jobs: list[dict[str, Any]] = []

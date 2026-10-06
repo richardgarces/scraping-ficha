@@ -1,79 +1,56 @@
-# Cyber Day — loop de queries Sonic
+# Cyber Junio 2026 (`cyber_junio2026`)
 
-Modo especial de scraping para días Cyber: recorre **100 queries fijas** (Tablas Sonic), muestra avance y tiempo por vuelta, y avisa por **Telegram + push** si cambia el precio/oferta de algún match monitoreado.
+Grupo de scraping diario con **100 queries Sonic** (Celulares, TV, Gaming…). Loop continuo vía worker dedicado; controles en el admin de corridas como retail/farmacias.
 
-## Lista oficial
+## Identidad
 
-- Seed: [`data/cyber_day_sonic.json`](../data/cyber_day_sonic.json) y CSV gemelo [`data/cyber_day_sonic.csv`](../data/cyber_day_sonic.csv).
-- Cada ítem es una **query de búsqueda** + categoría (Celulares, TV, Gaming, …).
-- Si la colección Mongo `cyber_day_products` está vacía, se carga el seed automáticamente (`ensure_seed`).
-- Scribd no se usa (paywall/challenge). Reimportá CSV/JSON desde el admin si querés editar la lista.
-
-## Controles admin
-
-En **Cron / lotes** (`/cron`), panel **Cyber Day**:
-
-| Botón | Efecto |
+| Campo | Valor |
 |-------|--------|
-| **Iniciar** | Vuelta 1 desde query #1 |
-| **Parar** | `stopped` (conserva cursor) |
-| **Continuar** | Reanuda desde el cursor |
-| **Importar lista** | Reemplaza la lista (CSV/JSON: `n,query,category`) |
+| **id** | `cyber_junio2026` |
+| **título** | Cyber Junio 2026 |
+| **lista** | `data/cyber_junio2026.json` (alias `data/cyber_day_sonic.json`) |
+| **colección** | `cyber_day_products` |
+| **estado** | `app_settings.cyber_day_run` |
+| **categoría Mongo** | `store_categories` (`kind: query_list`) |
 
-Progreso: `%` = procesados/total de la vuelta, tiempo transcurrido, ETA, número de vuelta, matches y mejor precio por query.
+## Ruta admin
+
+1. **Cron / lotes** → [`/cron`](https://precios.meincart.com/cron)
+2. Tabla **Corridas por grupo**: fila **Cyber Junio 2026** (`cyber_junio2026`)
+3. Controles: **Iniciar** · **Detener** · **Continuar** · **Reiniciar**
+4. Panel dedicado debajo (import CSV/JSON + preview de queries)
+
+API (también):
+
+- `POST /api/admin/cron-batches/cyber_junio2026/start` `{ "mode": "continue"|"restart"|omit }`
+- `POST /api/admin/cron-batches/cyber_junio2026/stop`
+- `GET /api/admin/cyber-day` (detalle progreso / import)
+
+## Comportamiento
+
+- Por cada query: catálogo + scrape ligero + refresh top matches.
+- Al terminar 1→100: `lap++` y reinicia (loop).
+- `%` avance, tiempo de vuelta, ETA.
+- Telegram (canal admin) + push (admins / seguidores) si cambia precio u oferta.
+- Cron host `retail batch --grupo cyber_junio2026` enciende el loop (delega a `precios-cyber-worker`).
 
 ## Worker
 
 ```bash
-python -m retail.cyber_day           # loop
-python -m retail.cyber_day --once    # una query
-python -m retail.cyber_day --seed    # solo asegurar seed
-python -m retail.cyber_day --healthcheck
+python -m retail.cyber_day
 ```
 
-Compose:
+Compose: `cyber-worker` → `precios-cyber-worker` (BMAX) o `precios-cyber-worker-soyo`.
 
-- BMAX: servicio `cyber-worker` → contenedor `precios-cyber-worker` en `docker-compose.prod.yml`.
-- Soyo (preferible si el scrape pesa): `cyber-worker` en `docker-compose.worker.soyo.yml` → `precios-cyber-worker-soyo`. **No** corras ambos a la vez.
+## Seed
 
-Variables opcionales:
-
-| Env | Default | Rol |
-|-----|---------|-----|
-| `CYBER_DAY_DELAY_SECONDS` | `2.5` | Pausa entre queries |
-| `CYBER_DAY_TOP_MATCHES` | `6` | Matches rankeados por query |
-| `CYBER_DAY_REFRESH_TOP` | `3` | Refresh puntual de ficha |
-| `CYBER_DAY_SEARCH_MAX_ITEMS` | `4` | Ítems por tienda en scrape |
-
-## Flujo por query
-
-1. `find_by_query` en catálogo Mongo.
-2. `search_products(source=both)` ligero (sin FlareSolverr).
-3. Refresh de top fichas + boost en `scrape_priorities`.
-4. Compara firmas `precio:normal:card` con la observación anterior (la primera no notifica).
-5. Si cambia → Telegram canal admin + push admins + alertas a quienes siguen el producto.
-6. Al terminar 1→100: `lap++`, cursor=0, sigue sin parar.
-
-Estado: `app_settings.cyber_day_run` (`idle|running|paused|stopped`, cursor, lap, processed/total, tiempos, last_error).
+Si `cyber_day_products` está vacío, carga automática del JSON oficial (100 ítems). Reimport opcional desde el panel.
 
 ## Deploy
 
 ```bash
-# Mac → BMAX
 ./push-to-server.sh
-# En BMAX
-cd ~/precios && EDGE=platform ./scripts/deploy-prod.sh
-# Verificar
-docker ps | grep cyber
-curl -s http://127.0.0.1:8080/api/health | jq .cyber_day
+ssh -p 2222 richard@192.168.1.198 'cd ~/precios && EDGE=platform ./scripts/deploy-prod.sh'
 ```
 
-En soyo (opcional, scrape remoto):
-
-```bash
-cd ~/precios
-docker compose -f docker-compose.worker.soyo.yml up -d --build cyber-worker
-# En BMAX: docker stop precios-cyber-worker
-```
-
-No uses `--force-recreate` de volúmenes. No actives FlareSolverr para este modo.
+Sin FlareSolverr. Sin `--force-recreate` de volúmenes.

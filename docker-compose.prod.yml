@@ -115,7 +115,7 @@ services:
     env_file:
       - .env
     environment:
-      MONGODB_URI: mongodb://precios-mongo:27017
+      # No pisar MONGODB_URI del .env (en BMAX lleva auth precios_soyo).
       MONGODB_DB: ${MONGODB_DB:-scraping}
       PYTHONDONTWRITEBYTECODE: "1"
       PYTHONUNBUFFERED: "1"

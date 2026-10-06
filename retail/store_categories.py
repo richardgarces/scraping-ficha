@@ -43,6 +43,10 @@ def normalize_group(group_id: str | None, *, repo: Any | None = None) -> str:
         raise ValueError("Indica un grupo de tiendas, por ejemplo tecnologia.")
     if key in GROUP_TITLES:
         return key
+    from retail.cyber_day import CYBER_GROUP_ID, is_cyber_group
+
+    if is_cyber_group(key):
+        return CYBER_GROUP_ID
     close = False
     local = repo
     if local is None:
@@ -61,7 +65,7 @@ def normalize_group(group_id: str | None, *, repo: Any | None = None) -> str:
                 local.close()
             except Exception:
                 pass
-    available = ", ".join(GROUP_ORDER)
+    available = ", ".join((*GROUP_ORDER, CYBER_GROUP_ID))
     raise ValueError(f"Grupo desconocido: {group_id}. Disponibles: {available}")
 
 
@@ -98,6 +102,12 @@ def ensure_store_categories(*, repo: Any | None = None) -> dict[str, Any]:
         if repo is None:
             return {"source": "registry", "count": len(GROUP_ORDER), "upserted": 0}
         upserted = repo.sync_store_categories(registry_payloads())
+        try:
+            from retail.cyber_day import ensure_cyber_category
+
+            ensure_cyber_category(repo)
+        except Exception:
+            logger.debug("No se pudo registrar cyber_junio2026", exc_info=True)
         rows = repo.load_store_categories()
         return {"source": "mongo", "count": len(rows), "upserted": upserted}
     except Exception as exc:
@@ -220,12 +230,17 @@ def _store_ids_for(group_id: str, *, repo: Any | None = None) -> list[str]:
 
 
 def _public_row(item: dict[str, Any]) -> dict[str, Any]:
-    return {
+    row = {
         "id": str(item.get("id") or "").strip().lower(),
         "title": str(item.get("title") or item.get("id") or "").strip(),
         "store_ids": [str(store) for store in (item.get("store_ids") or []) if store],
         "sort_order": int(item.get("sort_order") if item.get("sort_order") is not None else 999),
     }
+    if item.get("query_list") or item.get("kind") == "query_list":
+        row["query_list"] = True
+        row["kind"] = "query_list"
+        row["list_id"] = str(item.get("list_id") or row["id"])
+    return row
 
 
 def _connect():

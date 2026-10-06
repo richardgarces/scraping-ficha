@@ -37,6 +37,16 @@ def start_group_batch(grupo: str, *, mode: str | None = None) -> dict[str, Any]:
     """
     from retail.batch.config import load_schedule
     from retail.batch.group_scope import GroupBatchNothingToResume, GroupBatchPaused, resume_product_id
+    from retail.cyber_day import (
+        CYBER_GROUP_ID,
+        CYBER_GROUP_TITLE,
+        CyberDayError,
+        continue_run,
+        ensure_cyber_category,
+        is_cyber_group,
+        restart_run,
+        start_run,
+    )
     from retail.search import connect_repo
     from retail.store_categories import list_store_categories, normalize_group, stores_for_group
 
@@ -49,12 +59,41 @@ def start_group_batch(grupo: str, *, mode: str | None = None) -> dict[str, Any]:
         raise RuntimeError("MongoDB no está disponible; no se pudo iniciar la corrida.")
     try:
         group = normalize_group(grupo, repo=repo)
-        stores = stores_for_group(group, repo=repo)
-        if not stores:
-            raise ValueError(f"El grupo «{group}» no tiene tiendas registradas.")
         schedule = load_schedule(repo)
         if schedule.get("paused"):
             raise GroupBatchPaused()
+
+        # Grupo lista fija Cyber: el worker `precios-cyber-worker` hace el loop.
+        if is_cyber_group(group):
+            ensure_cyber_category(repo)
+            try:
+                if action == "continue":
+                    result = continue_run(repo)
+                    message = f"Continuando {CYBER_GROUP_TITLE} desde la query actual."
+                else:
+                    # Iniciar / Reiniciar: vuelta desde #1 en loop continuo.
+                    result = restart_run(repo) if action == "restart" else start_run(repo)
+                    message = (
+                        f"Reiniciando {CYBER_GROUP_TITLE} desde la query 1."
+                        if action == "restart"
+                        else f"Corrida iniciada para {CYBER_GROUP_TITLE} (loop continuo)."
+                    )
+            except CyberDayError as exc:
+                raise ValueError(str(exc)) from exc
+            return {
+                "ok": True,
+                "running": True,
+                "grupo": CYBER_GROUP_ID,
+                "run_id": CYBER_GROUP_ID,
+                "mode": action or "schedule",
+                "query_list": True,
+                "message": message,
+                "cyber": (result.get("run") if isinstance(result, dict) else None),
+            }
+
+        stores = stores_for_group(group, repo=repo)
+        if not stores:
+            raise ValueError(f"El grupo «{group}» no tiene tiendas registradas.")
         title = next(
             (item.get("title") or group for item in list_store_categories(repo=repo) if item["id"] == group),
             group,
@@ -114,6 +153,7 @@ def start_group_batch(grupo: str, *, mode: str | None = None) -> dict[str, Any]:
 def stop_group_batch(grupo: str) -> dict[str, Any]:
     """Pide detener un grupo. La corrida lo nota entre productos; las otras siguen."""
     from retail.batch.group_scope import GroupBatchIdle
+    from retail.cyber_day import CYBER_GROUP_ID, CYBER_GROUP_TITLE, CyberDayError, is_cyber_group, stop_run
     from retail.search import connect_repo
     from retail.store_categories import list_store_categories, normalize_group
 
@@ -122,6 +162,16 @@ def stop_group_batch(grupo: str) -> dict[str, Any]:
         raise RuntimeError("MongoDB no está disponible; no se pudo detener la corrida.")
     try:
         group = normalize_group(grupo, repo=repo)
+        if is_cyber_group(group):
+            try:
+                stop_run(repo)
+            except CyberDayError as exc:
+                raise GroupBatchIdle(CYBER_GROUP_ID) from exc
+            return {
+                "ok": True,
+                "grupo": CYBER_GROUP_ID,
+                "message": f"Deteniendo {CYBER_GROUP_TITLE}. Las demás corridas siguen.",
+            }
         if not repo.request_group_stop(group):
             raise GroupBatchIdle(group)
         title = next(
