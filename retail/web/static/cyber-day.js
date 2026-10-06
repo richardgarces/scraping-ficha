@@ -93,17 +93,40 @@
     return `$${Math.round(n).toLocaleString("es-CL")}`;
   }
 
-  /** Celda de mejor precio: verde si bajó, rojo si subió (según prev_best_price). */
+  /**
+   * Celda MEJOR PRECIO:
+   * verde=bajó, azul=volvió a bajar, rojo=subió, naranjo=volvió a subir,
+   * blanco=sin cambio/primer precio. Flecha ↑/↓ = última acción.
+   */
   function priceCellHtml(row) {
     const text = formatPrice(row?.last_price);
-    const dir = row?.price_direction
-      || (row?.prev_best_price != null && row?.last_price != null
-        ? (Number(row.last_price) < Number(row.prev_best_price) ? "down"
-          : Number(row.last_price) > Number(row.prev_best_price) ? "up" : "")
-        : "");
-    if (dir === "down") return `<td class="down" title="Bajó vs ${formatPrice(row.prev_best_price)}">${text}</td>`;
-    if (dir === "up") return `<td class="up" title="Subió vs ${formatPrice(row.prev_best_price)}">${text}</td>`;
-    return `<td>${text}</td>`;
+    let dir = row?.price_direction || "";
+    if (!dir && row?.prev_best_price != null && row?.last_price != null) {
+      const last = Number(row.last_price);
+      const prev = Number(row.prev_best_price);
+      if (Number.isFinite(last) && Number.isFinite(prev) && last !== prev) {
+        const base = last < prev ? "down" : "up";
+        const streak = Number(row.delta_streak) || 1;
+        dir = streak >= 2 ? `${base}_again` : base;
+      }
+    }
+    const arrow = (dir === "down" || dir === "down_again")
+      ? "↓"
+      : (dir === "up" || dir === "up_again")
+        ? "↑"
+        : "";
+    const arrowHtml = arrow
+      ? `<span class="price-arrow" aria-hidden="true">${arrow}</span>`
+      : "";
+    const vs = formatPrice(row?.prev_best_price);
+    const meta = {
+      down: { cls: "down", title: `Bajó vs ${vs}` },
+      down_again: { cls: "down-again", title: `Volvió a bajar vs ${vs}` },
+      up: { cls: "up", title: `Subió vs ${vs}` },
+      up_again: { cls: "up-again", title: `Volvió a subir vs ${vs}` },
+    }[dir];
+    if (!meta) return `<td>${text}</td>`;
+    return `<td class="${meta.cls}" title="${meta.title}">${text}${arrowHtml}</td>`;
   }
 
   function listQuery(path) {

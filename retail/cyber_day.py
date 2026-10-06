@@ -232,27 +232,63 @@ def _summary_patch(summary: dict[str, Any] | None) -> dict[str, Any]:
 
 
 def _prev_best_price_patch(item: dict[str, Any] | None, new_price: Any) -> dict[str, Any]:
-    """Si el mejor precio cambia, guarda el anterior para colorear en UI.
+    """Si el mejor precio cambia, guarda el anterior y la racha de dirección.
 
     Primera observación: sin prev. Si el precio se mantiene, no toca prev
     (el color sigue mientras prev ≠ current).
+
+    last_delta_direction: 'up'|'down' de la última variación.
+    delta_streak: 1 = primera en esa dirección; ≥2 = consecutiva (volvió a…).
     """
     old = _as_int((item or {}).get("last_price"))
     new = _as_int(new_price)
     if old is not None and new is not None and old != new:
-        return {"prev_best_price": old}
+        direction = "down" if new < old else "up"
+        prev_dir = (item or {}).get("last_delta_direction")
+        if prev_dir == direction:
+            streak = int((item or {}).get("delta_streak") or 1) + 1
+        else:
+            streak = 1
+        return {
+            "prev_best_price": old,
+            "last_delta_direction": direction,
+            "delta_streak": streak,
+        }
     if old is None:
-        return {"prev_best_price": None}
+        return {
+            "prev_best_price": None,
+            "last_delta_direction": None,
+            "delta_streak": 0,
+        }
     return {}
 
 
-def price_direction(last_price: Any, prev_best_price: Any) -> str | None:
-    """'down' si bajó, 'up' si subió; None si no hay previo comparable."""
+def price_direction(
+    last_price: Any,
+    prev_best_price: Any,
+    *,
+    last_delta_direction: Any = None,
+    delta_streak: Any = 0,
+) -> str | None:
+    """Semántica visual del mejor precio.
+
+    - down / up: primera baja o subida vs el previo
+    - down_again / up_again: misma dirección otra vez (racha ≥ 2)
+    - None: sin previo, sin cambio, o primer precio (blanco en UI)
+    """
     current = _as_int(last_price)
     previous = _as_int(prev_best_price)
     if current is None or previous is None or current == previous:
         return None
-    return "down" if current < previous else "up"
+    actual = "down" if current < previous else "up"
+    try:
+        streak = int(delta_streak or 1)
+    except (TypeError, ValueError):
+        streak = 1
+    # Solo usar racha guardada si coincide con la dirección real vs prev.
+    if last_delta_direction == actual and streak >= 2:
+        return f"{actual}_again"
+    return actual
 
 
 def slugify_list(name: str) -> str:
@@ -580,6 +616,13 @@ def product_row_view(row: dict[str, Any]) -> dict[str, Any]:
     if last_normal is None:
         last_normal = derived.get("last_price_normal")
     prev_best = _as_int(row.get("prev_best_price"))
+    last_delta = row.get("last_delta_direction")
+    if last_delta not in ("up", "down"):
+        last_delta = None
+    try:
+        delta_streak = int(row.get("delta_streak") or 0)
+    except (TypeError, ValueError):
+        delta_streak = 0
     return {
         "id": str(row.get("id") or row.get("_id") or ""),
         "n": row.get("n"),
@@ -590,7 +633,14 @@ def product_row_view(row: dict[str, Any]) -> dict[str, Any]:
         "last_match_count": int(row.get("last_match_count") or 0),
         "last_price": last_price,
         "prev_best_price": prev_best,
-        "price_direction": price_direction(last_price, prev_best),
+        "last_delta_direction": last_delta,
+        "delta_streak": delta_streak,
+        "price_direction": price_direction(
+            last_price,
+            prev_best,
+            last_delta_direction=last_delta,
+            delta_streak=delta_streak,
+        ),
         "last_price_normal": last_normal,
         "stores_scraped": int(stores or 0),
         "max_price_normal": max_normal,
@@ -745,6 +795,8 @@ def update_item(
             "last_match_count": 0,
             "last_price": None,
             "prev_best_price": None,
+            "last_delta_direction": None,
+            "delta_streak": 0,
             "last_price_normal": None,
             "last_signature": None,
             "stores_scraped": 0,

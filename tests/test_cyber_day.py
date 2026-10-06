@@ -11,6 +11,7 @@ from retail.cyber_day import (
     CYBER_GROUP_ID,
     SEED_PATH,
     CyberDayError,
+    _prev_best_price_patch,
     as_cron_group,
     continue_run,
     create_list,
@@ -29,6 +30,7 @@ from retail.cyber_day import (
     normalize_import_row,
     offer_signature,
     parse_products_payload,
+    price_direction,
     process_one,
     product_row_view,
     products_count,
@@ -188,6 +190,62 @@ def test_detect_changes_skips_first_sighting_then_notifies():
     assert "falabella:p1" in current2
 
 
+def test_price_direction_streak_and_patch():
+    """Verde/rojo = primera; azul/naranjo = misma dirección otra vez."""
+    assert price_direction(100, None) is None
+    assert price_direction(100, 100) is None
+    assert price_direction(90, 100) == "down"
+    assert price_direction(110, 100) == "up"
+    assert price_direction(80, 90, last_delta_direction="down", delta_streak=2) == "down_again"
+    assert price_direction(120, 110, last_delta_direction="up", delta_streak=2) == "up_again"
+    # Dirección real manda si el estado guardado no coincide
+    assert price_direction(80, 90, last_delta_direction="up", delta_streak=3) == "down"
+
+    first_drop = _prev_best_price_patch({"last_price": 100}, 90)
+    assert first_drop == {
+        "prev_best_price": 100,
+        "last_delta_direction": "down",
+        "delta_streak": 1,
+    }
+    second_drop = _prev_best_price_patch(
+        {"last_price": 90, "last_delta_direction": "down", "delta_streak": 1},
+        80,
+    )
+    assert second_drop["last_delta_direction"] == "down"
+    assert second_drop["delta_streak"] == 2
+    assert second_drop["prev_best_price"] == 90
+
+    rebound_up = _prev_best_price_patch(
+        {"last_price": 80, "last_delta_direction": "down", "delta_streak": 2},
+        95,
+    )
+    assert rebound_up["last_delta_direction"] == "up"
+    assert rebound_up["delta_streak"] == 1
+
+    again_up = _prev_best_price_patch(
+        {"last_price": 95, "last_delta_direction": "up", "delta_streak": 1},
+        110,
+    )
+    assert again_up["delta_streak"] == 2
+    assert again_up["last_delta_direction"] == "up"
+
+    unchanged = _prev_best_price_patch(
+        {"last_price": 110, "last_delta_direction": "up", "delta_streak": 2, "prev_best_price": 95},
+        110,
+    )
+    assert unchanged == {}
+
+    view = product_row_view({
+        "last_price": 80,
+        "prev_best_price": 90,
+        "last_delta_direction": "down",
+        "delta_streak": 2,
+    })
+    assert view["price_direction"] == "down_again"
+    assert view["last_delta_direction"] == "down"
+    assert view["delta_streak"] == 2
+
+
 def test_match_stats_todo_medio_and_product_row_view():
     matches = [
         {
@@ -306,6 +364,8 @@ def test_notify_on_change_mocked(repo, monkeypatch):
     assert stored is not None
     assert stored.get("last_price") == 700000
     assert stored.get("prev_best_price") == 800000
+    assert stored.get("last_delta_direction") == "down"
+    assert stored.get("delta_streak") == 1
     view = product_row_view({**stored, "id": str(stored["_id"])})
     assert view["price_direction"] == "down"
 
