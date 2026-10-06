@@ -12,9 +12,12 @@ from retail.cyber_day import (
     SEED_PATH,
     CyberDayError,
     continue_run,
+    dedupe_items,
     detect_changes,
     ensure_cyber_category,
     ensure_seed,
+    export_csv,
+    export_json,
     import_products,
     is_cyber_group,
     load_seed_items,
@@ -23,6 +26,7 @@ from retail.cyber_day import (
     parse_products_payload,
     process_one,
     progress_view,
+    repair_duplicates,
     restart_run,
     start_run,
     status_payload,
@@ -248,3 +252,31 @@ def test_import_replaces_list(repo):
     )
     assert result["imported"] == 1
     assert status_payload(repo)["products_count"] == 1
+
+
+def test_dedupe_and_repair_duplicates(repo):
+    items = load_seed_items()
+    doubled = items + [{**item, "n": item["n"]} for item in items]
+    assert len(doubled) == 200
+    assert len(dedupe_items(doubled)) == 100
+    import_products(repo, items, source="seed-a")
+    # Simula seed×2 sin clear (como race viejo).
+    coll = repo.cyber_day_products
+    for item in items:
+        coll.insert_one({**item, "source": "dup"})
+    assert coll.count_documents({}) == 200
+    repaired = repair_duplicates(repo)
+    assert repaired["repaired"] is True
+    assert repaired["total"] == 100
+    assert status_payload(repo)["products_count"] == 100
+
+
+def test_export_csv_and_json(repo):
+    ensure_seed(repo)
+    csv_text = export_csv(repo)
+    assert "n,query,category" in csv_text.splitlines()[0]
+    assert csv_text.count("\n") >= 100
+    payload = export_json(repo)
+    assert payload["id"] == "cyber_junio2026"
+    assert len(payload["items"]) == 100
+    assert payload["items"][0]["query"]

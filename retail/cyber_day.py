@@ -193,6 +193,47 @@ def normalize_import_row(raw: dict[str, Any], order: int) -> dict[str, Any] | No
     }
 
 
+def dedupe_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Deja una fila por query (prioridad: n más bajo, luego con más matches)."""
+    best: dict[str, dict[str, Any]] = {}
+    for item in items:
+        query = str(item.get("query") or item.get("name") or "").strip()
+        if not query:
+            continue
+        key = query.casefold()
+        current = best.get(key)
+        if current is None:
+            best[key] = item
+            continue
+        cur_n = int(current.get("n") or 10**9)
+        new_n = int(item.get("n") or 10**9)
+        cur_matches = int(current.get("last_match_count") or 0)
+        new_matches = int(item.get("last_match_count") or 0)
+        if new_n < cur_n or (new_n == cur_n and new_matches > cur_matches):
+            # Conserva firmas/matches del más completo.
+            merged = {**item}
+            if not merged.get("last_matches") and current.get("last_matches"):
+                merged["last_matches"] = current["last_matches"]
+                merged["last_match_count"] = current.get("last_match_count")
+                merged["last_price"] = current.get("last_price")
+                merged["last_signature"] = current.get("last_signature")
+            best[key] = merged
+        elif current.get("last_matches") is None and item.get("last_matches"):
+            best[key] = {**current, **{k: item[k] for k in (
+                "last_matches", "last_match_count", "last_price",
+                "last_price_normal", "last_signature", "last_observed_at",
+            ) if k in item}}
+    out = sorted(
+        best.values(),
+        key=lambda row: (int(row.get("n") or 10**9), str(row.get("query") or "")),
+    )
+    for index, item in enumerate(out):
+        item["order"] = index
+        item["n"] = index + 1
+        item["name"] = item.get("query") or item.get("name")
+    return out
+
+
 def parse_products_payload(text: str, *, filename: str = "") -> list[dict[str, Any]]:
     clean = (text or "").strip()
     if not clean:
@@ -215,11 +256,7 @@ def parse_products_payload(text: str, *, filename: str = "") -> list[dict[str, A
         item = normalize_import_row(raw if isinstance(raw, dict) else {}, index)
         if item:
             out.append(item)
-    out.sort(key=lambda row: (int(row.get("order") or 0), int(row.get("n") or 0)))
-    for index, item in enumerate(out):
-        item["order"] = index
-        item["n"] = index + 1
-    return out
+    return dedupe_items(out)
 
 
 def load_seed_items(path: Path | None = None) -> list[dict[str, Any]]:
@@ -230,13 +267,14 @@ def load_seed_items(path: Path | None = None) -> list[dict[str, Any]]:
 
 
 def import_products(repo: Any, items: list[dict[str, Any]], *, source: str = "import") -> dict[str, Any]:
-    if not items:
+    unique = dedupe_items(items)
+    if not unique:
         raise CyberDayError("La lista importada está vacía.")
     clear_products(repo)
     now = _now()
     docs = []
-    for item in items:
-        docs.append({**item, "source": source, "created_at": now, "updated_at": now})
+    for item in unique:
+        docs.append({**item, "source": source, "list_id": CYBER_LIST_ID, "created_at": now, "updated_at": now})
     products_collection(repo).insert_many(docs)
     run = load_run(repo)
     run["total"] = len(docs)
@@ -245,10 +283,91 @@ def import_products(repo: Any, items: list[dict[str, Any]], *, source: str = "im
     run["lap"] = 0
     if run.get("status") == "running":
         run["status"] = "stopped"
-    run["source_note"] = f"Lista Cyber Day: {len(docs)} queries ({source})."
+    run["source_note"] = f"Lista {CYBER_LIST_ID}: {len(docs)} queries ({source})."
+    run["list_id"] = CYBER_LIST_ID
+    run["group_id"] = CYBER_GROUP_ID
     run["last_error"] = None
     save_run(repo, run)
-    return {"ok": True, "imported": len(docs), "total": len(docs), "source": source}
+    return {
+        "ok": True,
+        "imported": len(docs),
+        "total": len(docs),
+        "source": source,
+        "deduped": max(0, len(items) - len(unique)),
+    }
+
+
+def repair_duplicates(repo: Any) -> dict[str, Any]:
+    """Si hay queries duplicadas (p. ej. seed×2 → 200), deja 100 únicos."""
+    rows = list_products(repo)
+    unique = dedupe_items(rows)
+    if len(unique) == len(rows):
+        # Asegura total coherente en el run.
+        run = load_run(repo)
+        if int(run.get("total") or 0) != len(rows):
+            run["total"] = len(rows)
+            save_run(repo, run)
+        return {"repaired": False, "total": len(rows)}
+    # Reinserta conservando estado de observación.
+    before = len(rows)
+    clear_products(repo)
+    now = _now()
+    docs = [{**item, "list_id": CYBER_LIST_ID, "updated_at": now} for item in unique]
+    if docs:
+        products_collection(repo).insert_many(docs)
+    run = load_run(repo)
+    run["total"] = len(docs)
+    run["cursor"] = min(int(run.get("cursor") or 0), len(docs))
+    run["processed"] = min(int(run.get("processed") or 0), len(docs))
+    run["source_note"] = f"Lista {CYBER_LIST_ID}: {len(docs)} queries (dedupe {before}→{len(docs)})."
+    save_run(repo, run)
+    return {"repaired": True, "before": before, "total": len(docs)}
+
+
+def export_rows(repo: Any) -> list[dict[str, Any]]:
+    repair_duplicates(repo)
+    rows = []
+    for item in list_products(repo):
+        rows.append({
+            "n": item.get("n"),
+            "query": item.get("query") or item.get("name") or "",
+            "category": item.get("category") or "",
+            "last_match_count": item.get("last_match_count"),
+            "last_price": item.get("last_price"),
+        })
+    return rows
+
+
+def export_csv(repo: Any) -> str:
+    rows = export_rows(repo)
+    buf = io.StringIO()
+    writer = csv.DictWriter(
+        buf,
+        fieldnames=["n", "query", "category", "last_match_count", "last_price"],
+        extrasaction="ignore",
+    )
+    writer.writeheader()
+    for row in rows:
+        writer.writerow(row)
+    return buf.getvalue()
+
+
+def export_json(repo: Any) -> dict[str, Any]:
+    rows = export_rows(repo)
+    return {
+        "id": CYBER_LIST_ID,
+        "title": CYBER_GROUP_TITLE,
+        "items": [
+            {
+                "n": row["n"],
+                "query": row["query"],
+                "category": row["category"],
+                "last_match_count": row.get("last_match_count"),
+                "last_price": row.get("last_price"),
+            }
+            for row in rows
+        ],
+    }
 
 
 def cyber_store_ids() -> list[str]:
@@ -285,15 +404,56 @@ def ensure_cyber_category(repo: Any) -> dict[str, Any]:
 
 
 def ensure_seed(repo: Any) -> dict[str, Any]:
-    """Si la colección está vacía, carga el seed oficial `cyber_junio2026`."""
+    """Si la colección está vacía, carga el seed oficial `cyber_junio2026`.
+
+    Si ya hay filas, repara duplicados (seed concurrente → 200).
+    """
     total = products_count(repo)
     if total > 0:
-        return {"seeded": False, "total": total, "list_id": CYBER_LIST_ID}
-    items = load_seed_items()
-    if not items:
-        return {"seeded": False, "total": 0, "detail": "Seed JSON ausente o vacío."}
-    result = import_products(repo, items, source=f"seed:{CYBER_LIST_ID}")
-    return {"seeded": True, "list_id": CYBER_LIST_ID, **result}
+        repair = repair_duplicates(repo)
+        return {
+            "seeded": False,
+            "total": int(repair.get("total") or products_count(repo)),
+            "list_id": CYBER_LIST_ID,
+            "repaired": bool(repair.get("repaired")),
+        }
+    lock_id = "cyber_day_seed_lock"
+    claimed = False
+    try:
+        repo.app_settings.insert_one({"_id": lock_id, "at": _now(), "host": socket.gethostname()})
+        claimed = True
+    except Exception:
+        # Otro proceso está sembrando.
+        time.sleep(0.6)
+        total = products_count(repo)
+        if total > 0:
+            repair = repair_duplicates(repo)
+            return {
+                "seeded": False,
+                "total": int(repair.get("total") or total),
+                "list_id": CYBER_LIST_ID,
+                "repaired": bool(repair.get("repaired")),
+            }
+    try:
+        if products_count(repo) > 0:
+            repair = repair_duplicates(repo)
+            return {
+                "seeded": False,
+                "total": int(repair.get("total") or products_count(repo)),
+                "list_id": CYBER_LIST_ID,
+                "repaired": bool(repair.get("repaired")),
+            }
+        items = load_seed_items()
+        if not items:
+            return {"seeded": False, "total": 0, "detail": "Seed JSON ausente o vacío."}
+        result = import_products(repo, items, source=f"seed:{CYBER_LIST_ID}")
+        return {"seeded": True, "list_id": CYBER_LIST_ID, **result}
+    finally:
+        if claimed:
+            try:
+                repo.app_settings.delete_one({"_id": lock_id})
+            except Exception:
+                pass
 
 
 def catalog_products_for_cyber(repo: Any) -> list[dict[str, Any]]:

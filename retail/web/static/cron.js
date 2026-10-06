@@ -1091,11 +1091,14 @@ function renderCyber(payload) {
   const start = $("cyber-start");
   const stop = $("cyber-stop");
   const cont = $("cyber-continue");
+  const restart = $("cyber-restart");
   if (start) start.disabled = !total || status === "running";
   if (stop) stop.disabled = !["running", "paused"].includes(status);
-  if (cont) cont.disabled = !total || status === "running" || status === "idle" && processed <= 0;
-  if (cont && ["stopped", "paused"].includes(status)) cont.disabled = !total;
-  if (cont && status === "idle" && total) cont.disabled = processed <= 0;
+  if (cont) {
+    cont.disabled = !total || status === "running" || (status === "idle" && processed <= 0);
+    if (["stopped", "paused"].includes(status)) cont.disabled = !total;
+  }
+  if (restart) restart.disabled = !total || status === "running";
 
   const wrap = $("cyber-products-wrap");
   const body = $("cyber-products-body");
@@ -1264,6 +1267,10 @@ $("cyber-stop")?.addEventListener("click", () => {
 });
 $("cyber-continue")?.addEventListener("click", () => {
   cyberAction("/api/admin/cyber-day/continue", $("cyber-continue"), "Continuando…")
+    .catch((error) => flash(error.message, false));
+});
+$("cyber-restart")?.addEventListener("click", () => {
+  cyberAction("/api/admin/cyber-day/restart", $("cyber-restart"), "Reiniciando…")
     .catch((error) => flash(error.message, false));
 });
 $("cyber-import-form")?.addEventListener("submit", async (event) => {

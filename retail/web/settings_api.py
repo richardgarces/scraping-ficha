@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import JSONResponse, Response
 
 from retail.web.deps import current_user
 from retail.batch.catalog import load_catalog
@@ -577,6 +578,65 @@ async def cyber_day_import(request: Request) -> dict:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except Exception as exc:
             raise HTTPException(status_code=400, detail=f"No se pudo leer la lista: {exc}") from exc
+    finally:
+        repo.close()
+
+
+@router.get("/api/admin/cyber-day/export.csv")
+def cyber_day_export_csv(request: Request) -> Response:
+    """Descarga la lista Cyber (n, query, category + matches/precio)."""
+    current_user(request, admin=True)
+    repo = connect_repo()
+    if repo is None:
+        raise HTTPException(status_code=503, detail="MongoDB no está disponible.")
+    try:
+        from retail.cyber_day import CYBER_LIST_ID, export_csv
+
+        body = export_csv(repo)
+        return Response(
+            content=body,
+            media_type="text/csv; charset=utf-8",
+            headers={
+                "Content-Disposition": f'attachment; filename="{CYBER_LIST_ID}.csv"',
+            },
+        )
+    finally:
+        repo.close()
+
+
+@router.get("/api/admin/cyber-day/export.json")
+def cyber_day_export_json(request: Request) -> JSONResponse:
+    """Descarga la lista Cyber en JSON (mismo shape que el seed)."""
+    current_user(request, admin=True)
+    repo = connect_repo()
+    if repo is None:
+        raise HTTPException(status_code=503, detail="MongoDB no está disponible.")
+    try:
+        from retail.cyber_day import CYBER_LIST_ID, export_json
+
+        payload = export_json(repo)
+        return JSONResponse(
+            content=payload,
+            headers={
+                "Content-Disposition": f'attachment; filename="{CYBER_LIST_ID}.json"',
+            },
+        )
+    finally:
+        repo.close()
+
+
+@router.post("/api/admin/cyber-day/restart")
+def cyber_day_restart(request: Request) -> dict:
+    current_user(request, admin=True)
+    repo = connect_repo()
+    if repo is None:
+        raise HTTPException(status_code=503, detail="MongoDB no está disponible.")
+    try:
+        from retail.cyber_day import CyberDayError, restart_run
+
+        return restart_run(repo)
+    except CyberDayError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     finally:
         repo.close()
 
