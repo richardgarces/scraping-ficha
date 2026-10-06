@@ -24,6 +24,7 @@ def test_cyber_day_api_requires_admin(anonymous_repo):
     assert client.get("/api/admin/cyber-day/export.json").status_code == 401
     assert client.patch("/api/admin/cyber-day/items/1", json={"query": "x"}).status_code == 401
     assert client.put("/api/admin/cyber-day/items/1", json={"query": "x"}).status_code == 401
+    assert client.delete("/api/admin/cyber-day/lists?list=x").status_code == 401
 
 
 def test_cyber_day_static_assets_exist():
@@ -36,7 +37,11 @@ def test_cyber_day_static_assets_exist():
     assert "Reiniciar" in html
     assert "cyber-list-select" in html
     assert "Nueva lista" in html
-    assert "cyber-day.js?v=11" in html
+    assert "cyber-delete-list" in html
+    assert "Eliminar lista" in html
+    assert "Importar / actualizar lista activa" in html
+    assert "reemplaza las queries" in html
+    assert "cyber-day.js?v=12" in html
     assert "<h1>Cyber</h1>" in html
     assert "cyber_junio2026" not in html  # branding genérico; slug solo backend/lista
     assert "<th>Matches</th>" not in html
@@ -53,6 +58,8 @@ def test_cyber_day_static_assets_exist():
     assert "/api/admin/cyber-day" in js
     assert "cyber-day/lists" in js
     assert "cyber-day/items/" in js
+    assert "cyber-delete-list" in js
+    assert 'method: "DELETE"' in js
     assert "cyber-query-input" in js
     assert "Query actualizada" in js
     assert "FETCH_TIMEOUT_MS = 8000" in js
@@ -66,6 +73,7 @@ def test_cyber_day_static_assets_exist():
     assert "priceCellHtml" in js
     assert 'nameEl.textContent = "Cyber"' in js
     assert "status === \"running\"" in js or 'status === "running"' in js
+    assert "Pará la lista antes de eliminarla" in js
     assert (root / "cyber_junio2026.json").is_file()
     prices = (root / "prices.js").read_text(encoding="utf-8")
     assert 'href = "/cyber-day"' in prices or 'href="/cyber-day"' in prices
@@ -107,6 +115,48 @@ def test_cyber_day_update_item_api_admin(monkeypatch, mongo_uri):
         assert payload["updated"]["last_match_count"] == 0
         empty = client.patch("/api/admin/cyber-day/items/1", json={"query": "  "})
         assert empty.status_code == 400
+    finally:
+        repo.close = real_close
+        real_close()
+
+
+def test_cyber_day_delete_and_reimport_api_admin(monkeypatch, mongo_uri):
+    from uuid import uuid4
+
+    from retail.cyber_day import create_list, ensure_seed, start_run
+    from retail.mongo import ProductRepository
+
+    repo = ProductRepository(mongo_uri, database=f"test_cyber_del_{uuid4().hex}")
+    real_close = repo.close
+    try:
+        ensure_seed(repo)
+        create_list(repo, name="Cyber Temp", slug="cyber_temp", use_seed=True)
+        repo.close = lambda: None
+        monkeypatch.setattr("retail.web.settings_api.connect_repo", lambda: repo)
+        monkeypatch.setattr(
+            "retail.web.settings_api.current_user",
+            lambda *_a, **_k: {"role": "admin", "status": "approved"},
+        )
+        client = TestClient(app)
+
+        start_run(repo, list_id="cyber_temp")
+        blocked = client.delete("/api/admin/cyber-day/lists?list=cyber_temp")
+        assert blocked.status_code == 409
+
+        assert client.post("/api/admin/cyber-day/stop?list=cyber_temp").status_code == 200
+        deleted = client.delete("/api/admin/cyber-day/lists?list=cyber_temp")
+        assert deleted.status_code == 200
+        assert deleted.json()["deleted"] == "cyber_temp"
+
+        reimport = client.post(
+            "/api/admin/cyber-day/import?list=cyber_junio2026",
+            json={"items": [{"n": 1, "query": "Solo reimport", "category": "Audio"}]},
+        )
+        assert reimport.status_code == 200
+        payload = reimport.json()
+        assert payload["imported"] == 1
+        assert payload["list_id"] == "cyber_junio2026"
+        assert payload["list"]["name"]
     finally:
         repo.close = real_close
         real_close()

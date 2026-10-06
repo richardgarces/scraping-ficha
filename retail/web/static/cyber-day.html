@@ -71,6 +71,7 @@
           </select>
         </label>
         <button type="button" id="cyber-new-list-toggle" class="secondary">Nueva lista</button>
+        <button type="button" id="cyber-delete-list" class="secondary">Eliminar lista</button>
       </div>
       <form id="cyber-new-list-form" class="cron-store-form" hidden style="margin-bottom:1rem">
         <label>Nombre
@@ -108,14 +109,14 @@
         <button type="button" id="cyber-restart" class="secondary">Reiniciar</button>
       </div>
       <form id="cyber-import-form" class="cron-store-form" style="margin-top:1rem">
-        <label>Importar lista Sonic (CSV o JSON)
+        <label>Importar / actualizar lista activa (CSV o JSON)
           <input type="file" id="cyber-file" accept=".csv,.json,text/csv,application/json" required>
         </label>
-        <button type="submit" id="cyber-import">Importar lista</button>
+        <button type="submit" id="cyber-import">Importar / actualizar</button>
         <a id="cyber-export-csv" class="btn secondary" href="/api/admin/cyber-day/export.csv">Exportar CSV</a>
         <a id="cyber-export-json" class="btn secondary" href="/api/admin/cyber-day/export.json">Exportar JSON</a>
       </form>
-      <p id="cyber-import-hint" class="muted">Cada lista es independiente. Import/export: n, query, category (+ matches, precios, tiendas, link en export). Podés editar la <strong>Query</strong> inline (también con el loop en curso). La lista activa también aparece en <a href="/cron">Cron / lotes</a>.</p>
+      <p id="cyber-import-hint" class="muted">Reimportar <strong>reemplaza las queries</strong> de la lista activa (mismo slug/nombre). Campos: n, query, category (+ matches, precios, tiendas, link en export). Podés editar la <strong>Query</strong> inline (también con el loop en curso). Cada lista es independiente y aparece en <a href="/cron">Cron / lotes</a>.</p>
       <div class="table-wrap scroll-x" id="cyber-products-wrap">
         <table class="results cron-table">
           <thead>
@@ -140,6 +141,6 @@
     </section>
   </main>
   <script src="/static/prices.js?v=34"></script>
-  <script src="/static/cyber-day.js?v=11"></script>
+  <script src="/static/cyber-day.js?v=12"></script>
 </body>
 </html>

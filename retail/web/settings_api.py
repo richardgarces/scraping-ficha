@@ -549,6 +549,29 @@ async def cyber_day_create_list(request: Request) -> dict:
         repo.close()
 
 
+@router.delete("/api/admin/cyber-day/lists")
+def cyber_day_delete_list(request: Request) -> dict:
+    """Elimina la lista indicada (queries + estado). Requiere Parar si está en curso."""
+    current_user(request, admin=True)
+    repo = connect_repo()
+    if repo is None:
+        raise HTTPException(status_code=503, detail="MongoDB no está disponible.")
+    try:
+        from retail.cyber_day import CyberDayError, delete_list
+
+        list_id = _cyber_list_param(request)
+        if not list_id:
+            raise HTTPException(status_code=400, detail="Indicá la lista a eliminar (?list=slug).")
+        try:
+            return delete_list(repo, list_id)
+        except CyberDayError as exc:
+            # 409 si está en curso (parar primero); 400 en el resto.
+            code = 409 if "Pará la lista" in str(exc) else 400
+            raise HTTPException(status_code=code, detail=str(exc)) from exc
+    finally:
+        repo.close()
+
+
 @router.post("/api/admin/cyber-day/start")
 def cyber_day_start(request: Request) -> dict:
     current_user(request, admin=True)

@@ -15,6 +15,7 @@ from retail.cyber_day import (
     continue_run,
     create_list,
     dedupe_items,
+    delete_list,
     detect_changes,
     ensure_cyber_category,
     ensure_seed,
@@ -421,3 +422,40 @@ def test_create_list_independent_run(repo):
     assert status_payload(repo, list_id="cyber_junio2026")["run"]["status"] == "running"
     slugs = {item["slug"] for item in list_all_lists(repo)}
     assert "cyber_junio2026" in slugs and "cyber_prueba" in slugs
+
+
+def test_import_preserves_list_identity(repo):
+    created = create_list(repo, name="Cyber Oct 2026", slug="cyber_oct2026", use_seed=False)
+    assert created["list_id"] == "cyber_oct2026"
+    result = import_products(
+        repo,
+        [
+            normalize_import_row({"n": 1, "query": "TV OLED", "category": "TV"}, 0),
+            normalize_import_row({"n": 2, "query": "AirPods", "category": "Audio"}, 1),
+        ],
+        source="reimport-test",
+        list_id="cyber_oct2026",
+    )
+    assert result["imported"] == 2
+    assert result["list_id"] == "cyber_oct2026"
+    assert result["list_name"] == "Cyber Oct 2026"
+    meta = next(item for item in list_all_lists(repo) if item["slug"] == "cyber_oct2026")
+    assert meta["name"] == "Cyber Oct 2026"
+    assert products_count(repo, "cyber_oct2026") == 2
+
+
+def test_delete_list_blocks_running_and_last(repo):
+    ensure_seed(repo)
+    created = create_list(repo, name="Cyber Borrar", slug="cyber_borrar", use_seed=True)
+    assert created["list_id"] == "cyber_borrar"
+    start_run(repo, list_id="cyber_borrar")
+    with pytest.raises(CyberDayError, match="Pará la lista"):
+        delete_list(repo, "cyber_borrar")
+    stop_run(repo, list_id="cyber_borrar")
+    deleted = delete_list(repo, "cyber_borrar")
+    assert deleted["deleted"] == "cyber_borrar"
+    slugs = {item["slug"] for item in list_all_lists(repo)}
+    assert "cyber_borrar" not in slugs
+    assert "cyber_junio2026" in slugs
+    with pytest.raises(CyberDayError, match="única lista"):
+        delete_list(repo, "cyber_junio2026")

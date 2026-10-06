@@ -72,6 +72,9 @@
 
   let cyberTimer = null;
   let currentListId = "";
+  let currentListName = "";
+  let currentListsCount = 0;
+  let currentRunStatus = "idle";
   let loadReady = false;
   let editingQueryN = null;
   let savingQueryN = null;
@@ -116,16 +119,22 @@
     btn.setAttribute("aria-disabled", enabled ? "false" : "true");
   }
 
-  /** Sincroniza Iniciar/Parar/Continuar/Reiniciar con el status del run. */
-  function applyActionButtons(status, total) {
+  /** Sincroniza Iniciar/Parar/Continuar/Reiniciar/Eliminar con el status del run. */
+  function applyActionButtons(status, total, listsCount) {
     const running = status === "running";
     const paused = status === "paused";
     const hasList = Number(total) > 0;
+    const listCount = Number(listsCount) || 0;
     setButtonEnabled(el("cyber-start"), hasList && !running);
     setButtonEnabled(el("cyber-stop"), running || paused);
     setButtonEnabled(el("cyber-continue"), hasList && paused);
     // Reiniciar con confirm: habilitado si hay lista (también en curso).
     setButtonEnabled(el("cyber-restart"), hasList);
+    // Eliminar: requiere Parar primero; no borrar la única lista.
+    setButtonEnabled(
+      el("cyber-delete-list"),
+      !usingSeedFallback && Boolean(currentListId) && !running && !paused && listCount > 1,
+    );
   }
 
   async function loadSeedFallback(message) {
@@ -169,7 +178,7 @@
       }
     }
     // Seed local: no arrancar worker; botones de control deshabilitados.
-    applyActionButtons("idle", 0);
+    applyActionButtons("idle", 0, 1);
   }
 
   function showLoadError(message) {
@@ -206,15 +215,18 @@
     const lap = Number(run.lap) || 0;
     if (payload?.list_id) currentListId = payload.list_id;
     fillListSelect(payload?.lists, currentListId);
+    currentListsCount = Array.isArray(payload?.lists) ? payload.lists.length : 0;
+    currentRunStatus = status;
 
     const listMeta = payload?.list || {};
+    currentListName = listMeta.name || listMeta.title || currentListId || "";
     const nameEl = el("cyber-name");
     const slugEl = el("cyber-slug");
     if (slugEl) slugEl.textContent = currentListId || "—";
     // Título de sección fijo; el nombre de lista vive en select + card de progreso.
     if (nameEl) nameEl.textContent = "Cyber";
     const liveTitle = el("cyber-live-title");
-    if (liveTitle) liveTitle.textContent = listMeta.name || listMeta.title || currentListId || "Cyber";
+    if (liveTitle) liveTitle.textContent = currentListName || "Cyber";
 
     const exportCsv = el("cyber-export-csv");
     const exportJson = el("cyber-export-json");
@@ -265,7 +277,7 @@
           ? `Última vuelta: ${formatSeconds(run.last_lap_elapsed_seconds)}`
           : "";
     }
-    applyActionButtons(status, total);
+    applyActionButtons(status, total, currentListsCount);
 
     const wrap = el("cyber-products-wrap");
     const body = el("cyber-products-body");
@@ -524,12 +536,66 @@
     cyberAction("/api/admin/cyber-day/restart", el("cyber-restart"), "Reiniciando…")
       .catch((error) => showFlash(error.message, false));
   });
+
+  el("cyber-delete-list")?.addEventListener("click", async () => {
+    const button = el("cyber-delete-list");
+    if (!button || button.disabled || button.classList.contains("is-disabled")) return;
+    if (!loadReady || usingSeedFallback) {
+      showFlash(usingSeedFallback
+        ? "Estás en modo seed local (solo lectura). Recargá cuando la API responda."
+        : "Todavía cargando el estado…", false);
+      return;
+    }
+    if (currentRunStatus === "running" || currentRunStatus === "paused") {
+      showFlash("Pará la lista antes de eliminarla.", false);
+      return;
+    }
+    if (currentListsCount <= 1) {
+      showFlash("No podés eliminar la única lista. Creá otra antes.", false);
+      return;
+    }
+    const label = currentListName || currentListId;
+    if (!window.confirm(
+      `¿Eliminar la lista «${label}» (${currentListId})?\nSe borran queries y progreso. No se puede deshacer.`,
+    )) {
+      return;
+    }
+    const prev = button.textContent;
+    setButtonEnabled(button, false);
+    button.textContent = "Eliminando…";
+    try {
+      const result = await apiJson(listQuery("/api/admin/cyber-day/lists"), { method: "DELETE" });
+      showFlash(result.message || `Lista «${result.deleted || currentListId}» eliminada.`);
+      currentListId = result.list_id || "";
+      renderCyber(result);
+      await refreshCyber();
+    } catch (error) {
+      showFlash(error.message, false);
+      await refreshCyber().catch(() => {});
+    } finally {
+      button.textContent = prev;
+    }
+  });
+
   el("cyber-import-form")?.addEventListener("submit", async (event) => {
     event.preventDefault();
     const input = el("cyber-file");
     const button = el("cyber-import");
     const file = input?.files?.[0];
     if (!file || !button) return;
+    if (usingSeedFallback) {
+      showFlash("Estás en modo seed local (solo lectura). Recargá cuando la API responda.", false);
+      return;
+    }
+    const label = currentListName || currentListId || "lista activa";
+    const runningNote = (currentRunStatus === "running" || currentRunStatus === "paused")
+      ? " La lista está en curso: se detendrá y se reiniciará el progreso."
+      : "";
+    if (!window.confirm(
+      `¿Reemplazar las queries de «${label}» con «${file.name}»?${runningNote}\nSe conserva el slug/nombre; las filas actuales se sobrescriben.`,
+    )) {
+      return;
+    }
     button.disabled = true;
     button.textContent = "Importando…";
     try {
@@ -545,18 +611,21 @@
       if (!response.ok) {
         throw new Error(typeof payload.detail === "string" ? payload.detail : response.statusText);
       }
-      showFlash(`Lista importada: ${payload.imported || 0} queries.`);
+      showFlash(payload.message || `Lista actualizada: ${payload.imported || 0} queries.`);
       input.value = "";
+      if (payload.list_id || payload.run) {
+        renderCyber(payload);
+      }
       await refreshCyber();
     } catch (error) {
       showFlash(error.message, false);
     } finally {
       button.disabled = false;
-      button.textContent = "Importar lista";
+      button.textContent = "Importar / actualizar";
     }
   });
 
   // Hasta el primer refresh: controles deshabilitados (evita Iniciar con status desconocido).
-  applyActionButtons("idle", 0);
+  applyActionButtons("idle", 0, 0);
   refreshCyber().catch((error) => showFlash(error.message, false));
 })();

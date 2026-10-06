@@ -361,10 +361,14 @@ def save_run(repo: Any, data: dict[str, Any], list_id: str | None = None) -> dic
 
 
 def ensure_default_list(repo: Any) -> dict[str, Any]:
-    """Garantiza meta de lista default + list_id en productos huérfanos."""
+    """Garantiza al menos una lista + list_id en productos huérfanos.
+
+    Si borraron la oficial pero quedan otras, no la recrea. Solo inserta
+    `cyber_junio2026` cuando no hay ninguna meta de lista.
+    """
     coll = lists_collection(repo)
     now = _now()
-    if not coll.find_one({"slug": CYBER_LIST_ID}):
+    if coll.count_documents({}) == 0:
         coll.insert_one({
             "slug": CYBER_LIST_ID,
             "name": CYBER_GROUP_TITLE,
@@ -381,8 +385,10 @@ def ensure_default_list(repo: Any) -> dict[str, Any]:
     except Exception as exc:
         print(f"cyber-day: backfill list_id: {exc}", flush=True)
     if hasattr(repo, "get_app_setting") and not repo.get_app_setting(ACTIVE_LIST_SETTING):
-        set_active_list(repo, CYBER_LIST_ID)
-    return {"ok": True, "list_id": CYBER_LIST_ID}
+        first = coll.find_one({}, sort=[("created_at", 1), ("slug", 1)]) or {}
+        set_active_list(repo, str(first.get("slug") or CYBER_LIST_ID))
+    active = resolve_list_id(repo)
+    return {"ok": True, "list_id": active}
 
 
 def list_meta_view(doc: dict[str, Any], *, products_count: int = 0, run: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -491,6 +497,49 @@ def create_list(
         "lists": list_all_lists(repo),
         **status_payload(repo, list_id=lid, enrich_missing=False),
     }
+
+
+def delete_list(repo: Any, list_id: str | None = None) -> dict[str, Any]:
+    """Elimina meta, queries y estado de una lista. Bloqueado si está en curso."""
+    ensure_default_list(repo)
+    lid = resolve_list_id(repo, list_id)
+    meta = lists_collection(repo).find_one({"slug": lid})
+    if not meta:
+        raise CyberDayError(f"No existe la lista «{lid}».")
+    if lists_collection(repo).count_documents({}) <= 1:
+        raise CyberDayError("No podés eliminar la única lista. Creá otra antes.")
+    run = load_run(repo, lid)
+    if run.get("status") in {"running", "paused"}:
+        raise CyberDayError("Pará la lista antes de eliminarla.")
+    clear_products(repo, lid)
+    lists_collection(repo).delete_one({"slug": lid})
+    try:
+        if hasattr(repo, "app_settings"):
+            repo.app_settings.delete_one({"_id": run_setting_key(lid)})
+            if lid == CYBER_LIST_ID:
+                repo.app_settings.delete_one({"_id": RUN_SETTING})
+    except Exception as exc:
+        print(f"cyber-day: delete run setting: {exc}", flush=True)
+    remaining = list(
+        lists_collection(repo).find().sort([("created_at", 1), ("slug", 1)])
+    )
+    next_id = str((remaining[0] or {}).get("slug") or CYBER_LIST_ID) if remaining else CYBER_LIST_ID
+    active = None
+    if hasattr(repo, "get_app_setting"):
+        active_doc = repo.get_app_setting(ACTIVE_LIST_SETTING) or {}
+        if isinstance(active_doc, dict):
+            active = str(active_doc.get("list_id") or active_doc.get("slug") or "").strip()
+        elif isinstance(active_doc, str):
+            active = active_doc.strip()
+    if not active or active == lid:
+        set_active_list(repo, next_id)
+    else:
+        next_id = active
+    ensure_default_list(repo)
+    payload = status_payload(repo, list_id=next_id, enrich_missing=False)
+    payload["deleted"] = lid
+    payload["message"] = f"Lista «{lid}» eliminada."
+    return payload
 
 
 def list_products(repo: Any, list_id: str | None = None) -> list[dict[str, Any]]:
@@ -849,9 +898,11 @@ def import_products(
     source: str = "import",
     list_id: str | None = None,
 ) -> dict[str, Any]:
+    """Reemplaza las queries de la lista indicada; conserva slug/nombre."""
     lid = resolve_list_id(repo, list_id)
     ensure_default_list(repo)
-    if not lists_collection(repo).find_one({"slug": lid}):
+    existing_meta = lists_collection(repo).find_one({"slug": lid})
+    if not existing_meta:
         lists_collection(repo).insert_one({
             "slug": lid,
             "name": lid,
@@ -860,40 +911,47 @@ def import_products(
             "updated_at": _now(),
             "source": source,
         })
+        existing_meta = {"slug": lid, "name": lid, "title": lid}
     unique = dedupe_items(items)
     if not unique:
         raise CyberDayError("La lista importada está vacía.")
+    run = load_run(repo, lid)
+    if run.get("status") in {"running", "paused"}:
+        # Reimport detiene el loop (mismo criterio que reiniciar progreso).
+        run["status"] = "stopped"
     clear_products(repo, lid)
     now = _now()
     docs = []
     for item in unique:
         docs.append({**item, "source": source, "list_id": lid, "created_at": now, "updated_at": now})
     products_collection(repo).insert_many(docs)
-    run = load_run(repo, lid)
     run["total"] = len(docs)
     run["cursor"] = 0
     run["processed"] = 0
     run["lap"] = 0
-    if run.get("status") == "running":
-        run["status"] = "stopped"
     run["source_note"] = f"Lista {lid}: {len(docs)} queries ({source})."
     run["list_id"] = lid
     run["group_id"] = lid if lid != CYBER_LIST_ID else CYBER_GROUP_ID
     run["last_error"] = None
     save_run(repo, run, list_id=lid)
+    # No pisa name/title: reimport actualiza contenido, no identidad.
     lists_collection(repo).update_one(
         {"slug": lid},
         {"$set": {"updated_at": now, "source": source}},
     )
     set_active_list(repo, lid)
-    return {
+    payload = status_payload(repo, list_id=lid, enrich_missing=False)
+    payload.update({
         "ok": True,
         "imported": len(docs),
         "total": len(docs),
         "source": source,
         "list_id": lid,
+        "list_name": existing_meta.get("name") or existing_meta.get("title") or lid,
         "deduped": max(0, len(items) - len(unique)),
-    }
+        "message": f"Lista «{existing_meta.get('name') or lid}» actualizada: {len(docs)} queries.",
+    })
+    return payload
 
 
 def repair_duplicates(repo: Any, list_id: str | None = None) -> dict[str, Any]:
