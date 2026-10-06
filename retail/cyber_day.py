@@ -3,8 +3,10 @@
 Cada ítem es una query de búsqueda. El worker busca/refresca top matches,
 notifica Telegram+push si cambia precio/oferta, y al terminar 1→N reinicia.
 
-Estado: `app_settings.cyber_day_run`. Lista: `cyber_day_products`.
-Seed: `data/cyber_day_sonic.json` (carga automática si la colección está vacía).
+Multi-lista: `cyber_day_lists` (slug/nombre) + productos en `cyber_day_products`
+filtrados por `list_id`. Estado por lista: `app_settings.cyber_day_run:{slug}`
+(legacy `cyber_day_run` se migra a la lista oficial). Seed oficial:
+`data/cyber_junio2026.json` (auto si `cyber_junio2026` está vacía).
 """
 
 from __future__ import annotations
@@ -14,17 +16,21 @@ import csv
 import io
 import json
 import os
+import re
 import socket
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-RUN_SETTING = "cyber_day_run"
+RUN_SETTING = "cyber_day_run"  # legacy; migrado a cyber_day_run:{slug}
+RUN_SETTING_PREFIX = "cyber_day_run:"
+ACTIVE_LIST_SETTING = "cyber_day_active_list"
 CYBER_GROUP_ID = "cyber_junio2026"
 CYBER_GROUP_TITLE = "Cyber Junio 2026"
 CYBER_LIST_ID = "cyber_junio2026"
 STATUSES = frozenset({"idle", "running", "paused", "stopped"})
+_SLUG_RE = re.compile(r"[^a-z0-9_]+")
 DEFAULT_DELAY = float(os.environ.get("CYBER_DAY_DELAY_SECONDS") or "1.0")
 TOP_MATCHES = max(1, int(os.environ.get("CYBER_DAY_TOP_MATCHES") or "6"))
 REFRESH_TOP = max(0, int(os.environ.get("CYBER_DAY_REFRESH_TOP") or "2"))
@@ -93,7 +99,53 @@ def match_key(store: str, product_id: str) -> str:
     return f"{store}:{product_id}"
 
 
-def default_run() -> dict[str, Any]:
+def slugify_list(name: str) -> str:
+    text = (name or "").strip().lower().replace("-", "_")
+    text = _SLUG_RE.sub("_", text)
+    text = re.sub(r"_+", "_", text).strip("_")
+    return (text[:64] or "lista")
+
+
+def run_setting_key(list_id: str) -> str:
+    return f"{RUN_SETTING_PREFIX}{list_id}"
+
+
+def lists_collection(repo: Any):
+    coll = getattr(repo, "cyber_day_lists", None)
+    if coll is not None:
+        return coll
+    return repo.db["cyber_day_lists"]
+
+
+def products_collection(repo: Any):
+    coll = getattr(repo, "cyber_day_products", None)
+    if coll is not None:
+        return coll
+    return repo.db["cyber_day_products"]
+
+
+def resolve_list_id(repo: Any, list_id: str | None = None) -> str:
+    key = str(list_id or "").strip()
+    if key:
+        return key
+    active = None
+    if hasattr(repo, "get_app_setting"):
+        active = repo.get_app_setting(ACTIVE_LIST_SETTING)
+    if isinstance(active, dict):
+        key = str(active.get("list_id") or active.get("slug") or "").strip()
+    elif isinstance(active, str):
+        key = active.strip()
+    return key or CYBER_LIST_ID
+
+
+def set_active_list(repo: Any, list_id: str) -> str:
+    slug = resolve_list_id(repo, list_id)
+    repo.save_app_setting(ACTIVE_LIST_SETTING, {"list_id": slug, "slug": slug})
+    return slug
+
+
+def default_run(list_id: str | None = None) -> dict[str, Any]:
+    lid = list_id or CYBER_LIST_ID
     return {
         "status": "idle",
         "cursor": 0,
@@ -109,41 +161,194 @@ def default_run() -> dict[str, Any]:
         "notified_count": 0,
         "heartbeat_at": None,
         "worker": None,
-        "source_note": f"Lista {CYBER_LIST_ID}: 100 queries Sonic.",
-        "list_id": CYBER_LIST_ID,
-        "group_id": CYBER_GROUP_ID,
+        "source_note": f"Lista {lid}.",
+        "list_id": lid,
+        "group_id": lid if lid != CYBER_LIST_ID else CYBER_GROUP_ID,
     }
 
 
-def load_run(repo: Any) -> dict[str, Any]:
-    found = repo.get_app_setting(RUN_SETTING) if hasattr(repo, "get_app_setting") else None
+def load_run(repo: Any, list_id: str | None = None) -> dict[str, Any]:
+    lid = resolve_list_id(repo, list_id)
+    key = run_setting_key(lid)
+    found = repo.get_app_setting(key) if hasattr(repo, "get_app_setting") else None
+    if not found and lid == CYBER_LIST_ID and hasattr(repo, "get_app_setting"):
+        # Migración: app_settings.cyber_day_run → cyber_day_run:cyber_junio2026
+        legacy = repo.get_app_setting(RUN_SETTING)
+        if legacy:
+            found = {k: v for k, v in legacy.items() if k != "updated_at"}
+            try:
+                repo.save_app_setting(key, {**default_run(lid), **found, "list_id": lid})
+            except Exception:
+                pass
     if not found:
-        return default_run()
-    base = default_run()
+        return default_run(lid)
+    base = default_run(lid)
     base.update({k: v for k, v in found.items() if k != "updated_at"})
+    base["list_id"] = lid
     if base.get("status") not in STATUSES:
         base["status"] = "idle"
     return base
 
 
-def save_run(repo: Any, data: dict[str, Any]) -> dict[str, Any]:
-    payload = {**default_run(), **data}
+def save_run(repo: Any, data: dict[str, Any], list_id: str | None = None) -> dict[str, Any]:
+    lid = resolve_list_id(repo, list_id or data.get("list_id"))
+    payload = {**default_run(lid), **data, "list_id": lid}
     payload["status"] = payload.get("status") if payload.get("status") in STATUSES else "idle"
-    return repo.save_app_setting(RUN_SETTING, payload)
+    saved = repo.save_app_setting(run_setting_key(lid), payload)
+    if lid == CYBER_LIST_ID:
+        # Compat cron / código viejo que lee cyber_day_run.
+        try:
+            repo.save_app_setting(RUN_SETTING, payload)
+        except Exception:
+            pass
+    return saved
 
 
-def products_collection(repo: Any):
-    coll = getattr(repo, "cyber_day_products", None)
-    if coll is not None:
-        return coll
-    return repo.db["cyber_day_products"]
+def ensure_default_list(repo: Any) -> dict[str, Any]:
+    """Garantiza meta de lista default + list_id en productos huérfanos."""
+    coll = lists_collection(repo)
+    now = _now()
+    if not coll.find_one({"slug": CYBER_LIST_ID}):
+        coll.insert_one({
+            "slug": CYBER_LIST_ID,
+            "name": CYBER_GROUP_TITLE,
+            "title": CYBER_GROUP_TITLE,
+            "created_at": now,
+            "updated_at": now,
+            "source": "seed",
+        })
+    try:
+        products_collection(repo).update_many(
+            {"$or": [{"list_id": {"$exists": False}}, {"list_id": None}, {"list_id": ""}]},
+            {"$set": {"list_id": CYBER_LIST_ID}},
+        )
+    except Exception as exc:
+        print(f"cyber-day: backfill list_id: {exc}", flush=True)
+    if hasattr(repo, "get_app_setting") and not repo.get_app_setting(ACTIVE_LIST_SETTING):
+        set_active_list(repo, CYBER_LIST_ID)
+    return {"ok": True, "list_id": CYBER_LIST_ID}
 
 
-def list_products(repo: Any) -> list[dict[str, Any]]:
-    rows = list(products_collection(repo).find().sort([("order", 1), ("_id", 1)]))
+def list_meta_view(doc: dict[str, Any], *, products_count: int = 0, run: dict[str, Any] | None = None) -> dict[str, Any]:
+    slug = str(doc.get("slug") or doc.get("list_id") or "")
+    progress = progress_view(run or default_run(slug), product_total=products_count) if run is not None else None
+    return {
+        "slug": slug,
+        "list_id": slug,
+        "name": doc.get("name") or doc.get("title") or slug,
+        "title": doc.get("title") or doc.get("name") or slug,
+        "products_count": products_count,
+        "source": doc.get("source"),
+        "created_at": _iso(doc.get("created_at")),
+        "updated_at": _iso(doc.get("updated_at")),
+        "run": progress,
+    }
+
+
+def list_all_lists(repo: Any) -> list[dict[str, Any]]:
+    ensure_default_list(repo)
+    rows = list(lists_collection(repo).find().sort([("created_at", 1), ("slug", 1)]))
+    if not rows:
+        rows = [{"slug": CYBER_LIST_ID, "name": CYBER_GROUP_TITLE, "title": CYBER_GROUP_TITLE}]
+    out = []
+    for doc in rows:
+        slug = str(doc.get("slug") or "")
+        if not slug:
+            continue
+        total = products_count(repo, slug)
+        run = load_run(repo, slug)
+        out.append(list_meta_view(doc, products_count=total, run=run))
+    return out
+
+
+def get_list_meta(repo: Any, list_id: str | None = None) -> dict[str, Any] | None:
+    lid = resolve_list_id(repo, list_id)
+    ensure_default_list(repo)
+    doc = lists_collection(repo).find_one({"slug": lid})
+    if not doc:
+        return None
+    return list_meta_view(doc, products_count=products_count(repo, lid), run=load_run(repo, lid))
+
+
+def create_list(
+    repo: Any,
+    *,
+    name: str,
+    slug: str | None = None,
+    copy_from: str | None = None,
+    use_seed: bool = False,
+    items: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Crea una lista independiente (estado/progreso propios)."""
+    ensure_default_list(repo)
+    title = (name or "").strip() or (slug or "").strip()
+    lid = slugify_list(slug or title)
+    if not lid:
+        raise CyberDayError("Slug de lista inválido.")
+    if lists_collection(repo).find_one({"slug": lid}):
+        raise CyberDayError(f"Ya existe la lista «{lid}».")
+    now = _now()
+    source = "empty"
+    lists_collection(repo).insert_one({
+        "slug": lid,
+        "name": title or lid,
+        "title": title or lid,
+        "created_at": now,
+        "updated_at": now,
+        "source": source,
+    })
+    save_run(repo, default_run(lid), list_id=lid)
+    imported = 0
+    if items:
+        result = import_products(repo, items, source="create-import", list_id=lid)
+        imported = int(result.get("imported") or 0)
+        source = "import"
+    elif copy_from:
+        src_id = resolve_list_id(repo, copy_from)
+        src_rows = list_products(repo, src_id)
+        if not src_rows:
+            raise CyberDayError(f"La lista origen «{src_id}» está vacía.")
+        payload = [
+            normalize_import_row(
+                {"n": r.get("n"), "query": r.get("query") or r.get("name"), "category": r.get("category")},
+                index,
+            )
+            for index, r in enumerate(src_rows)
+        ]
+        payload = [row for row in payload if row]
+        result = import_products(repo, payload, source=f"copy:{src_id}", list_id=lid)
+        imported = int(result.get("imported") or 0)
+        source = f"copy:{src_id}"
+    elif use_seed:
+        seed_items = load_seed_items()
+        if not seed_items:
+            raise CyberDayError("Seed JSON ausente o vacío.")
+        result = import_products(repo, seed_items, source=f"seed:{lid}", list_id=lid)
+        imported = int(result.get("imported") or 0)
+        source = f"seed:{lid}"
+    lists_collection(repo).update_one({"slug": lid}, {"$set": {"source": source, "updated_at": _now()}})
+    set_active_list(repo, lid)
+    return {
+        "ok": True,
+        "list": get_list_meta(repo, lid),
+        "imported": imported,
+        "lists": list_all_lists(repo),
+        **status_payload(repo, list_id=lid, enrich_missing=False),
+    }
+
+
+def list_products(repo: Any, list_id: str | None = None) -> list[dict[str, Any]]:
+    lid = resolve_list_id(repo, list_id)
+    rows = list(
+        products_collection(repo)
+        .find(_products_filter(lid))
+        .sort([("order", 1), ("_id", 1)])
+    )
     for row in rows:
         row["id"] = str(row.get("_id"))
         row.pop("_id", None)
+        if not row.get("list_id"):
+            row["list_id"] = lid
     return rows
 
 
@@ -223,12 +428,28 @@ def enrich_row_from_catalog(repo: Any, row: dict[str, Any], *, persist: bool = T
     return product_row_view(merged)
 
 
-def products_count(repo: Any) -> int:
-    return int(products_collection(repo).count_documents({}))
+def _products_filter(list_id: str) -> dict[str, Any]:
+    """Filtro por lista; la oficial también incluye filas huérfanas sin list_id."""
+    if list_id == CYBER_LIST_ID:
+        return {
+            "$or": [
+                {"list_id": list_id},
+                {"list_id": {"$exists": False}},
+                {"list_id": None},
+                {"list_id": ""},
+            ]
+        }
+    return {"list_id": list_id}
 
 
-def clear_products(repo: Any) -> None:
-    products_collection(repo).delete_many({})
+def products_count(repo: Any, list_id: str | None = None) -> int:
+    lid = resolve_list_id(repo, list_id)
+    return int(products_collection(repo).count_documents(_products_filter(lid)))
+
+
+def clear_products(repo: Any, list_id: str | None = None) -> None:
+    lid = resolve_list_id(repo, list_id)
+    products_collection(repo).delete_many(_products_filter(lid))
 
 
 def normalize_import_row(raw: dict[str, Any], order: int) -> dict[str, Any] | None:
@@ -351,68 +572,91 @@ def load_seed_items(path: Path | None = None) -> list[dict[str, Any]]:
     return parse_products_payload(seed.read_text(encoding="utf-8"), filename=seed.name)
 
 
-def import_products(repo: Any, items: list[dict[str, Any]], *, source: str = "import") -> dict[str, Any]:
+def import_products(
+    repo: Any,
+    items: list[dict[str, Any]],
+    *,
+    source: str = "import",
+    list_id: str | None = None,
+) -> dict[str, Any]:
+    lid = resolve_list_id(repo, list_id)
+    ensure_default_list(repo)
+    if not lists_collection(repo).find_one({"slug": lid}):
+        lists_collection(repo).insert_one({
+            "slug": lid,
+            "name": lid,
+            "title": lid,
+            "created_at": _now(),
+            "updated_at": _now(),
+            "source": source,
+        })
     unique = dedupe_items(items)
     if not unique:
         raise CyberDayError("La lista importada está vacía.")
-    clear_products(repo)
+    clear_products(repo, lid)
     now = _now()
     docs = []
     for item in unique:
-        docs.append({**item, "source": source, "list_id": CYBER_LIST_ID, "created_at": now, "updated_at": now})
+        docs.append({**item, "source": source, "list_id": lid, "created_at": now, "updated_at": now})
     products_collection(repo).insert_many(docs)
-    run = load_run(repo)
+    run = load_run(repo, lid)
     run["total"] = len(docs)
     run["cursor"] = 0
     run["processed"] = 0
     run["lap"] = 0
     if run.get("status") == "running":
         run["status"] = "stopped"
-    run["source_note"] = f"Lista {CYBER_LIST_ID}: {len(docs)} queries ({source})."
-    run["list_id"] = CYBER_LIST_ID
-    run["group_id"] = CYBER_GROUP_ID
+    run["source_note"] = f"Lista {lid}: {len(docs)} queries ({source})."
+    run["list_id"] = lid
+    run["group_id"] = lid if lid != CYBER_LIST_ID else CYBER_GROUP_ID
     run["last_error"] = None
-    save_run(repo, run)
+    save_run(repo, run, list_id=lid)
+    lists_collection(repo).update_one(
+        {"slug": lid},
+        {"$set": {"updated_at": now, "source": source}},
+    )
+    set_active_list(repo, lid)
     return {
         "ok": True,
         "imported": len(docs),
         "total": len(docs),
         "source": source,
+        "list_id": lid,
         "deduped": max(0, len(items) - len(unique)),
     }
 
 
-def repair_duplicates(repo: Any) -> dict[str, Any]:
-    """Si hay queries duplicadas (p. ej. seed×2 → 200), deja 100 únicos."""
-    rows = list_products(repo)
+def repair_duplicates(repo: Any, list_id: str | None = None) -> dict[str, Any]:
+    """Si hay queries duplicadas (p. ej. seed×2 → 200), deja únicos por lista."""
+    lid = resolve_list_id(repo, list_id)
+    rows = list_products(repo, lid)
     unique = dedupe_items(rows)
     if len(unique) == len(rows):
-        # Asegura total coherente en el run.
-        run = load_run(repo)
+        run = load_run(repo, lid)
         if int(run.get("total") or 0) != len(rows):
             run["total"] = len(rows)
-            save_run(repo, run)
-        return {"repaired": False, "total": len(rows)}
-    # Reinserta conservando estado de observación.
+            save_run(repo, run, list_id=lid)
+        return {"repaired": False, "total": len(rows), "list_id": lid}
     before = len(rows)
-    clear_products(repo)
+    clear_products(repo, lid)
     now = _now()
-    docs = [{**item, "list_id": CYBER_LIST_ID, "updated_at": now} for item in unique]
+    docs = [{**item, "list_id": lid, "updated_at": now} for item in unique]
     if docs:
         products_collection(repo).insert_many(docs)
-    run = load_run(repo)
+    run = load_run(repo, lid)
     run["total"] = len(docs)
     run["cursor"] = min(int(run.get("cursor") or 0), len(docs))
     run["processed"] = min(int(run.get("processed") or 0), len(docs))
-    run["source_note"] = f"Lista {CYBER_LIST_ID}: {len(docs)} queries (dedupe {before}→{len(docs)})."
-    save_run(repo, run)
-    return {"repaired": True, "before": before, "total": len(docs)}
+    run["source_note"] = f"Lista {lid}: {len(docs)} queries (dedupe {before}→{len(docs)})."
+    save_run(repo, run, list_id=lid)
+    return {"repaired": True, "before": before, "total": len(docs), "list_id": lid}
 
 
-def export_rows(repo: Any) -> list[dict[str, Any]]:
-    repair_duplicates(repo)
+def export_rows(repo: Any, list_id: str | None = None) -> list[dict[str, Any]]:
+    lid = resolve_list_id(repo, list_id)
+    repair_duplicates(repo, lid)
     rows = []
-    for item in list_products(repo):
+    for item in list_products(repo, lid):
         rows.append({
             "n": item.get("n"),
             "query": item.get("query") or item.get("name") or "",
@@ -423,8 +667,8 @@ def export_rows(repo: Any) -> list[dict[str, Any]]:
     return rows
 
 
-def export_csv(repo: Any) -> str:
-    rows = export_rows(repo)
+def export_csv(repo: Any, list_id: str | None = None) -> str:
+    rows = export_rows(repo, list_id)
     buf = io.StringIO()
     writer = csv.DictWriter(
         buf,
@@ -437,11 +681,13 @@ def export_csv(repo: Any) -> str:
     return buf.getvalue()
 
 
-def export_json(repo: Any) -> dict[str, Any]:
-    rows = export_rows(repo)
+def export_json(repo: Any, list_id: str | None = None) -> dict[str, Any]:
+    lid = resolve_list_id(repo, list_id)
+    meta = get_list_meta(repo, lid) or {"name": lid, "title": lid}
+    rows = export_rows(repo, lid)
     return {
-        "id": CYBER_LIST_ID,
-        "title": CYBER_GROUP_TITLE,
+        "id": lid,
+        "title": meta.get("title") or meta.get("name") or lid,
         "items": [
             {
                 "n": row["n"],
@@ -488,51 +734,55 @@ def ensure_cyber_category(repo: Any) -> dict[str, Any]:
     return {"ok": True, "id": CYBER_GROUP_ID, "store_count": len(stores), "queries": products_count(repo)}
 
 
-def ensure_seed(repo: Any) -> dict[str, Any]:
-    """Si la colección está vacía, carga el seed oficial `cyber_junio2026`.
+def ensure_seed(repo: Any, list_id: str | None = None) -> dict[str, Any]:
+    """Si la lista está vacía, carga el seed (solo default o cuando se pide).
 
     Si ya hay filas, repara duplicados (seed concurrente → 200).
     """
-    total = products_count(repo)
+    ensure_default_list(repo)
+    lid = resolve_list_id(repo, list_id)
+    total = products_count(repo, lid)
     if total > 0:
-        repair = repair_duplicates(repo)
+        repair = repair_duplicates(repo, lid)
         return {
             "seeded": False,
-            "total": int(repair.get("total") or products_count(repo)),
-            "list_id": CYBER_LIST_ID,
+            "total": int(repair.get("total") or products_count(repo, lid)),
+            "list_id": lid,
             "repaired": bool(repair.get("repaired")),
         }
+    # Solo auto-siembra la lista oficial; listas nuevas quedan vacías hasta import/seed.
+    if lid != CYBER_LIST_ID:
+        return {"seeded": False, "total": 0, "list_id": lid, "detail": "Lista vacía (importá o copiá seed)."}
     lock_id = "cyber_day_seed_lock"
     claimed = False
     try:
         repo.app_settings.insert_one({"_id": lock_id, "at": _now(), "host": socket.gethostname()})
         claimed = True
     except Exception:
-        # Otro proceso está sembrando.
         time.sleep(0.6)
-        total = products_count(repo)
+        total = products_count(repo, lid)
         if total > 0:
-            repair = repair_duplicates(repo)
+            repair = repair_duplicates(repo, lid)
             return {
                 "seeded": False,
                 "total": int(repair.get("total") or total),
-                "list_id": CYBER_LIST_ID,
+                "list_id": lid,
                 "repaired": bool(repair.get("repaired")),
             }
     try:
-        if products_count(repo) > 0:
-            repair = repair_duplicates(repo)
+        if products_count(repo, lid) > 0:
+            repair = repair_duplicates(repo, lid)
             return {
                 "seeded": False,
-                "total": int(repair.get("total") or products_count(repo)),
-                "list_id": CYBER_LIST_ID,
+                "total": int(repair.get("total") or products_count(repo, lid)),
+                "list_id": lid,
                 "repaired": bool(repair.get("repaired")),
             }
         items = load_seed_items()
         if not items:
-            return {"seeded": False, "total": 0, "detail": "Seed JSON ausente o vacío."}
-        result = import_products(repo, items, source=f"seed:{CYBER_LIST_ID}")
-        return {"seeded": True, "list_id": CYBER_LIST_ID, **result}
+            return {"seeded": False, "total": 0, "list_id": lid, "detail": "Seed JSON ausente o vacío."}
+        result = import_products(repo, items, source=f"seed:{lid}", list_id=lid)
+        return {"seeded": True, "list_id": lid, **result}
     finally:
         if claimed:
             try:
@@ -561,22 +811,23 @@ def catalog_products_for_cyber(repo: Any) -> list[dict[str, Any]]:
     return rows
 
 
-def restart_run(repo: Any) -> dict[str, Any]:
+def restart_run(repo: Any, list_id: str | None = None) -> dict[str, Any]:
     """Reinicia desde la query #1 (igual que Iniciar)."""
-    run = load_run(repo)
+    lid = resolve_list_id(repo, list_id)
+    run = load_run(repo, lid)
     if run.get("status") == "running":
         run["status"] = "stopped"
-        save_run(repo, run)
-    return start_run(repo)
+        save_run(repo, run, list_id=lid)
+    return start_run(repo, list_id=lid)
 
 
 def as_cron_group(repo: Any) -> dict[str, Any]:
     """Fila de `/cron` para el grupo cyber_junio2026 (progreso del worker)."""
     ensure_cyber_category(repo)
-    payload = status_payload(repo)
+    # Sin enrich: el poll de /cron es cada 3s; el worker ya completa precios.
+    payload = status_payload(repo, list_id=CYBER_LIST_ID, enrich_missing=False)
     run = payload.get("run") or {}
     status = str(run.get("status") or "idle")
-    # Mapear a estados del panel de grupos.
     if status == "running":
         group_status = "running"
     elif status == "paused":
@@ -586,13 +837,15 @@ def as_cron_group(repo: Any) -> dict[str, Any]:
     else:
         group_status = "idle"
     processed = int(run.get("processed") or 0)
-    total = int(run.get("total") or payload.get("products_count") or 0)
+    total = int(run.get("total") or payload.get("products_count") or products_count(repo, CYBER_LIST_ID) or 0)
     percent = float(run.get("percent") or 0)
     can_continue = group_status in {"stopped", "partial", "failed"} and processed > 0
+    # store_count = queries de la lista (no tiendas del catálogo).
     return {
         "id": CYBER_GROUP_ID,
         "title": CYBER_GROUP_TITLE,
-        "store_count": len(cyber_store_ids()),
+        "store_count": total,
+        "query_count": total,
         "query_list": True,
         "list_id": CYBER_LIST_ID,
         "kind": "query_list",
@@ -615,6 +868,8 @@ def as_cron_group(repo: Any) -> dict[str, Any]:
             "lap": run.get("lap"),
             "lap_elapsed_seconds": run.get("lap_elapsed_seconds"),
             "lap_eta_seconds": run.get("lap_eta_seconds"),
+            "worker_healthy": run.get("worker_healthy"),
+            "heartbeat_at": run.get("heartbeat_at"),
         } if group_status in {"running", "paused", "stopped"} else None,
         "last_run": {
             "status": group_status,
@@ -664,12 +919,13 @@ def progress_view(run: dict[str, Any], *, product_total: int | None = None) -> d
         "last_lap_elapsed_seconds": run.get("last_lap_elapsed_seconds"),
         "last_lap_finished_at": _iso(run.get("last_lap_finished_at")),
         "last_error": run.get("last_error"),
-        "last_change": run.get("last_change"),
+        "last_change": _json_safe(run.get("last_change")),
         "notified_count": int(run.get("notified_count") or 0),
         "worker": run.get("worker"),
         "worker_healthy": healthy,
         "heartbeat_at": _iso(heartbeat),
         "source_note": run.get("source_note"),
+        "list_id": run.get("list_id"),
         "import_required": total <= 0,
     }
 
@@ -684,20 +940,38 @@ def _iso(value: Any) -> str | None:
     return str(value)
 
 
-def status_payload(repo: Any, *, enrich_missing: bool = True) -> dict[str, Any]:
-    """Estado + lista JSON-safe. Nunca debe fallar por datetime de Mongo."""
+def _json_safe(value: Any) -> Any:
+    """Evita 500 de FastAPI por datetime/ObjectId anidados en last_change."""
+    if isinstance(value, datetime):
+        return _iso(value)
+    if isinstance(value, dict):
+        return {str(k): _json_safe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(v) for v in value]
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    return str(value)
+
+
+def status_payload(
+    repo: Any,
+    *,
+    list_id: str | None = None,
+    enrich_missing: bool = False,
+) -> dict[str, Any]:
+    """Estado + lista JSON-safe. Rápido por defecto (sin enrich) para no colgar la UI."""
+    lid = resolve_list_id(repo, list_id)
     try:
-        ensure_seed(repo)
+        ensure_seed(repo, lid)
     except Exception as exc:
         print(f"cyber-day: ensure_seed en status: {exc}", flush=True)
-    run = load_run(repo)
-    total = products_count(repo)
+    run = load_run(repo, lid)
+    total = products_count(repo, lid)
     run["total"] = total
     progress = progress_view(run, product_total=total)
-    raw_rows = list_products(repo)
+    raw_rows = list_products(repo, lid)
     products: list[dict[str, Any]] = []
-    # Limita enrich por request para no bloquear el poll de 3s; persiste y el resto se completa después.
-    enrich_budget = 40 if enrich_missing else 0
+    enrich_budget = 12 if enrich_missing else 0
     for row in raw_rows:
         needs = int(row.get("last_match_count") or 0) <= 0 or row.get("last_price") is None
         if needs and enrich_budget > 0:
@@ -705,9 +979,12 @@ def status_payload(repo: Any, *, enrich_missing: bool = True) -> dict[str, Any]:
             enrich_budget -= 1
         else:
             products.append(product_row_view(row))
-    # Compat: products_preview = lista completa (antes top 40).
+    meta = get_list_meta(repo, lid)
     return {
         "ok": True,
+        "list_id": lid,
+        "list": meta,
+        "lists": list_all_lists(repo),
         "run": progress,
         "products": products,
         "products_preview": products,
@@ -715,14 +992,17 @@ def status_payload(repo: Any, *, enrich_missing: bool = True) -> dict[str, Any]:
     }
 
 
-def start_run(repo: Any) -> dict[str, Any]:
-    ensure_seed(repo)
-    total = products_count(repo)
+def start_run(repo: Any, list_id: str | None = None) -> dict[str, Any]:
+    lid = resolve_list_id(repo, list_id)
+    ensure_seed(repo, lid)
+    total = products_count(repo, lid)
     if total <= 0:
-        raise CyberDayError("No hay queries Cyber Day. Revisá el seed o importá CSV/JSON.")
-    run = load_run(repo)
+        raise CyberDayError("No hay queries en esta lista. Importá CSV/JSON o copiá el seed.")
+    run = load_run(repo, lid)
     if run.get("status") == "running":
-        raise CyberDayError("Cyber Day ya está en curso.")
+        # Idempotente: /cron «Iniciar ahora» no debe 400 si el worker ya corre.
+        set_active_list(repo, lid)
+        return status_payload(repo, list_id=lid, enrich_missing=False)
     now = _now()
     run.update({
         "status": "running",
@@ -733,28 +1013,32 @@ def start_run(repo: Any) -> dict[str, Any]:
         "started_at": now,
         "lap_started_at": now,
         "last_error": None,
+        "list_id": lid,
     })
-    save_run(repo, run)
-    return status_payload(repo)
+    save_run(repo, run, list_id=lid)
+    set_active_list(repo, lid)
+    return status_payload(repo, list_id=lid, enrich_missing=False)
 
 
-def stop_run(repo: Any) -> dict[str, Any]:
-    run = load_run(repo)
+def stop_run(repo: Any, list_id: str | None = None) -> dict[str, Any]:
+    lid = resolve_list_id(repo, list_id)
+    run = load_run(repo, lid)
     if run.get("status") not in {"running", "paused"}:
-        raise CyberDayError("Cyber Day no está en curso.")
+        raise CyberDayError("Esta lista no está en curso.")
     run["status"] = "stopped"
-    save_run(repo, run)
-    return status_payload(repo)
+    save_run(repo, run, list_id=lid)
+    return status_payload(repo, list_id=lid, enrich_missing=False)
 
 
-def continue_run(repo: Any) -> dict[str, Any]:
-    ensure_seed(repo)
-    total = products_count(repo)
+def continue_run(repo: Any, list_id: str | None = None) -> dict[str, Any]:
+    lid = resolve_list_id(repo, list_id)
+    ensure_seed(repo, lid)
+    total = products_count(repo, lid)
     if total <= 0:
-        raise CyberDayError("No hay queries Cyber Day. Revisá el seed o importá CSV/JSON.")
-    run = load_run(repo)
+        raise CyberDayError("No hay queries en esta lista. Importá CSV/JSON o copiá el seed.")
+    run = load_run(repo, lid)
     if run.get("status") == "running":
-        raise CyberDayError("Cyber Day ya está en curso.")
+        raise CyberDayError("Esta lista ya está en curso.")
     if run.get("status") not in {"stopped", "paused", "idle"}:
         raise CyberDayError("No se puede continuar desde este estado.")
     now = _now()
@@ -771,16 +1055,19 @@ def continue_run(repo: Any) -> dict[str, Any]:
         "started_at": run.get("started_at") or now,
         "lap_started_at": run.get("lap_started_at") or now,
         "last_error": None,
+        "list_id": lid,
     })
-    save_run(repo, run)
-    return status_payload(repo)
+    save_run(repo, run, list_id=lid)
+    set_active_list(repo, lid)
+    return status_payload(repo, list_id=lid, enrich_missing=False)
 
 
-def touch_worker(repo: Any) -> None:
-    run = load_run(repo)
+def touch_worker(repo: Any, list_id: str | None = None) -> None:
+    lid = resolve_list_id(repo, list_id)
+    run = load_run(repo, lid)
     run["heartbeat_at"] = _now()
     run["worker"] = socket.gethostname()
-    save_run(repo, run)
+    save_run(repo, run, list_id=lid)
 
 
 def notify_cyber_change(repo: Any, change: dict[str, Any]) -> int:
@@ -891,10 +1178,16 @@ def boost_catalog_priority(repo: Any, catalog_id: str, *, reason: str = "cyber_d
     )
 
 
-def collect_query_matches(repo: Any, query: str) -> list[dict[str, Any]]:
+def collect_query_matches(
+    repo: Any,
+    query: str,
+    *,
+    list_id: str | None = None,
+) -> list[dict[str, Any]]:
     """Catálogo local (+ scrape acotado opcional); top matches rankeados."""
+    lid = resolve_list_id(repo, list_id)
     seen: dict[str, dict[str, Any]] = {}
-    touch_worker(repo)
+    touch_worker(repo, lid)
     try:
         for doc in repo.find_by_query(query, limit=max(TOP_MATCHES * 3, 20)):
             key = match_key(str(doc.get("store") or ""), str(doc.get("product_id") or ""))
@@ -909,7 +1202,7 @@ def collect_query_matches(repo: Any, query: str) -> list[dict[str, Any]]:
         try:
             from retail.search import search_products
 
-            touch_worker(repo)
+            touch_worker(repo, lid)
             result = search_products(
                 query,
                 source="scrape" if SEARCH_SOURCE == "scrape" else "both",
@@ -919,7 +1212,7 @@ def collect_query_matches(repo: Any, query: str) -> list[dict[str, Any]]:
                 delay=0.3,
                 timeout=SEARCH_TIMEOUT,
                 persist=True,
-                persist_meta={"source": "cyber_day"},
+                persist_meta={"source": "cyber_day", "list_id": lid},
                 price_band=True,
                 fresh=False,
                 background_side_effects=False,
@@ -934,20 +1227,26 @@ def collect_query_matches(repo: Any, query: str) -> list[dict[str, Any]]:
         except Exception as exc:
             print(f"cyber-day: search_products falló ({query}): {exc}", flush=True)
 
-    touch_worker(repo)
+    touch_worker(repo, lid)
     return _rank_matches(list(seen.values()), TOP_MATCHES)
 
 
-def refresh_top_matches(repo: Any, matches: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def refresh_top_matches(
+    repo: Any,
+    matches: list[dict[str, Any]],
+    *,
+    list_id: str | None = None,
+) -> list[dict[str, Any]]:
     from retail.product_refresh import refresh_product_price
 
+    lid = resolve_list_id(repo, list_id)
     fresh_rows: list[dict[str, Any]] = []
     for offer in matches[:REFRESH_TOP]:
         store = str(offer.get("store") or "")
         product_id = str(offer.get("product_id") or "")
         if not store or not product_id:
             continue
-        touch_worker(repo)
+        touch_worker(repo, lid)
         try:
             refresh_product_price(repo, store, product_id)
         except Exception as exc:
@@ -955,14 +1254,13 @@ def refresh_top_matches(repo: Any, matches: list[dict[str, Any]]) -> list[dict[s
         detail = repo.product_detail(store, product_id) or offer
         fresh_rows.append(detail)
         boost_catalog_priority(repo, str(detail.get("catalog_id") or ""))
-    # Matches sin refresh puntual igual entran al seguimiento de firma.
     refreshed_keys = {match_key(str(r.get("store") or ""), str(r.get("product_id") or "")) for r in fresh_rows}
     for offer in matches:
         key = match_key(str(offer.get("store") or ""), str(offer.get("product_id") or ""))
         if key not in refreshed_keys:
             fresh_rows.append(offer)
             boost_catalog_priority(repo, str(offer.get("catalog_id") or ""))
-    touch_worker(repo)
+    touch_worker(repo, lid)
     return fresh_rows
 
 
@@ -1027,31 +1325,41 @@ def detect_changes(
     return current, changes, summary
 
 
-def process_one(repo: Any, *, delay: float = 0.0) -> dict[str, Any]:
-    """Procesa la query del cursor si el run está `running`."""
-    run = load_run(repo)
+def process_one(repo: Any, *, delay: float = 0.0, list_id: str | None = None) -> dict[str, Any]:
+    """Procesa la query del cursor si el run de esa lista está `running`."""
+    lid = resolve_list_id(repo, list_id)
+    run = load_run(repo, lid)
     if run.get("status") != "running":
-        return {"ok": True, "skipped": True, "reason": "not_running", "status": run.get("status")}
+        return {
+            "ok": True,
+            "skipped": True,
+            "reason": "not_running",
+            "status": run.get("status"),
+            "list_id": lid,
+        }
 
     coll = products_collection(repo)
-    total = int(coll.count_documents({}))
+    total = int(coll.count_documents(_products_filter(lid)))
     if total <= 0:
-        seeded = ensure_seed(repo)
-        total = int(seeded.get("total") or products_count(repo))
+        seeded = ensure_seed(repo, lid)
+        total = int(seeded.get("total") or products_count(repo, lid))
         if total <= 0:
             run["status"] = "stopped"
             run["last_error"] = "Lista vacía."
             run["total"] = 0
-            save_run(repo, run)
-            return {"ok": False, "detail": "Lista vacía."}
+            save_run(repo, run, list_id=lid)
+            return {"ok": False, "detail": "Lista vacía.", "list_id": lid}
 
     cursor = int(run.get("cursor") or 0)
     if cursor >= total:
-        return _finish_lap(repo, run, total)
+        return _finish_lap(repo, run, total, list_id=lid)
 
-    item = next(coll.find().sort([("order", 1), ("_id", 1)]).skip(cursor).limit(1), None)
+    item = next(
+        coll.find(_products_filter(lid)).sort([("order", 1), ("_id", 1)]).skip(cursor).limit(1),
+        None,
+    )
     if item is None:
-        return _finish_lap(repo, run, total)
+        return _finish_lap(repo, run, total, list_id=lid)
 
     query = str(item.get("query") or item.get("name") or "").strip()
     result: dict[str, Any] = {
@@ -1061,22 +1369,22 @@ def process_one(repo: Any, *, delay: float = 0.0) -> dict[str, Any]:
         "cursor": cursor,
         "lap": run.get("lap"),
         "n": item.get("n"),
+        "list_id": lid,
     }
     now = _now()
     notified = 0
     changed = 0
-    touch_worker(repo)
+    touch_worker(repo, lid)
 
     try:
         if not query:
             raise CyberDayError("Query vacía.")
-        matches = collect_query_matches(repo, query)
-        fresh = refresh_top_matches(repo, matches) if matches else []
+        matches = collect_query_matches(repo, query, list_id=lid)
+        fresh = refresh_top_matches(repo, matches, list_id=lid) if matches else []
         tracked = fresh or matches
         current_sigs, changes, summary = detect_changes(
             item.get("last_matches"), tracked, query=query,
         )
-        # Primera vuelta: solo memoriza firmas.
         had_history = bool(item.get("last_matches"))
         if had_history:
             for change in changes:
@@ -1092,6 +1400,7 @@ def process_one(repo: Any, *, delay: float = 0.0) -> dict[str, Any]:
                     "previous_price": change["previous_price"],
                     "price": change["price"],
                     "notified": sent,
+                    "list_id": lid,
                 }
         if changed:
             run["notified_count"] = int(run.get("notified_count") or 0) + changed
@@ -1102,6 +1411,7 @@ def process_one(repo: Any, *, delay: float = 0.0) -> dict[str, Any]:
                 "$set": {
                     "query": query,
                     "name": query,
+                    "list_id": lid,
                     "resolved": bool(tracked),
                     "last_matches": current_sigs,
                     "last_match_count": len(current_sigs),
@@ -1129,7 +1439,7 @@ def process_one(repo: Any, *, delay: float = 0.0) -> dict[str, Any]:
         run["last_error"] = err
         result["detail"] = err
 
-    current = load_run(repo)
+    current = load_run(repo, lid)
     if current.get("status") != "running":
         result["stopped_during"] = True
         return result
@@ -1140,29 +1450,31 @@ def process_one(repo: Any, *, delay: float = 0.0) -> dict[str, Any]:
     run["total"] = total
     run["heartbeat_at"] = now
     run["worker"] = socket.gethostname()
+    run["list_id"] = lid
     if next_cursor >= total:
-        save_run(repo, run)
-        lap_result = _finish_lap(repo, run, total)
+        save_run(repo, run, list_id=lid)
+        lap_result = _finish_lap(repo, run, total, list_id=lid)
         result["lap_finished"] = True
         result.update(lap_result)
     else:
-        save_run(repo, run)
+        save_run(repo, run, list_id=lid)
 
     if delay > 0:
         time.sleep(delay)
     return result
 
 
-def _finish_lap(repo: Any, run: dict[str, Any], total: int) -> dict[str, Any]:
+def _finish_lap(repo: Any, run: dict[str, Any], total: int, *, list_id: str | None = None) -> dict[str, Any]:
+    lid = resolve_list_id(repo, list_id or run.get("list_id"))
     now = _now()
     started = run.get("lap_started_at")
     elapsed = None
     if isinstance(started, datetime):
         start = started if started.tzinfo else started.replace(tzinfo=timezone.utc)
         elapsed = max(0, int((now - start).total_seconds()))
-    current = load_run(repo)
+    current = load_run(repo, lid)
     if current.get("status") != "running":
-        return {"ok": True, "lap_finished": True, "status": current.get("status")}
+        return {"ok": True, "lap_finished": True, "status": current.get("status"), "list_id": lid}
     next_lap = int(run.get("lap") or 1) + 1
     run.update({
         "status": "running",
@@ -1175,10 +1487,12 @@ def _finish_lap(repo: Any, run: dict[str, Any], total: int) -> dict[str, Any]:
         "last_lap_finished_at": now,
         "heartbeat_at": now,
         "worker": socket.gethostname(),
+        "list_id": lid,
     })
-    save_run(repo, run)
+    save_run(repo, run, list_id=lid)
     print(
-        f"cyber-day lap {next_lap - 1} done in {elapsed}s; starting lap {next_lap} ({total} queries)",
+        f"cyber-day [{lid}] lap {next_lap - 1} done in {elapsed}s; "
+        f"starting lap {next_lap} ({total} queries)",
         flush=True,
     )
     return {
@@ -1187,30 +1501,53 @@ def _finish_lap(repo: Any, run: dict[str, Any], total: int) -> dict[str, Any]:
         "last_lap": next_lap - 1,
         "last_lap_elapsed_seconds": elapsed,
         "lap": next_lap,
+        "list_id": lid,
     }
 
 
+def running_list_ids(repo: Any) -> list[str]:
+    ensure_default_list(repo)
+    ids = []
+    for meta in list_all_lists(repo):
+        slug = str(meta.get("slug") or "")
+        if not slug:
+            continue
+        if load_run(repo, slug).get("status") == "running":
+            ids.append(slug)
+    # Compat: si solo existe el run legacy running
+    if not ids:
+        legacy = load_run(repo, CYBER_LIST_ID)
+        if legacy.get("status") == "running":
+            ids.append(CYBER_LIST_ID)
+    return ids
+
+
 def worker_loop(repo: Any, *, delay: float = DEFAULT_DELAY, poll_seconds: float = 2.0) -> None:
-    ensure_seed(repo)
+    ensure_seed(repo, CYBER_LIST_ID)
     while True:
-        touch_worker(repo)
-        run = load_run(repo)
-        if run.get("status") != "running":
+        active = resolve_list_id(repo)
+        running = running_list_ids(repo)
+        if not running:
+            touch_worker(repo, active)
             time.sleep(poll_seconds)
             continue
-        metrics = process_one(repo, delay=delay)
-        if metrics.get("skipped"):
+        for lid in running:
+            touch_worker(repo, lid)
+            metrics = process_one(repo, delay=delay, list_id=lid)
+            if metrics.get("skipped"):
+                continue
+            if metrics.get("ok"):
+                print(
+                    f"cyber-day [{lid}] lap={metrics.get('lap')} n={metrics.get('n')} "
+                    f"query={metrics.get('query')!r} matches={metrics.get('matches')} "
+                    f"changed={metrics.get('changed')} notified={metrics.get('notified')}",
+                    flush=True,
+                )
+            else:
+                print(f"cyber-day [{lid}] error: {metrics.get('detail')}", flush=True)
+                time.sleep(max(delay, 1.0))
+        if not running:
             time.sleep(poll_seconds)
-        elif metrics.get("ok"):
-            print(
-                f"cyber-day lap={metrics.get('lap')} n={metrics.get('n')} "
-                f"query={metrics.get('query')!r} matches={metrics.get('matches')} "
-                f"changed={metrics.get('changed')} notified={metrics.get('notified')}",
-                flush=True,
-            )
-        else:
-            print(f"cyber-day error: {metrics.get('detail')}", flush=True)
-            time.sleep(max(delay, 1.0))
 
 
 def main() -> None:

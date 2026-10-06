@@ -11,7 +11,9 @@ from retail.cyber_day import (
     CYBER_GROUP_ID,
     SEED_PATH,
     CyberDayError,
+    as_cron_group,
     continue_run,
+    create_list,
     dedupe_items,
     detect_changes,
     ensure_cyber_category,
@@ -20,11 +22,13 @@ from retail.cyber_day import (
     export_json,
     import_products,
     is_cyber_group,
+    list_all_lists,
     load_seed_items,
     normalize_import_row,
     offer_signature,
     parse_products_payload,
     process_one,
+    products_count,
     progress_view,
     repair_duplicates,
     restart_run,
@@ -111,8 +115,9 @@ def test_state_machine_start_stop_continue(repo):
     assert started["run"]["cursor"] == 0
     assert started["run"]["percent"] == 0.0
 
-    with pytest.raises(CyberDayError):
-        start_run(repo)
+    # Idempotente: segundo start no falla (cron «Iniciar ahora»).
+    again = start_run(repo)
+    assert again["run"]["status"] == "running"
 
     stopped = stop_run(repo)
     assert stopped["run"]["status"] == "stopped"
@@ -178,7 +183,7 @@ def test_notify_on_change_mocked(repo, monkeypatch):
     start_run(repo)
     sent = {"n": 0}
 
-    def fake_collect(repo, query):
+    def fake_collect(repo, query, **_kwargs):
         return [{
             "store": "falabella",
             "product_id": "iphone-x",
@@ -188,7 +193,7 @@ def test_notify_on_change_mocked(repo, monkeypatch):
             "catalog_id": "cat-1",
         }]
 
-    def fake_refresh(repo, matches):
+    def fake_refresh(repo, matches, **_kwargs):
         return matches
 
     def fake_notify(repo, change):
@@ -205,7 +210,7 @@ def test_notify_on_change_mocked(repo, monkeypatch):
     assert sent["n"] == 0
 
     # Segunda observación con precio distinto
-    def fake_collect_drop(repo, query):
+    def fake_collect_drop(repo, query, **_kwargs):
         return [{
             "store": "falabella",
             "product_id": "iphone-x",
@@ -280,3 +285,29 @@ def test_export_csv_and_json(repo):
     assert payload["id"] == "cyber_junio2026"
     assert len(payload["items"]) == 100
     assert payload["items"][0]["query"]
+
+
+def test_as_cron_group_shows_queries_not_store_catalog(repo):
+    ensure_seed(repo)
+    start_run(repo)
+    row = as_cron_group(repo)
+    assert row["query_list"] is True
+    assert row["store_count"] == 100
+    assert row["query_count"] == 100
+    assert row["status"] == "running"
+    assert row["progress"]["items"] == 100
+
+
+def test_create_list_independent_run(repo):
+    ensure_seed(repo)
+    start_run(repo, list_id="cyber_junio2026")
+    created = create_list(repo, name="Cyber Prueba", slug="cyber_prueba", use_seed=True)
+    assert created["ok"] is True
+    assert created["list_id"] == "cyber_prueba"
+    assert products_count(repo, "cyber_prueba") == 100
+    assert products_count(repo, "cyber_junio2026") == 100
+    # La lista nueva arranca idle; la oficial sigue running.
+    assert created["run"]["status"] == "idle"
+    assert status_payload(repo, list_id="cyber_junio2026")["run"]["status"] == "running"
+    slugs = {item["slug"] for item in list_all_lists(repo)}
+    assert "cyber_junio2026" in slugs and "cyber_prueba" in slugs

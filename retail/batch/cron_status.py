@@ -219,147 +219,149 @@ def build_cron_batch_status(*, repo: Any | None = None, today: str | None = None
             if by_job is not None:
                 basic_run = by_job("scraping_basico")
         categories = list_store_categories(repo=local)
+
+        groups: list[dict[str, Any]] = []
+        any_running = False
+        cyber_done = False
+        for cat in categories:
+            gid = str(cat.get("id") or "").strip().lower()
+            if not gid:
+                continue
+            # Cyber Junio 2026: progreso del worker dedicado (loop de queries).
+            # Importante: el repo debe seguir abierto aquí (antes se cerraba en finally
+            # y as_cron_group fallaba → fallback idle + «246 tiendas»).
+            try:
+                from retail.cyber_day import as_cron_group, is_cyber_group
+
+                if is_cyber_group(gid) and local is not None:
+                    cyber = as_cron_group(local)
+                    slot = slots.get(gid) or {
+                        "hour": int(6 if schedule.get("hour") is None else schedule["hour"]),
+                        "minute": int(0 if schedule.get("minute") is None else schedule["minute"]),
+                    }
+                    cyber["schedule"] = {
+                        "hour": slot["hour"],
+                        "minute": slot["minute"],
+                        "label": f"{slot['hour']:02d}:{slot['minute']:02d}",
+                    }
+                    if cyber.get("status") in {"running", "paused"}:
+                        any_running = True
+                    groups.append(cyber)
+                    cyber_done = True
+                    continue
+            except Exception:
+                pass
+            run = runs_by_grupo.get(gid)
+            status = derive_group_status(run, today=day)
+            if status in {"running", "paused"}:
+                any_running = True
+            slot = slots.get(gid) or {
+                "hour": int(6 if schedule.get("hour") is None else schedule["hour"]),
+                "minute": int(0 if schedule.get("minute") is None else schedule["minute"]),
+            }
+            groups.append(
+                {
+                    "id": gid,
+                    "title": cat.get("title") or gid,
+                    "store_count": len(cat.get("store_ids") or []),
+                    "query_list": bool(cat.get("query_list")),
+                    "schedule": {
+                        "hour": slot["hour"],
+                        "minute": slot["minute"],
+                        "label": f"{slot['hour']:02d}:{slot['minute']:02d}",
+                    },
+                    "status": status,
+                    "can_continue": run_can_continue(run) if status in {"partial", "failed", "stopped"} else False,
+                    "progress": progress_payload(run) if status in {"running", "paused"} else None,
+                    "last_run": public_run_summary(run),
+                }
+            )
+        if not cyber_done and local is not None:
+            try:
+                from retail.cyber_day import CYBER_GROUP_ID, as_cron_group
+
+                if not any(item.get("id") == CYBER_GROUP_ID for item in groups):
+                    cyber = as_cron_group(local)
+                    slot = slots.get(CYBER_GROUP_ID) or {
+                        "hour": int(6 if schedule.get("hour") is None else schedule["hour"]),
+                        "minute": int(0 if schedule.get("minute") is None else schedule["minute"]),
+                    }
+                    cyber["schedule"] = {
+                        "hour": slot["hour"],
+                        "minute": slot["minute"],
+                        "label": f"{slot['hour']:02d}:{slot['minute']:02d}",
+                    }
+                    if cyber.get("status") in {"running", "paused"}:
+                        any_running = True
+                    groups.insert(0, cyber)
+            except Exception:
+                pass
+
+        titles = {spec.id: spec.title for spec in list_stores()}
+        store_jobs: list[dict[str, Any]] = []
+        for store_id, run in runs_by_tienda.items():
+            status = derive_group_status(run, today=day)
+            if status in {"running", "paused"}:
+                any_running = True
+            store_jobs.append(
+                {
+                    "id": store_id,
+                    "public_id": public_store_key(store_id),
+                    "title": public_store_label(store_id, titles),
+                    "groups": list(run.get("groups") or []),
+                    "status": status,
+                    "can_continue": run_can_continue(run) if status in {"partial", "failed", "stopped"} else False,
+                    "progress": progress_payload(run) if status in {"running", "paused"} else None,
+                    "last_run": public_run_summary(run),
+                }
+            )
+        store_jobs.sort(key=lambda item: (item["status"] not in {"running", "paused"}, item["title"].lower()))
+
+        basic_status = derive_group_status(basic_run, today=day)
+        if basic_status in {"running", "paused"}:
+            any_running = True
+        basic_scrape = {
+            "id": "scraping_basico",
+            "title": "Scraping básico",
+            "status": basic_status,
+            "can_continue": run_can_continue(basic_run) if basic_status in {"partial", "failed", "stopped"} else False,
+            "progress": progress_payload(basic_run) if basic_status in {"running", "paused"} else None,
+            "last_run": public_run_summary(basic_run),
+        }
+
+        registered: list[dict[str, Any]] = []
+        for spec in list_stores():
+            gid, gtitle, _order = group_of(spec.id)
+            registered.append(
+                {
+                    "id": spec.id,
+                    "public_id": public_store_key(spec.id),
+                    "title": public_store_label(spec.id, titles),
+                    "group": gid,
+                    "group_title": gtitle,
+                }
+            )
+        registered.sort(key=lambda item: item["title"].lower())
+
+        return {
+            "today": day,
+            "timezone": "America/Santiago",
+            "any_running": any_running,
+            "schedule": {
+                "enabled": bool(sched_public.get("enabled")),
+                "paused": bool(sched_public.get("paused")),
+                "source": sched_public.get("source"),
+                "pause": sched_public.get("pause"),
+                "batch_budget_minutes": int(sched_public.get("batch_budget_minutes") or 90),
+                "backend": sched_public.get("backend"),
+                "stagger_minutes": int((sched_public.get("groups") or {}).get("stagger_minutes") or 45),
+                "hint": sched_public.get("hint"),
+            },
+            "groups": groups,
+            "stores": registered,
+            "store_jobs": store_jobs,
+            "basic_scrape": basic_scrape,
+        }
     finally:
         if close and local is not None:
             local.close()
-
-    groups: list[dict[str, Any]] = []
-    any_running = False
-    cyber_done = False
-    for cat in categories:
-        gid = str(cat.get("id") or "").strip().lower()
-        if not gid:
-            continue
-        # Cyber Junio 2026: progreso del worker dedicado (loop de queries).
-        try:
-            from retail.cyber_day import as_cron_group, is_cyber_group
-
-            if is_cyber_group(gid) and local is not None:
-                cyber = as_cron_group(local)
-                slot = slots.get(gid) or {
-                    "hour": int(6 if schedule.get("hour") is None else schedule["hour"]),
-                    "minute": int(0 if schedule.get("minute") is None else schedule["minute"]),
-                }
-                cyber["schedule"] = {
-                    "hour": slot["hour"],
-                    "minute": slot["minute"],
-                    "label": f"{slot['hour']:02d}:{slot['minute']:02d}",
-                }
-                if cyber.get("status") in {"running", "paused"}:
-                    any_running = True
-                groups.append(cyber)
-                cyber_done = True
-                continue
-        except Exception:
-            pass
-        run = runs_by_grupo.get(gid)
-        status = derive_group_status(run, today=day)
-        if status in {"running", "paused"}:
-            any_running = True
-        slot = slots.get(gid) or {
-            "hour": int(6 if schedule.get("hour") is None else schedule["hour"]),
-            "minute": int(0 if schedule.get("minute") is None else schedule["minute"]),
-        }
-        groups.append(
-            {
-                "id": gid,
-                "title": cat.get("title") or gid,
-                "store_count": len(cat.get("store_ids") or []),
-                "query_list": bool(cat.get("query_list")),
-                "schedule": {
-                    "hour": slot["hour"],
-                    "minute": slot["minute"],
-                    "label": f"{slot['hour']:02d}:{slot['minute']:02d}",
-                },
-                "status": status,
-                "can_continue": run_can_continue(run) if status in {"partial", "failed", "stopped"} else False,
-                "progress": progress_payload(run) if status in {"running", "paused"} else None,
-                "last_run": public_run_summary(run),
-            }
-        )
-    if not cyber_done and local is not None:
-        try:
-            from retail.cyber_day import CYBER_GROUP_ID, as_cron_group
-
-            if not any(item.get("id") == CYBER_GROUP_ID for item in groups):
-                cyber = as_cron_group(local)
-                slot = slots.get(CYBER_GROUP_ID) or {
-                    "hour": int(6 if schedule.get("hour") is None else schedule["hour"]),
-                    "minute": int(0 if schedule.get("minute") is None else schedule["minute"]),
-                }
-                cyber["schedule"] = {
-                    "hour": slot["hour"],
-                    "minute": slot["minute"],
-                    "label": f"{slot['hour']:02d}:{slot['minute']:02d}",
-                }
-                if cyber.get("status") in {"running", "paused"}:
-                    any_running = True
-                groups.insert(0, cyber)
-        except Exception:
-            pass
-
-    titles = {spec.id: spec.title for spec in list_stores()}
-    store_jobs: list[dict[str, Any]] = []
-    for store_id, run in runs_by_tienda.items():
-        status = derive_group_status(run, today=day)
-        if status in {"running", "paused"}:
-            any_running = True
-        store_jobs.append(
-            {
-                "id": store_id,
-                "public_id": public_store_key(store_id),
-                "title": public_store_label(store_id, titles),
-                "groups": list(run.get("groups") or []),
-                "status": status,
-                "can_continue": run_can_continue(run) if status in {"partial", "failed", "stopped"} else False,
-                "progress": progress_payload(run) if status in {"running", "paused"} else None,
-                "last_run": public_run_summary(run),
-            }
-        )
-    store_jobs.sort(key=lambda item: (item["status"] not in {"running", "paused"}, item["title"].lower()))
-
-    basic_status = derive_group_status(basic_run, today=day)
-    if basic_status in {"running", "paused"}:
-        any_running = True
-    basic_scrape = {
-        "id": "scraping_basico",
-        "title": "Scraping básico",
-        "status": basic_status,
-        "can_continue": run_can_continue(basic_run) if basic_status in {"partial", "failed", "stopped"} else False,
-        "progress": progress_payload(basic_run) if basic_status in {"running", "paused"} else None,
-        "last_run": public_run_summary(basic_run),
-    }
-
-    registered: list[dict[str, Any]] = []
-    for spec in list_stores():
-        gid, gtitle, _order = group_of(spec.id)
-        registered.append(
-            {
-                "id": spec.id,
-                "public_id": public_store_key(spec.id),
-                "title": public_store_label(spec.id, titles),
-                "group": gid,
-                "group_title": gtitle,
-            }
-        )
-    registered.sort(key=lambda item: item["title"].lower())
-
-    return {
-        "today": day,
-        "timezone": "America/Santiago",
-        "any_running": any_running,
-        "schedule": {
-            "enabled": bool(sched_public.get("enabled")),
-            "paused": bool(sched_public.get("paused")),
-            "source": sched_public.get("source"),
-            "pause": sched_public.get("pause"),
-            "batch_budget_minutes": int(sched_public.get("batch_budget_minutes") or 90),
-            "backend": sched_public.get("backend"),
-            "stagger_minutes": int((sched_public.get("groups") or {}).get("stagger_minutes") or 45),
-            "hint": sched_public.get("hint"),
-        },
-        "groups": groups,
-        "stores": registered,
-        "store_jobs": store_jobs,
-        "basic_scrape": basic_scrape,
-    }

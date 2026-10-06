@@ -32,7 +32,15 @@ def test_cyber_day_static_assets_exist():
     assert "data-admin" in html
     assert "cyber-export-csv" in html
     assert "Reiniciar" in html
+    assert "cyber-list-select" in html
+    assert "Nueva lista" in html
+    assert "cyber-day.js?v=4" in html
     assert "/api/admin/cyber-day" in js
+    assert "cyber-day/lists" in js
+    assert "FETCH_TIMEOUT_MS" in js
     prices = (root / "prices.js").read_text(encoding="utf-8")
     assert 'href = "/cyber-day"' in prices or 'href="/cyber-day"' in prices
     assert 'textContent = "Cyber Day"' in prices
+    cron_js = (root / "cron.js").read_text(encoding="utf-8")
+    assert "queries" in cron_js
+    assert "query_list" in cron_js

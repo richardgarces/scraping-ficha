@@ -459,6 +459,19 @@ def admin_test_push(request: Request) -> dict:
         repo.close()
 
 
+def _cyber_list_param(request: Request, body: dict | None = None) -> str | None:
+    if body:
+        for key in ("list_id", "list", "slug"):
+            value = body.get(key)
+            if value:
+                return str(value).strip()
+    for key in ("list", "list_id", "slug"):
+        value = request.query_params.get(key)
+        if value:
+            return str(value).strip()
+    return None
+
+
 @router.get("/api/admin/cyber-day")
 def cyber_day_status(request: Request) -> dict:
     """Estado, progreso y lista Cyber Day (JSON-safe; no bloquea la UI)."""
@@ -467,11 +480,71 @@ def cyber_day_status(request: Request) -> dict:
     if repo is None:
         raise HTTPException(status_code=503, detail="MongoDB no está disponible.")
     try:
-        from retail.cyber_day import status_payload
+        from retail.cyber_day import set_active_list, status_payload
 
-        return status_payload(repo)
+        list_id = _cyber_list_param(request)
+        if list_id:
+            set_active_list(repo, list_id)
+        # enrich_missing=False: el worker completa precios; la UI no debe colgarse.
+        return status_payload(repo, list_id=list_id, enrich_missing=False)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Cyber Day status falló: {exc}") from exc
+    finally:
+        repo.close()
+
+
+@router.get("/api/admin/cyber-day/lists")
+def cyber_day_lists(request: Request) -> dict:
+    current_user(request, admin=True)
+    repo = connect_repo()
+    if repo is None:
+        raise HTTPException(status_code=503, detail="MongoDB no está disponible.")
+    try:
+        from retail.cyber_day import list_all_lists, resolve_list_id
+
+        return {"ok": True, "lists": list_all_lists(repo), "active": resolve_list_id(repo)}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Cyber Day lists falló: {exc}") from exc
+    finally:
+        repo.close()
+
+
+@router.post("/api/admin/cyber-day/lists")
+async def cyber_day_create_list(request: Request) -> dict:
+    """Crea una lista nueva (nombre/slug) con seed, copia u opcionalmente vacía."""
+    current_user(request, admin=True)
+    repo = connect_repo()
+    if repo is None:
+        raise HTTPException(status_code=503, detail="MongoDB no está disponible.")
+    try:
+        from retail.cyber_day import CyberDayError, create_list
+
+        body = {}
+        content_type = request.headers.get("content-type") or ""
+        if "application/json" in content_type:
+            raw = await request.json()
+            body = raw if isinstance(raw, dict) else {}
+        else:
+            form = await request.form()
+            body = {k: form.get(k) for k in form.keys()}
+        name = str(body.get("name") or body.get("title") or "").strip()
+        slug = str(body.get("slug") or body.get("list_id") or "").strip() or None
+        copy_from = str(body.get("copy_from") or "").strip() or None
+        use_seed = str(body.get("use_seed") or body.get("seed") or "").lower() in {
+            "1", "true", "yes", "on", "si", "sí",
+        }
+        if not name and not slug:
+            raise HTTPException(status_code=400, detail="Indicá un nombre o slug para la lista.")
+        try:
+            return create_list(
+                repo,
+                name=name or slug or "lista",
+                slug=slug,
+                copy_from=copy_from,
+                use_seed=use_seed,
+            )
+        except CyberDayError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
     finally:
         repo.close()
 
@@ -485,7 +558,7 @@ def cyber_day_start(request: Request) -> dict:
     try:
         from retail.cyber_day import CyberDayError, start_run
 
-        return start_run(repo)
+        return start_run(repo, list_id=_cyber_list_param(request))
     except CyberDayError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     finally:
@@ -501,7 +574,7 @@ def cyber_day_stop(request: Request) -> dict:
     try:
         from retail.cyber_day import CyberDayError, stop_run
 
-        return stop_run(repo)
+        return stop_run(repo, list_id=_cyber_list_param(request))
     except CyberDayError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     finally:
@@ -517,7 +590,7 @@ def cyber_day_continue(request: Request) -> dict:
     try:
         from retail.cyber_day import CyberDayError, continue_run
 
-        return continue_run(repo)
+        return continue_run(repo, list_id=_cyber_list_param(request))
     except CyberDayError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     finally:
@@ -526,17 +599,19 @@ def cyber_day_continue(request: Request) -> dict:
 
 @router.post("/api/admin/cyber-day/import")
 async def cyber_day_import(request: Request) -> dict:
-    """Importa lista Sonic (CSV o JSON). Reemplaza la lista actual."""
+    """Importa lista Sonic (CSV o JSON). Reemplaza solo la lista indicada."""
     current_user(request, admin=True)
     repo = connect_repo()
     if repo is None:
         raise HTTPException(status_code=503, detail="MongoDB no está disponible.")
     filename = ""
     text = ""
+    list_id = _cyber_list_param(request)
     content_type = request.headers.get("content-type") or ""
     try:
         if "multipart/form-data" in content_type:
             form = await request.form()
+            list_id = str(form.get("list_id") or form.get("list") or list_id or "").strip() or list_id
             upload = form.get("file") or form.get("lista")
             if upload is not None and hasattr(upload, "read"):
                 filename = str(getattr(upload, "filename", "") or "")
@@ -546,6 +621,8 @@ async def cyber_day_import(request: Request) -> dict:
                 text = str(form.get("text") or form.get("content") or "")
         elif "application/json" in content_type:
             body = await request.json()
+            if isinstance(body, dict):
+                list_id = _cyber_list_param(request, body) or list_id
             if isinstance(body, list):
                 from retail.cyber_day import CyberDayError, import_products, normalize_import_row
 
@@ -555,7 +632,7 @@ async def cyber_day_import(request: Request) -> dict:
                     if (row := normalize_import_row(raw if isinstance(raw, dict) else {}, index))
                 ]
                 try:
-                    return import_products(repo, items, source="api-json")
+                    return import_products(repo, items, source="api-json", list_id=list_id)
                 except CyberDayError as exc:
                     raise HTTPException(status_code=400, detail=str(exc)) from exc
             if not isinstance(body, dict):
@@ -575,7 +652,7 @@ async def cyber_day_import(request: Request) -> dict:
 
         try:
             items = parse_products_payload(text, filename=filename)
-            return import_products(repo, items, source=filename or "upload")
+            return import_products(repo, items, source=filename or "upload", list_id=list_id)
         except CyberDayError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except Exception as exc:
@@ -592,14 +669,15 @@ def cyber_day_export_csv(request: Request) -> Response:
     if repo is None:
         raise HTTPException(status_code=503, detail="MongoDB no está disponible.")
     try:
-        from retail.cyber_day import CYBER_LIST_ID, export_csv
+        from retail.cyber_day import export_csv, resolve_list_id
 
-        body = export_csv(repo)
+        list_id = resolve_list_id(repo, _cyber_list_param(request))
+        body = export_csv(repo, list_id)
         return Response(
             content=body,
             media_type="text/csv; charset=utf-8",
             headers={
-                "Content-Disposition": f'attachment; filename="{CYBER_LIST_ID}.csv"',
+                "Content-Disposition": f'attachment; filename="{list_id}.csv"',
             },
         )
     finally:
@@ -614,13 +692,14 @@ def cyber_day_export_json(request: Request) -> JSONResponse:
     if repo is None:
         raise HTTPException(status_code=503, detail="MongoDB no está disponible.")
     try:
-        from retail.cyber_day import CYBER_LIST_ID, export_json
+        from retail.cyber_day import export_json, resolve_list_id
 
-        payload = export_json(repo)
+        list_id = resolve_list_id(repo, _cyber_list_param(request))
+        payload = export_json(repo, list_id)
         return JSONResponse(
             content=payload,
             headers={
-                "Content-Disposition": f'attachment; filename="{CYBER_LIST_ID}.json"',
+                "Content-Disposition": f'attachment; filename="{list_id}.json"',
             },
         )
     finally:
@@ -636,7 +715,7 @@ def cyber_day_restart(request: Request) -> dict:
     try:
         from retail.cyber_day import CyberDayError, restart_run
 
-        return restart_run(repo)
+        return restart_run(repo, list_id=_cyber_list_param(request))
     except CyberDayError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     finally:

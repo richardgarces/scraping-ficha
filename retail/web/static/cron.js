@@ -1014,7 +1014,11 @@ function render(payload) {
     <tr data-status="${escapeHtml(normalizedGroupStatus(group.status))}">
       <td>
         <strong>${escapeHtml(group.title || group.id)}</strong>
-        <div class="muted">${escapeHtml(group.id)} · ${group.store_count || 0} tiendas</div>
+        <div class="muted">${escapeHtml(group.id)} · ${
+          group.query_list
+            ? `${Number(group.query_count ?? group.store_count) || 0} queries`
+            : `${group.store_count || 0} tiendas`
+        }</div>
       </td>
       <td>${escapeHtml(group.schedule?.label || "—")}</td>
       <td>${groupStatusCell(group)}</td>

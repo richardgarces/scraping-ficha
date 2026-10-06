@@ -9,20 +9,22 @@ Grupo de scraping diario con **100 queries Sonic** (Celulares, TV, Gaming…). L
 | **id** | `cyber_junio2026` |
 | **título** | Cyber Junio 2026 |
 | **lista** | `data/cyber_junio2026.json` (alias `data/cyber_day_sonic.json`) |
-| **colección** | `cyber_day_products` |
-| **estado** | `app_settings.cyber_day_run` |
+| **colección** | `cyber_day_products` (por `list_id`) + `cyber_day_lists` |
+| **estado** | `app_settings.cyber_day_run:{slug}` (legacy `cyber_day_run`) |
 | **categoría Mongo** | `store_categories` (`kind: query_list`) |
 
 ## Ruta admin
 
 1. Menú **Cuenta → Cyber Day** (solo `role === admin`) → [`/cyber-day`](https://precios.meincart.com/cyber-day) (alias `/cyber`)
-2. Controles: **Iniciar** · **Parar** · **Continuar** · **Reiniciar** + import/export CSV/JSON
-3. También en **Cron / lotes** (`/cron`) como grupo `cyber_junio2026` (Iniciar/Detener/Continuar/Reiniciar)
+2. Selector de listas + **Nueva lista** (nombre/slug, seed / copiar / vacía)
+3. Controles: **Iniciar** · **Parar** · **Continuar** · **Reiniciar** + import/export CSV/JSON
+4. También en **Cron / lotes** (`/cron`) como grupo `cyber_junio2026` (muestra **100 queries**, no tiendas)
 
 API (admin):
 
-- `GET /api/admin/cyber-day`
-- `POST /api/admin/cyber-day/start|stop|continue|restart`
+- `GET /api/admin/cyber-day?list=slug`
+- `GET|POST /api/admin/cyber-day/lists`
+- `POST /api/admin/cyber-day/start|stop|continue|restart?list=slug`
 - `POST /api/admin/cyber-day/import`
 - `GET /api/admin/cyber-day/export.csv` · `export.json`
 - `POST /api/admin/cron-batches/cyber_junio2026/start` `{ "mode": "continue"|"restart"|omit }`
