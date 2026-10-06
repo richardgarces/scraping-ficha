@@ -1,6 +1,8 @@
 // Panel admin Cyber Day (/cyber-day). Solo admin; la API también exige admin.
 
-const FETCH_TIMEOUT_MS = 20000;
+const FETCH_TIMEOUT_MS = 12000;
+const SEED_FALLBACK_URL = "/static/cyber_junio2026.json?v=1";
+let usingSeedFallback = false;
 
 async function json(url, options = {}) {
   const controller = new AbortController();
@@ -83,21 +85,48 @@ function listQuery(path) {
   return `${path}${sep}list=${encodeURIComponent(currentListId)}`;
 }
 
-function showLoadError(message) {
+async function loadSeedFallback(message) {
+  usingSeedFallback = true;
+  loadReady = true;
   const meta = $("cyber-meta");
-  if (meta) meta.textContent = `No se pudo cargar el estado: ${message}`;
+  if (meta) {
+    meta.textContent = `Error API: ${message}. Mostrando seed local (solo lectura).`;
+  }
   const wrap = $("cyber-products-wrap");
   if (wrap) wrap.hidden = false;
-  const body = $("cyber-products-body");
-  if (body) {
-    body.innerHTML = `<tr><td colspan="6" class="err">Error al cargar: ${escapeHtml(message)}</td></tr>`;
+  try {
+    const response = await fetch(SEED_FALLBACK_URL, { cache: "no-store" });
+    const data = await response.json();
+    const items = data.items || data.products || [];
+    const body = $("cyber-products-body");
+    if (body) {
+      body.innerHTML = items.map((row) => `
+      <tr>
+        <td>${escapeHtml(row.n ?? "—")}</td>
+        <td>${escapeHtml(row.query || row.name || "—")}</td>
+        <td>${escapeHtml(row.category || "—")}</td>
+        <td>—</td>
+        <td>—</td>
+        <td class="muted">seed local</td>
+      </tr>`).join("") || `<tr><td colspan="6" class="err">Sin seed local.</td></tr>`;
+    }
+    if (meta) {
+      meta.textContent = `Error API: ${message}. Seed local: ${items.length} queries (solo lectura; reintentá Iniciar o recargá).`;
+    }
+  } catch (seedError) {
+    const body = $("cyber-products-body");
+    if (body) {
+      body.innerHTML = `<tr><td colspan="6" class="err">Error al cargar: ${escapeHtml(message)} · seed: ${escapeHtml(seedError.message)}</td></tr>`;
+    }
   }
-  // No dejar botones «muertos» sin feedback: quedan clicables para reintentar acciones.
   ["cyber-start", "cyber-stop", "cyber-continue", "cyber-restart"].forEach((id) => {
     const btn = $(id);
     if (btn) btn.disabled = false;
   });
-  loadReady = true;
+}
+
+function showLoadError(message) {
+  loadSeedFallback(message).catch(() => {});
 }
 
 function fillListSelect(lists, activeId) {
@@ -227,6 +256,7 @@ function renderCyber(payload) {
 async function refreshCyber() {
   try {
     const payload = await json(listQuery("/api/admin/cyber-day"));
+    usingSeedFallback = false;
     renderCyber(payload);
     if (cyberTimer) {
       clearTimeout(cyberTimer);
