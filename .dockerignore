@@ -10,8 +10,12 @@ output
 logs
 backups
 storage
-data
+# Catálogos grandes fuera de la imagen; seed Cyber Day sí va en el build.
+data/*
+!data/cyber_day_sonic.json
+!data/cyber_day_sonic.csv
 *.csv
+!data/cyber_day_sonic.csv
 *.xlsx
 .env
 .env.prod
