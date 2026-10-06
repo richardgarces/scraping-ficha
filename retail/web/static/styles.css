@@ -1135,30 +1135,48 @@ button[aria-busy="true"] { cursor: progress; }
 }
 .push-preference p { margin: 4px 0 0; }
 .push-preference button { width: auto; white-space: nowrap; }
+/* Override .sources { display:flex } on the same fieldset */
+.sources.notice-kind-grid,
 .notice-kind-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 190px), 1fr));
   gap: 9px;
+  min-width: 0;
 }
 .notice-kind-grid legend { margin-bottom: 8px; }
 .form-grid .notice-kind-grid label {
   display: flex;
   align-items: flex-start;
   gap: 9px;
+  min-width: 0;
   min-height: 54px;
+  height: auto;
+  overflow: visible;
   padding: 12px;
   border: 1px solid var(--line);
   border-radius: 12px;
   background: var(--panel-2);
   color: var(--text);
   cursor: pointer;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 .form-grid .notice-kind-grid label:has(input:checked) {
   border-color: var(--accent);
   background: var(--accent-dim);
   box-shadow: inset 3px 0 0 var(--accent);
 }
-.notice-kind-grid input { flex: 0 0 auto; margin: 2px 0 0; accent-color: var(--accent); }
+/* form-grid label > input { width:100% } was stretching the checkbox and
+   shoving the text node into the grid gaps between cards */
+.form-grid .notice-kind-grid label > input,
+.notice-kind-grid input {
+  flex: 0 0 auto;
+  width: auto;
+  max-width: none;
+  margin: 2px 0 0;
+  accent-color: var(--accent);
+}
 .email-filters {
   min-width: 0;
   margin: 4px 0;
@@ -2282,6 +2300,7 @@ html[data-theme="day"] .drops-table th[aria-sort="descending"] button.sort { col
   .store-preference-grid, .password-change-form { grid-template-columns: 1fr; }
   .email-filter-grid { grid-template-columns: 1fr; }
   .choice-grid { grid-template-columns: repeat(2, minmax(120px, 1fr)); }
+  .notice-kind-grid { grid-template-columns: 1fr; }
   .analysis-search button { width: 100%; margin-top: 10px; }
   .search-hero, .result-hero, .offer-row { display: grid; grid-template-columns: 1fr; }
   .result-actions, .offer-side { justify-items: start; justify-content: start; }
