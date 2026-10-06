@@ -364,11 +364,15 @@ def health() -> dict:
     mongo = False
     products = 0
     real_offer_worker = {"healthy": False}
+    cyber_day = {"status": "idle", "worker_healthy": False}
     if repo is not None:
         mongo = True
         try:
             products = repo.count()
             real_offer_worker = repo.real_offer_worker_status()
+            from retail.cyber_day import status_payload
+
+            cyber_day = status_payload(repo).get("run") or cyber_day
         except Exception:
             products = 0
         repo.close()
@@ -386,6 +390,7 @@ def health() -> dict:
         "qdrant": qdrant is not None,
         "redis": redis_ok,
         "real_offer_worker": real_offer_worker,
+        "cyber_day": cyber_day,
         "stores": len(list_stores()),
         "products": products,
     }

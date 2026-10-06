@@ -458,6 +458,129 @@ def admin_test_push(request: Request) -> dict:
         repo.close()
 
 
+@router.get("/api/admin/cyber-day")
+def cyber_day_status(request: Request) -> dict:
+    """Estado, progreso y vista previa de la lista Cyber Day."""
+    current_user(request, admin=True)
+    repo = connect_repo()
+    if repo is None:
+        raise HTTPException(status_code=503, detail="MongoDB no está disponible.")
+    try:
+        from retail.cyber_day import status_payload
+
+        return status_payload(repo)
+    finally:
+        repo.close()
+
+
+@router.post("/api/admin/cyber-day/start")
+def cyber_day_start(request: Request) -> dict:
+    current_user(request, admin=True)
+    repo = connect_repo()
+    if repo is None:
+        raise HTTPException(status_code=503, detail="MongoDB no está disponible.")
+    try:
+        from retail.cyber_day import CyberDayError, start_run
+
+        return start_run(repo)
+    except CyberDayError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    finally:
+        repo.close()
+
+
+@router.post("/api/admin/cyber-day/stop")
+def cyber_day_stop(request: Request) -> dict:
+    current_user(request, admin=True)
+    repo = connect_repo()
+    if repo is None:
+        raise HTTPException(status_code=503, detail="MongoDB no está disponible.")
+    try:
+        from retail.cyber_day import CyberDayError, stop_run
+
+        return stop_run(repo)
+    except CyberDayError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    finally:
+        repo.close()
+
+
+@router.post("/api/admin/cyber-day/continue")
+def cyber_day_continue(request: Request) -> dict:
+    current_user(request, admin=True)
+    repo = connect_repo()
+    if repo is None:
+        raise HTTPException(status_code=503, detail="MongoDB no está disponible.")
+    try:
+        from retail.cyber_day import CyberDayError, continue_run
+
+        return continue_run(repo)
+    except CyberDayError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    finally:
+        repo.close()
+
+
+@router.post("/api/admin/cyber-day/import")
+async def cyber_day_import(request: Request) -> dict:
+    """Importa lista Sonic (CSV o JSON). Reemplaza la lista actual."""
+    current_user(request, admin=True)
+    repo = connect_repo()
+    if repo is None:
+        raise HTTPException(status_code=503, detail="MongoDB no está disponible.")
+    filename = ""
+    text = ""
+    content_type = request.headers.get("content-type") or ""
+    try:
+        if "multipart/form-data" in content_type:
+            form = await request.form()
+            upload = form.get("file") or form.get("lista")
+            if upload is not None and hasattr(upload, "read"):
+                filename = str(getattr(upload, "filename", "") or "")
+                raw = await upload.read()
+                text = raw.decode("utf-8-sig", errors="replace")
+            else:
+                text = str(form.get("text") or form.get("content") or "")
+        elif "application/json" in content_type:
+            body = await request.json()
+            if isinstance(body, list):
+                from retail.cyber_day import CyberDayError, import_products, normalize_import_row
+
+                items = [
+                    row
+                    for index, raw in enumerate(body)
+                    if (row := normalize_import_row(raw if isinstance(raw, dict) else {}, index))
+                ]
+                try:
+                    return import_products(repo, items, source="api-json")
+                except CyberDayError as exc:
+                    raise HTTPException(status_code=400, detail=str(exc)) from exc
+            if not isinstance(body, dict):
+                raise HTTPException(status_code=400, detail="JSON inválido.")
+            if "text" in body or "content" in body:
+                text = str(body.get("text") or body.get("content") or "")
+                filename = str(body.get("filename") or "")
+            else:
+                from retail.cyber_day import CyberDayError, import_products, parse_products_payload
+                import json as _json
+
+                text = _json.dumps(body, ensure_ascii=False)
+                filename = "import.json"
+        else:
+            text = (await request.body()).decode("utf-8-sig", errors="replace")
+        from retail.cyber_day import CyberDayError, import_products, parse_products_payload
+
+        try:
+            items = parse_products_payload(text, filename=filename)
+            return import_products(repo, items, source=filename or "upload")
+        except CyberDayError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f"No se pudo leer la lista: {exc}") from exc
+    finally:
+        repo.close()
+
+
 @router.get("/api/admin/overview")
 def admin_overview(request: Request) -> dict:
     current_user(request, admin=True)

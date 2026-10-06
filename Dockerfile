@@ -8,6 +8,7 @@ RUN apt-get update \
 
 COPY pyproject.toml README.md ./
 COPY retail ./retail
+COPY data ./data
 
 RUN pip install --no-cache-dir -e .
 

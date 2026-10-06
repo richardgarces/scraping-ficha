@@ -210,6 +210,7 @@ class ProductRepository:
         self.search_results = self.db["search_results"]
         self.real_offer_jobs = self.db["real_offer_jobs"]
         self.daily_real_offers = self.db["daily_real_offers"]
+        self.cyber_day_products = self.db["cyber_day_products"]
         self.app_requests = self.db[APP_REQUESTS_COLLECTION]
         self.short_links = self.db["short_links"]
         # Validar los mismos índices para cada producto agrega muchas idas a

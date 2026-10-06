@@ -29,3 +29,33 @@ services:
     #   docker compose -f docker-compose.worker.soyo.yml run --rm worker retail …
     command: ["sleep", "infinity"]
     restart: unless-stopped
+
+  # Cyber Day loop en soyo (scrape hacia tiendas; Mongo/Redis en BMAX).
+  # Si corre aquí, conviene parar precios-cyber-worker en BMAX para no duplicar.
+  cyber-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: precios-cyber-worker-soyo
+    env_file:
+      - .env
+    environment:
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONUNBUFFERED: "1"
+      CYBER_DAY_DELAY_SECONDS: ${CYBER_DAY_DELAY_SECONDS:-2.5}
+      CYBER_DAY_TOP_MATCHES: ${CYBER_DAY_TOP_MATCHES:-6}
+      CYBER_DAY_REFRESH_TOP: ${CYBER_DAY_REFRESH_TOP:-3}
+      CYBER_DAY_SEARCH_MAX_ITEMS: ${CYBER_DAY_SEARCH_MAX_ITEMS:-4}
+    volumes:
+      - ./data/cyber_day_sonic.json:/app/data/cyber_day_sonic.json:ro
+      - ./output:/app/output
+      - ./logs:/app/logs
+    command: ["python", "-m", "retail.cyber_day"]
+    restart: unless-stopped
+    mem_limit: 1g
+    healthcheck:
+      test: ["CMD", "python", "-m", "retail.cyber_day", "--healthcheck"]
+      interval: 30s
+      timeout: 12s
+      retries: 4
+      start_period: 40s

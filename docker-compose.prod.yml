@@ -104,6 +104,37 @@ services:
       retries: 4
       start_period: 30s
 
+  # Loop Cyber Day (queries Sonic). Preferible en soyo si el scrape pesa;
+  # en BMAX comparte Mongo con la web. Un solo worker activo vía heartbeat.
+  cyber-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: precios-cyber-worker
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      MONGODB_URI: mongodb://precios-mongo:27017
+      MONGODB_DB: ${MONGODB_DB:-scraping}
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONUNBUFFERED: "1"
+      CYBER_DAY_DELAY_SECONDS: ${CYBER_DAY_DELAY_SECONDS:-2.5}
+      CYBER_DAY_TOP_MATCHES: ${CYBER_DAY_TOP_MATCHES:-6}
+      CYBER_DAY_REFRESH_TOP: ${CYBER_DAY_REFRESH_TOP:-3}
+      CYBER_DAY_SEARCH_MAX_ITEMS: ${CYBER_DAY_SEARCH_MAX_ITEMS:-4}
+    command: ["python", "-m", "retail.cyber_day"]
+    depends_on:
+      mongo:
+        condition: service_healthy
+    mem_limit: 1g
+    healthcheck:
+      test: ["CMD", "python", "-m", "retail.cyber_day", "--healthcheck"]
+      interval: 30s
+      timeout: 12s
+      retries: 4
+      start_period: 40s
+
 volumes:
   mongo_data:
   qdrant_data:
