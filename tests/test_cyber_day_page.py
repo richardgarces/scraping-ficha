@@ -36,7 +36,9 @@ def test_cyber_day_static_assets_exist():
     assert "Reiniciar" in html
     assert "cyber-list-select" in html
     assert "Nueva lista" in html
-    assert "cyber-day.js?v=8" in html
+    assert "cyber-day.js?v=9" in html
+    assert "<th>Matches</th>" not in html
+    assert "last_match_count" not in js  # columna UI quitada; sigue en API/export
     assert "Precio más alto normal" in html
     assert "Tiendas" in html
     assert "Mejor oferta" in html

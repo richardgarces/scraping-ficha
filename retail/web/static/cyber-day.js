@@ -265,7 +265,7 @@
     if (wrap && body && !editingActive) {
       wrap.hidden = false;
       if (!rows.length) {
-        body.innerHTML = `<tr><td colspan="11" class="muted">Sin filas en la lista. Importá CSV/JSON o creá la lista con seed.</td></tr>`;
+        body.innerHTML = `<tr><td colspan="10" class="muted">Sin filas en la lista. Importá CSV/JSON o creá la lista con seed.</td></tr>`;
       } else {
         body.innerHTML = rows.map((row) => {
           const n = row.n ?? (row.order != null ? row.order + 1 : "");
@@ -289,7 +289,6 @@
           >
         </td>
         <td>${escapeHtml(row.category || "—")}</td>
-        <td>${escapeHtml(row.last_match_count != null ? row.last_match_count : 0)}</td>
         <td>${formatPrice(row.last_price)}</td>
         <td>${escapeHtml(row.stores_scraped != null ? row.stores_scraped : 0)}</td>
         <td>${formatPrice(row.max_price_normal)}</td>
