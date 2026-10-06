@@ -1,17 +1,55 @@
+/* Contención: select/textarea/button no deben ensanchar el panel. */
+main.settings,
+main.settings > .panel,
+.quote-mode-panel,
+#shopping-import,
+#quote-import,
+#quote-docling,
+#quote-edit {
+  min-width: 0;
+  max-width: 100%;
+}
+main.settings > .panel {
+  overflow-x: hidden;
+  box-sizing: border-box;
+}
+#shopping-import :is(input, select, textarea, button),
+#quote-import :is(input, select, textarea, button),
+#quote-docling :is(input, select, textarea, button),
+#quote-edit > :is(button) {
+  max-width: 100%;
+  box-sizing: border-box;
+}
+#shopping-csv,
+#quote-csv {
+  width: 100%;
+  min-width: 0;
+  resize: vertical;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+#shopping-group,
+#shopping-title,
+#quote-title,
+#quote-supplier {
+  width: 100%;
+  min-width: 0;
+}
+
 .quote-list { display: flex; gap: .75rem; flex-wrap: wrap; }
-.quote-list-item { display: inline-flex; flex-direction: column; align-items: flex-start; gap: .35rem; min-width: 10rem; }
+.quote-list-item { display: inline-flex; flex-direction: column; align-items: flex-start; gap: .35rem; min-width: 10rem; max-width: 100%; }
 .quote-status-pill { display: inline-block; padding: .15rem .55rem; border-radius: .4rem; background: color-mix(in srgb, var(--border) 70%, transparent); font-size: .8rem; }
 .quote-status-pill[data-status="review"] { background: color-mix(in srgb, #c9852a 25%, transparent); }
 .quote-status-pill[data-status="compared"] { background: color-mix(in srgb, #2a7a4b 25%, transparent); }
 .quote-status-pill[data-status="exported"] { background: color-mix(in srgb, #245b8a 25%, transparent); }
 #quote-pilot-metrics { margin: 1rem 0; padding: .85rem 1rem; border-left: 3px solid var(--border); }
-#quote-lines input { min-width: 6rem; max-width: 24rem; width: 100%; }
-#quote-lines input[data-field="name"] { min-width: 15rem; }
+#quote-lines input { min-width: 0; max-width: 24rem; width: 100%; box-sizing: border-box; }
+#quote-lines input[data-field="name"] { min-width: 0; }
 #quote-lines small { display: block; max-width: 28rem; margin-top: .5rem; overflow-wrap: anywhere; }
-.quote-candidate { border: 1px solid var(--border); border-radius: .75rem; padding: 1rem; margin: .75rem 0; }
+.quote-candidate { border: 1px solid var(--border); border-radius: .75rem; padding: 1rem; margin: .75rem 0; min-width: 0; max-width: 100%; box-sizing: border-box; }
 .quote-summary { display: flex; gap: 1.5rem; flex-wrap: wrap; padding: 1rem 0; }
 .quote-summary strong { display: block; font-size: 1.5rem; }
-#quote-candidates { scroll-margin-top: 1rem; }
+#quote-candidates { scroll-margin-top: 1rem; min-width: 0; max-width: 100%; }
 
 .quote-mode-tabs {
   display: flex;
@@ -20,6 +58,8 @@
   margin-bottom: 1.25rem;
   border-bottom: 1px solid var(--border);
   padding-bottom: .35rem;
+  min-width: 0;
+  max-width: 100%;
 }
 .quote-mode-tab {
   appearance: none;
@@ -39,7 +79,8 @@
 }
 .quote-mode-panel h2 { margin-top: 0; }
 
-.shopping-matrix { width: 100%; border-collapse: collapse; font-size: .92rem; }
+.shopping-matrix { width: 100%; max-width: 100%; border-collapse: collapse; font-size: .92rem; }
+#shopping-matrix-wrap { max-width: 100%; overflow-x: auto; }
 .shopping-matrix th, .shopping-matrix td {
   border: 1px solid var(--border);
   padding: .55rem .65rem;
