@@ -461,7 +461,7 @@ def admin_test_push(request: Request) -> dict:
 
 @router.get("/api/admin/cyber-day")
 def cyber_day_status(request: Request) -> dict:
-    """Estado, progreso y vista previa de la lista Cyber Day."""
+    """Estado, progreso y lista Cyber Day (JSON-safe; no bloquea la UI)."""
     current_user(request, admin=True)
     repo = connect_repo()
     if repo is None:
@@ -470,6 +470,8 @@ def cyber_day_status(request: Request) -> dict:
         from retail.cyber_day import status_payload
 
         return status_payload(repo)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Cyber Day status falló: {exc}") from exc
     finally:
         repo.close()
 

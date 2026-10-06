@@ -56,10 +56,16 @@ function formatSeconds(value) {
   return `${m}m ${String(s).padStart(2, "0")}s`;
 }
 
+function formatPrice(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return "—";
+  return `$${Math.round(n).toLocaleString("es-CL")}`;
+}
+
 function renderCyber(payload) {
   const run = payload?.run || {};
   const status = run.status || "idle";
-  const total = Number(run.total) || 0;
+  const total = Number(run.total) || Number(payload?.products_count) || 0;
   const processed = Number(run.processed) || 0;
   const percent = Number(run.percent) || 0;
   const lap = Number(run.lap) || 0;
@@ -69,8 +75,11 @@ function renderCyber(payload) {
     const change = run.last_change
       ? ` · Último cambio: ${run.last_change.name || ""} ${run.last_change.previous_price}→${run.last_change.price}`
       : "";
+    const rows = payload?.products || payload?.products_preview || [];
+    const withPrice = rows.filter((r) => r.last_price != null && Number(r.last_price) > 0).length;
     meta.textContent = [
       total ? `${total} queries en lista` : "Lista vacía — importá CSV/JSON",
+      withPrice ? `${withPrice} con precio` : null,
       run.worker_healthy ? "worker OK" : "worker sin heartbeat",
       run.notified_count ? `${run.notified_count} avisos` : null,
       note,
@@ -118,18 +127,22 @@ function renderCyber(payload) {
 
   const wrap = $("cyber-products-wrap");
   const body = $("cyber-products-body");
-  const rows = payload?.products_preview || [];
+  const rows = payload?.products || payload?.products_preview || [];
   if (wrap && body) {
-    wrap.hidden = !rows.length;
-    body.innerHTML = rows.map((row) => `
+    wrap.hidden = false;
+    if (!rows.length) {
+      body.innerHTML = `<tr><td colspan="6" class="muted">Sin filas en la lista. Importá CSV/JSON o revisá el seed.</td></tr>`;
+    } else {
+      body.innerHTML = rows.map((row) => `
       <tr>
         <td>${escapeHtml(row.n ?? (row.order != null ? row.order + 1 : "—"))}</td>
         <td>${escapeHtml(row.query || row.name || "—")}</td>
         <td>${escapeHtml(row.category || "—")}</td>
-        <td>${row.last_match_count != null ? escapeHtml(row.last_match_count) : "—"}</td>
-        <td>${row.last_price != null ? escapeHtml(row.last_price) : "—"}</td>
+        <td>${escapeHtml(row.last_match_count != null ? row.last_match_count : 0)}</td>
+        <td>${formatPrice(row.last_price)}</td>
         <td class="muted">${escapeHtml(row.last_error || "")}</td>
       </tr>`).join("");
+    }
   }
   const refreshHint = $("cyber-refresh");
   if (refreshHint) {
@@ -138,16 +151,31 @@ function renderCyber(payload) {
 }
 
 async function refreshCyber() {
-  const payload = await json("/api/admin/cyber-day");
-  renderCyber(payload);
-  if (cyberTimer) {
-    clearTimeout(cyberTimer);
-    cyberTimer = null;
-  }
-  if (payload?.run?.status === "running") {
-    cyberTimer = setTimeout(() => {
-      refreshCyber().catch((error) => flash(error.message, false));
-    }, 3000);
+  try {
+    const payload = await json("/api/admin/cyber-day");
+    renderCyber(payload);
+    if (cyberTimer) {
+      clearTimeout(cyberTimer);
+      cyberTimer = null;
+    }
+    if (payload?.run?.status === "running") {
+      cyberTimer = setTimeout(() => {
+        refreshCyber().catch((error) => {
+          const meta = $("cyber-meta");
+          if (meta && meta.textContent === "Cargando…") {
+            meta.textContent = `Error al actualizar: ${error.message}`;
+          }
+          flash(error.message, false);
+        });
+      }, 3000);
+    }
+  } catch (error) {
+    const meta = $("cyber-meta");
+    if (meta) meta.textContent = `No se pudo cargar el estado: ${error.message}`;
+    const wrap = $("cyber-products-wrap");
+    if (wrap) wrap.hidden = false;
+    flash(error.message, false);
+    throw error;
   }
 }
 

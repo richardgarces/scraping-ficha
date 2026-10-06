@@ -91,7 +91,7 @@
         <a id="cyber-export-json" class="btn secondary" href="/api/admin/cyber-day/export.json">Exportar JSON</a>
       </form>
       <p id="cyber-import-hint" class="muted">Lista <code>cyber_junio2026</code> (seed <code>data/cyber_junio2026.json</code>, 100 queries). Duplicados se deduplican solos. Import/export: n, query, category (+ matches/precio en export). También aparece como grupo en <a href="/cron">Cron / lotes</a>.</p>
-      <div class="table-wrap" id="cyber-products-wrap" hidden>
+      <div class="table-wrap" id="cyber-products-wrap">
         <table class="results cron-table">
           <thead>
             <tr>
@@ -103,12 +103,14 @@
               <th>Error</th>
             </tr>
           </thead>
-          <tbody id="cyber-products-body"></tbody>
+          <tbody id="cyber-products-body">
+            <tr><td colspan="6" class="muted">Cargando lista…</td></tr>
+          </tbody>
         </table>
       </div>
     </section>
   </main>
-  <script src="/static/prices.js?v=32"></script>
-  <script src="/static/cyber-day.js?v=1"></script>
+  <script src="/static/prices.js?v=33"></script>
+  <script src="/static/cyber-day.js?v=2"></script>
 </body>
 </html>

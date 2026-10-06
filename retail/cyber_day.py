@@ -25,10 +25,19 @@ CYBER_GROUP_ID = "cyber_junio2026"
 CYBER_GROUP_TITLE = "Cyber Junio 2026"
 CYBER_LIST_ID = "cyber_junio2026"
 STATUSES = frozenset({"idle", "running", "paused", "stopped"})
-DEFAULT_DELAY = float(os.environ.get("CYBER_DAY_DELAY_SECONDS") or "2.5")
+DEFAULT_DELAY = float(os.environ.get("CYBER_DAY_DELAY_SECONDS") or "1.0")
 TOP_MATCHES = max(1, int(os.environ.get("CYBER_DAY_TOP_MATCHES") or "6"))
-REFRESH_TOP = max(0, int(os.environ.get("CYBER_DAY_REFRESH_TOP") or "3"))
-SEARCH_MAX_ITEMS = max(1, int(os.environ.get("CYBER_DAY_SEARCH_MAX_ITEMS") or "4"))
+REFRESH_TOP = max(0, int(os.environ.get("CYBER_DAY_REFRESH_TOP") or "2"))
+SEARCH_MAX_ITEMS = max(1, int(os.environ.get("CYBER_DAY_SEARCH_MAX_ITEMS") or "3"))
+# db = rápido (catálogo + refresh). both/scrape = también consulta tiendas (lento).
+SEARCH_SOURCE = (os.environ.get("CYBER_DAY_SEARCH_SOURCE") or "db").strip().lower()
+SEARCH_TIMEOUT = float(os.environ.get("CYBER_DAY_SEARCH_TIMEOUT") or "6")
+# Tiendas prioritarias si hay scrape en vivo (evita Movistar/etc. que cuelgan el loop).
+PREFERRED_SCRAPE_STORES = tuple(
+    s.strip()
+    for s in (os.environ.get("CYBER_DAY_STORES") or "falabella,paris,ripley,hites,lider,abcdin").split(",")
+    if s.strip()
+)
 HEARTBEAT_MAX_AGE = 180
 _DATA = Path(__file__).resolve().parents[1] / "data"
 SEED_PATH = _DATA / "cyber_junio2026.json"
@@ -136,6 +145,82 @@ def list_products(repo: Any) -> list[dict[str, Any]]:
         row["id"] = str(row.get("_id"))
         row.pop("_id", None)
     return rows
+
+
+def product_row_view(row: dict[str, Any]) -> dict[str, Any]:
+    """Fila JSON-safe para la tabla admin (sin datetime ni firmas pesadas)."""
+    return {
+        "id": str(row.get("id") or row.get("_id") or ""),
+        "n": row.get("n"),
+        "order": row.get("order"),
+        "query": row.get("query") or row.get("name") or "",
+        "name": row.get("name") or row.get("query") or "",
+        "category": row.get("category") or "",
+        "last_match_count": int(row.get("last_match_count") or 0),
+        "last_price": _as_int(row.get("last_price")),
+        "last_price_normal": _as_int(row.get("last_price_normal")),
+        "last_error": row.get("last_error"),
+        "resolved": bool(row.get("resolved")),
+        "last_observed_at": _iso(row.get("last_observed_at")),
+        "list_id": row.get("list_id") or CYBER_LIST_ID,
+    }
+
+
+def catalog_matches_for_query(repo: Any, query: str) -> list[dict[str, Any]]:
+    """Solo catálogo Mongo (rápido). No toca heartbeat ni scrapea tiendas."""
+    query = (query or "").strip()
+    if not query:
+        return []
+    seen: dict[str, dict[str, Any]] = {}
+    try:
+        for doc in repo.find_by_query(query, limit=max(TOP_MATCHES * 3, 20)):
+            key = match_key(str(doc.get("store") or ""), str(doc.get("product_id") or ""))
+            if key != ":":
+                seen[key] = doc
+    except Exception as exc:
+        print(f"cyber-day: catalog find_by_query falló ({query}): {exc}", flush=True)
+    return _rank_matches(list(seen.values()), TOP_MATCHES)
+
+
+def enrich_row_from_catalog(repo: Any, row: dict[str, Any], *, persist: bool = True) -> dict[str, Any]:
+    """Rellena matches/precio desde catálogo si la fila aún no tiene observación."""
+    if int(row.get("last_match_count") or 0) > 0 and row.get("last_price") is not None:
+        return product_row_view(row)
+    query = str(row.get("query") or row.get("name") or "").strip()
+    matches = catalog_matches_for_query(repo, query)
+    if not matches:
+        return product_row_view(row)
+    sigs, _changes, summary = detect_changes(None, matches, query=query)
+    now = _now()
+    patch = {
+        "last_matches": sigs,
+        "last_match_count": len(sigs),
+        "last_price": summary.get("last_price") if summary else None,
+        "last_price_normal": summary.get("last_price_normal") if summary else None,
+        "last_signature": summary.get("last_signature") if summary else None,
+        "last_observed_at": now,
+        "last_error": None,
+        "resolved": True,
+        "updated_at": now,
+    }
+    if persist and row.get("id"):
+        try:
+            from bson import ObjectId
+
+            products_collection(repo).update_one(
+                {"_id": ObjectId(str(row["id"]))},
+                {"$set": patch},
+            )
+        except Exception:
+            try:
+                products_collection(repo).update_one(
+                    {"n": row.get("n"), "query": query},
+                    {"$set": patch},
+                )
+            except Exception as exc:
+                print(f"cyber-day: enrich persist falló ({query}): {exc}", flush=True)
+    merged = {**row, **patch}
+    return product_row_view(merged)
 
 
 def products_count(repo: Any) -> int:
@@ -599,18 +684,34 @@ def _iso(value: Any) -> str | None:
     return str(value)
 
 
-def status_payload(repo: Any) -> dict[str, Any]:
-    ensure_seed(repo)
+def status_payload(repo: Any, *, enrich_missing: bool = True) -> dict[str, Any]:
+    """Estado + lista JSON-safe. Nunca debe fallar por datetime de Mongo."""
+    try:
+        ensure_seed(repo)
+    except Exception as exc:
+        print(f"cyber-day: ensure_seed en status: {exc}", flush=True)
     run = load_run(repo)
     total = products_count(repo)
     run["total"] = total
     progress = progress_view(run, product_total=total)
-    preview = list_products(repo)[:40]
+    raw_rows = list_products(repo)
+    products: list[dict[str, Any]] = []
+    # Limita enrich por request para no bloquear el poll de 3s; persiste y el resto se completa después.
+    enrich_budget = 40 if enrich_missing else 0
+    for row in raw_rows:
+        needs = int(row.get("last_match_count") or 0) <= 0 or row.get("last_price") is None
+        if needs and enrich_budget > 0:
+            products.append(enrich_row_from_catalog(repo, row, persist=True))
+            enrich_budget -= 1
+        else:
+            products.append(product_row_view(row))
+    # Compat: products_preview = lista completa (antes top 40).
     return {
         "ok": True,
         "run": progress,
-        "products_preview": preview,
-        "products_count": total,
+        "products": products,
+        "products_preview": products,
+        "products_count": total or len(products),
     }
 
 
@@ -791,8 +892,9 @@ def boost_catalog_priority(repo: Any, catalog_id: str, *, reason: str = "cyber_d
 
 
 def collect_query_matches(repo: Any, query: str) -> list[dict[str, Any]]:
-    """Catálogo local + búsqueda scrape ligera; top matches rankeados."""
+    """Catálogo local (+ scrape acotado opcional); top matches rankeados."""
     seen: dict[str, dict[str, Any]] = {}
+    touch_worker(repo)
     try:
         for doc in repo.find_by_query(query, limit=max(TOP_MATCHES * 3, 20)):
             key = match_key(str(doc.get("store") or ""), str(doc.get("product_id") or ""))
@@ -801,31 +903,38 @@ def collect_query_matches(repo: Any, query: str) -> list[dict[str, Any]]:
     except Exception as exc:
         print(f"cyber-day: find_by_query falló ({query}): {exc}", flush=True)
 
-    try:
-        from retail.search import search_products
+    # Por defecto solo DB: el scrape live de todas las tiendas bloqueaba el loop
+    # (timeouts Movistar, etc.) y el heartbeat caducaba → «worker sin heartbeat».
+    if SEARCH_SOURCE in {"both", "scrape"}:
+        try:
+            from retail.search import search_products
 
-        result = search_products(
-            query,
-            source="both",
-            max_items=SEARCH_MAX_ITEMS,
-            delay=min(DEFAULT_DELAY, 1.0),
-            timeout=10.0,
-            persist=True,
-            persist_meta={"source": "cyber_day"},
-            price_band=True,
-            fresh=False,
-            background_side_effects=False,
-            wait_for_all=False,
-            recover_underfilled_db=True,
-        )
-        for offer in _offer_rows_from_search(result):
-            store = str(offer.get("store") or "")
-            product_id = str(offer.get("product_id") or "")
-            if store and product_id:
-                seen[match_key(store, product_id)] = offer
-    except Exception as exc:
-        print(f"cyber-day: search_products falló ({query}): {exc}", flush=True)
+            touch_worker(repo)
+            result = search_products(
+                query,
+                source="scrape" if SEARCH_SOURCE == "scrape" else "both",
+                stores=list(PREFERRED_SCRAPE_STORES),
+                preferred_stores=list(PREFERRED_SCRAPE_STORES),
+                max_items=SEARCH_MAX_ITEMS,
+                delay=0.3,
+                timeout=SEARCH_TIMEOUT,
+                persist=True,
+                persist_meta={"source": "cyber_day"},
+                price_band=True,
+                fresh=False,
+                background_side_effects=False,
+                wait_for_all=False,
+                recover_underfilled_db=False,
+            )
+            for offer in _offer_rows_from_search(result):
+                store = str(offer.get("store") or "")
+                product_id = str(offer.get("product_id") or "")
+                if store and product_id:
+                    seen[match_key(store, product_id)] = offer
+        except Exception as exc:
+            print(f"cyber-day: search_products falló ({query}): {exc}", flush=True)
 
+    touch_worker(repo)
     return _rank_matches(list(seen.values()), TOP_MATCHES)
 
 
@@ -838,6 +947,7 @@ def refresh_top_matches(repo: Any, matches: list[dict[str, Any]]) -> list[dict[s
         product_id = str(offer.get("product_id") or "")
         if not store or not product_id:
             continue
+        touch_worker(repo)
         try:
             refresh_product_price(repo, store, product_id)
         except Exception as exc:
@@ -852,6 +962,7 @@ def refresh_top_matches(repo: Any, matches: list[dict[str, Any]]) -> list[dict[s
         if key not in refreshed_keys:
             fresh_rows.append(offer)
             boost_catalog_priority(repo, str(offer.get("catalog_id") or ""))
+    touch_worker(repo)
     return fresh_rows
 
 
@@ -954,6 +1065,7 @@ def process_one(repo: Any, *, delay: float = 0.0) -> dict[str, Any]:
     now = _now()
     notified = 0
     changed = 0
+    touch_worker(repo)
 
     try:
         if not query:
