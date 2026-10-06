@@ -607,6 +607,91 @@ def clear_products(repo: Any, list_id: str | None = None) -> None:
     products_collection(repo).delete_many(_products_filter(lid))
 
 
+def _find_item_by_n(repo: Any, n: int, list_id: str) -> dict[str, Any] | None:
+    """Busca ítem por `n`; si no, por posición (order / índice 1-based)."""
+    coll = products_collection(repo)
+    filt = _products_filter(list_id)
+    item = coll.find_one({**filt, "n": int(n)})
+    if item is not None:
+        return item
+    return next(
+        coll.find(filt).sort([("order", 1), ("_id", 1)]).skip(max(0, int(n) - 1)).limit(1),
+        None,
+    )
+
+
+def update_item(
+    repo: Any,
+    n: int,
+    *,
+    query: str | None = None,
+    category: str | None = None,
+    list_id: str | None = None,
+    enrich: bool = True,
+) -> dict[str, Any]:
+    """Actualiza query/categoría de una fila. Permite hacerlo con el loop running.
+
+    Al cambiar la query limpia matches/precios; opcionalmente re-enriquece desde
+    catálogo. El worker lee la query fresca en la próxima pasada de ese ítem.
+    """
+    lid = resolve_list_id(repo, list_id)
+    try:
+        index = int(n)
+    except (TypeError, ValueError) as exc:
+        raise CyberDayError("n inválido.") from exc
+    if index < 1:
+        raise CyberDayError("n inválido.")
+    item = _find_item_by_n(repo, index, lid)
+    if item is None:
+        raise CyberDayError(f"No hay ítem #{index} en la lista.")
+
+    patch: dict[str, Any] = {"updated_at": _now(), "list_id": lid}
+    query_changed = False
+    if query is not None:
+        clean = str(query).strip()
+        if not clean:
+            raise CyberDayError("La query no puede estar vacía.")
+        prev = str(item.get("query") or item.get("name") or "").strip()
+        if clean != prev:
+            query_changed = True
+        patch["query"] = clean
+        patch["name"] = clean
+    if category is not None:
+        patch["category"] = str(category).strip()
+    if query is None and category is None:
+        raise CyberDayError("Indicá query o category para actualizar.")
+
+    if query_changed:
+        patch.update({
+            "last_matches": {},
+            "last_match_count": 0,
+            "last_price": None,
+            "last_price_normal": None,
+            "last_signature": None,
+            "stores_scraped": 0,
+            "max_price_normal": None,
+            "min_price_normal": None,
+            "max_offer_price": None,
+            "best_offer_url": None,
+            "last_observed_at": None,
+            "last_error": None,
+            "resolved": False,
+        })
+
+    products_collection(repo).update_one({"_id": item["_id"]}, {"$set": patch})
+    fresh = products_collection(repo).find_one({"_id": item["_id"]}) or {**item, **patch}
+    fresh["id"] = str(fresh.get("_id") or item["_id"])
+    fresh.pop("_id", None)
+    if query_changed and enrich:
+        view = enrich_row_from_catalog(repo, fresh, persist=True)
+    else:
+        view = product_row_view(fresh)
+    payload = status_payload(repo, list_id=lid, enrich_missing=False)
+    payload["updated"] = view
+    payload["message"] = "Query actualizada" if query is not None else "Ítem actualizado"
+    return payload
+
+
 def normalize_import_row(raw: dict[str, Any], order: int) -> dict[str, Any] | None:
     """Normaliza fila a query Cyber Day (name/query + category opcionales)."""
     if not isinstance(raw, dict):

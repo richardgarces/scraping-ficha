@@ -2156,6 +2156,22 @@ html[data-theme="day"] .panel { backdrop-filter: none; }
   filter: grayscale(0.2);
 }
 .table-wrap.scroll-x { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+input.cyber-query-input {
+  width: min(28rem, 100%);
+  min-width: 12rem;
+  box-sizing: border-box;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-2, var(--panel));
+  color: inherit;
+  font: inherit;
+}
+input.cyber-query-input:focus {
+  outline: 2px solid color-mix(in srgb, var(--accent, #3aa8c1) 55%, transparent);
+  outline-offset: 1px;
+}
+input.cyber-query-input.is-saving { opacity: 0.65; }
 tr.cron-store-selected td { background: color-mix(in srgb, var(--accent, #2563eb) 8%, transparent); }
 .badge.status-stopped { background: color-mix(in srgb, var(--muted) 18%, var(--panel-2)); color: var(--muted); }
 .cron-progress-wrap { min-width: 160px; max-width: 320px; }

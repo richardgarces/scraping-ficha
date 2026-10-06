@@ -38,6 +38,7 @@ from retail.cyber_day import (
     status_payload,
     stop_run,
     summarize_match_stats,
+    update_item,
 )
 
 
@@ -338,6 +339,36 @@ def test_dedupe_and_repair_duplicates(repo):
     assert repaired["repaired"] is True
     assert repaired["total"] == 100
     assert status_payload(repo)["products_count"] == 100
+
+
+def test_update_item_query_while_running(repo, monkeypatch):
+    ensure_seed(repo)
+    start_run(repo)
+    assert status_payload(repo)["run"]["status"] == "running"
+
+    monkeypatch.setattr(
+        "retail.cyber_day.catalog_matches_for_query",
+        lambda *_a, **_k: [{
+            "store": "falabella",
+            "product_id": "nuevo-1",
+            "price": 500000,
+            "price_all_payment": 499990,
+            "price_normal": 600000,
+        }],
+    )
+    result = update_item(repo, 1, query="iPhone 17 Pro Max 256GB")
+    assert result["message"] == "Query actualizada"
+    assert result["run"]["status"] == "running"
+    updated = result["updated"]
+    assert updated["query"] == "iPhone 17 Pro Max 256GB"
+    assert updated["last_price"] == 499990
+    assert updated["stores_scraped"] == 1
+
+    row = next(r for r in result["products"] if r["n"] == 1)
+    assert row["query"] == "iPhone 17 Pro Max 256GB"
+
+    with pytest.raises(CyberDayError, match="vacía"):
+        update_item(repo, 1, query="   ")
 
 
 def test_export_csv_and_json(repo):

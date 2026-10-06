@@ -73,6 +73,8 @@
   let cyberTimer = null;
   let currentListId = "";
   let loadReady = false;
+  let editingQueryN = null;
+  let savingQueryN = null;
 
   function formatSeconds(value) {
     const total = Math.max(0, Number(value) || 0);
@@ -255,20 +257,37 @@
     const wrap = el("cyber-products-wrap");
     const body = el("cyber-products-body");
     const rows = payload?.products || payload?.products_preview || [];
-    if (wrap && body) {
+    const editingActive = Boolean(
+      editingQueryN != null
+      || savingQueryN != null
+      || document.activeElement?.classList?.contains("cyber-query-input"),
+    );
+    if (wrap && body && !editingActive) {
       wrap.hidden = false;
       if (!rows.length) {
         body.innerHTML = `<tr><td colspan="11" class="muted">Sin filas en la lista. Importá CSV/JSON o creá la lista con seed.</td></tr>`;
       } else {
         body.innerHTML = rows.map((row) => {
+          const n = row.n ?? (row.order != null ? row.order + 1 : "");
+          const query = row.query || row.name || "";
           const offerUrl = String(row.best_offer_url || "").trim();
           const offerCell = offerUrl
             ? `<a href="${escapeHtml(offerUrl)}" target="_blank" rel="noopener">Ver oferta</a>`
             : "—";
           return `
-      <tr>
-        <td>${escapeHtml(row.n ?? (row.order != null ? row.order + 1 : "—"))}</td>
-        <td>${escapeHtml(row.query || row.name || "—")}</td>
+      <tr data-n="${escapeHtml(n)}">
+        <td>${escapeHtml(n || "—")}</td>
+        <td>
+          <input
+            type="text"
+            class="cyber-query-input"
+            data-n="${escapeHtml(n)}"
+            data-original="${escapeHtml(query)}"
+            value="${escapeHtml(query)}"
+            aria-label="Query ${escapeHtml(n)}"
+            ${usingSeedFallback ? "disabled" : ""}
+          >
+        </td>
         <td>${escapeHtml(row.category || "—")}</td>
         <td>${escapeHtml(row.last_match_count != null ? row.last_match_count : 0)}</td>
         <td>${formatPrice(row.last_price)}</td>
@@ -281,6 +300,8 @@
       </tr>`;
         }).join("");
       }
+    } else if (wrap) {
+      wrap.hidden = false;
     }
     const refreshHint = el("cyber-refresh");
     if (refreshHint) {
@@ -399,6 +420,76 @@
         button.disabled = false;
         button.textContent = "Crear lista";
       }
+    }
+  });
+
+  async function saveQueryInput(input) {
+    if (!input || usingSeedFallback || input.disabled) return;
+    const n = Number(input.dataset.n);
+    const next = String(input.value || "").trim();
+    const original = String(input.dataset.original || "").trim();
+    if (!Number.isFinite(n) || n < 1) return;
+    if (!next) {
+      showFlash("La query no puede estar vacía.", false);
+      input.value = original;
+      return;
+    }
+    if (next === original) {
+      editingQueryN = null;
+      return;
+    }
+    savingQueryN = n;
+    editingQueryN = n;
+    input.classList.add("is-saving");
+    input.disabled = true;
+    try {
+      const result = await apiJson(listQuery(`/api/admin/cyber-day/items/${n}`), {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query: next }),
+      });
+      showFlash(result.message || "Query actualizada.");
+      editingQueryN = null;
+      savingQueryN = null;
+      renderCyber(result);
+    } catch (error) {
+      showFlash(error.message, false);
+      input.value = original;
+    } finally {
+      savingQueryN = null;
+      editingQueryN = null;
+      input.classList.remove("is-saving");
+      input.disabled = false;
+      input.dataset.original = String(input.value || "").trim();
+    }
+  }
+
+  const productsBody = el("cyber-products-body");
+  productsBody?.addEventListener("focusin", (event) => {
+    const input = event.target?.closest?.(".cyber-query-input");
+    if (!input) return;
+    editingQueryN = Number(input.dataset.n) || null;
+  });
+  productsBody?.addEventListener("focusout", (event) => {
+    const input = event.target?.closest?.(".cyber-query-input");
+    if (!input) return;
+    // Dejá que el blur termine antes de decidir; evita carrera con Enter.
+    setTimeout(() => {
+      if (document.activeElement === input) return;
+      saveQueryInput(input).catch((error) => showFlash(error.message, false));
+    }, 0);
+  });
+  productsBody?.addEventListener("keydown", (event) => {
+    const input = event.target?.closest?.(".cyber-query-input");
+    if (!input) return;
+    if (event.key === "Enter") {
+      event.preventDefault();
+      input.blur();
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      input.value = input.dataset.original || "";
+      editingQueryN = null;
+      input.blur();
     }
   });
 

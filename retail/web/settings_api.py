@@ -722,6 +722,47 @@ def cyber_day_restart(request: Request) -> dict:
         repo.close()
 
 
+@router.patch("/api/admin/cyber-day/items/{n}")
+@router.put("/api/admin/cyber-day/items/{n}")
+async def cyber_day_update_item(n: int, request: Request) -> dict:
+    """Edita query/categoría de una fila (también con el loop en curso)."""
+    current_user(request, admin=True)
+    repo = connect_repo()
+    if repo is None:
+        raise HTTPException(status_code=503, detail="MongoDB no está disponible.")
+    try:
+        from retail.cyber_day import CyberDayError, update_item
+
+        body: dict = {}
+        content_type = request.headers.get("content-type") or ""
+        if "application/json" in content_type:
+            raw = await request.json()
+            body = raw if isinstance(raw, dict) else {}
+        else:
+            form = await request.form()
+            body = {k: form.get(k) for k in form.keys()}
+        query = body.get("query")
+        category = body.get("category")
+        if query is None and category is None:
+            raise HTTPException(status_code=400, detail="Indicá query o category.")
+        if query is not None:
+            query = str(query)
+        if category is not None:
+            category = str(category)
+        try:
+            return update_item(
+                repo,
+                n,
+                query=query,
+                category=category,
+                list_id=_cyber_list_param(request, body),
+            )
+        except CyberDayError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+    finally:
+        repo.close()
+
+
 @router.get("/api/admin/overview")
 def admin_overview(request: Request) -> dict:
     current_user(request, admin=True)
