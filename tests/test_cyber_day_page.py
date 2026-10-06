@@ -34,11 +34,14 @@ def test_cyber_day_static_assets_exist():
     assert "Reiniciar" in html
     assert "cyber-list-select" in html
     assert "Nueva lista" in html
-    assert "cyber-day.js?v=5" in html
+    assert "cyber-day.js?v=6" in html
     assert "/api/admin/cyber-day" in js
     assert "cyber-day/lists" in js
-    assert "FETCH_TIMEOUT_MS" in js
+    assert "FETCH_TIMEOUT_MS = 8000" in js
     assert "SEED_FALLBACK_URL" in js
+    assert "(() => {" in js
+    assert "function flash(" not in js  # choca con window.flash (#flash)
+    assert "showFlash" in js
     assert (root / "cyber_junio2026.json").is_file()
     prices = (root / "prices.js").read_text(encoding="utf-8")
     assert 'href = "/cyber-day"' in prices or 'href="/cyber-day"' in prices
