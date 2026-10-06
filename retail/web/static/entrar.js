@@ -14,7 +14,14 @@ function nextPath(user) {
   if (raw.startsWith("/") && !raw.startsWith("//") && !raw.includes("://") && !raw.includes("\\")) {
     dest = raw;
   }
-  if (dest.startsWith("/ofertas") || dest.startsWith("/cron") || dest.startsWith("/estadisticas") || dest.startsWith("/usuarios")) {
+  if (
+    dest.startsWith("/ofertas")
+    || dest.startsWith("/cron")
+    || dest.startsWith("/cyber")
+    || dest.startsWith("/estadisticas")
+    || dest.startsWith("/usuarios")
+    || dest.startsWith("/cotizaciones")
+  ) {
     if (!user || user.role !== "admin") {
       return "/siguiendo";
     }

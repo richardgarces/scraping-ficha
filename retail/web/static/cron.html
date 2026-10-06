@@ -36,6 +36,7 @@
         <summary class="current" data-user-label>Cuenta</summary>
         <div class="nav-menu-list">
           <a href="/siguiendo">Siguiendo</a>
+          <a href="/cyber-day" data-admin hidden>Cyber Day</a>
           <a href="/cron" class="current" data-admin hidden>Cron / lotes</a>
           <a href="/analisis-producto" data-admin hidden>Análisis de producto</a>
           <a href="/estadisticas" data-admin hidden>Estadísticas</a>
@@ -53,57 +54,15 @@
   </header>
   <main class="settings">
     <p id="flash" class="summary" hidden></p>
-    <section class="panel" id="cyber-day-panel">
+    <section class="panel">
       <div class="cron-head">
         <div>
-          <h2>Cyber Junio 2026 <span class="muted">cyber_junio2026</span></h2>
-          <p class="muted">Grupo de corridas diario (lista Sonic, 100 queries). También aparece arriba en «Corridas por grupo» con Iniciar / Detener / Continuar / Reiniciar. Loop continuo: al terminar 1→100 reinicia. Telegram + push si cambia precio.</p>
+          <h2>Cyber Day</h2>
+          <p class="muted">Controles, import/export y progreso de <code>cyber_junio2026</code> están en la página dedicada. El grupo también aparece abajo en «Corridas por grupo».</p>
         </div>
         <div class="cron-controls">
-          <p id="cyber-refresh" class="muted"></p>
+          <a class="btn" href="/cyber-day">Abrir Cyber Day</a>
         </div>
-      </div>
-      <p id="cyber-meta" class="muted">Cargando…</p>
-      <div id="cyber-live" class="cron-store-live" hidden>
-        <div class="cron-store-live-head">
-          <strong id="cyber-live-title">Cyber Day</strong>
-          <span id="cyber-live-status" class="badge">En espera</span>
-        </div>
-        <div id="cyber-live-label" class="cron-progress-label">Sin corrida</div>
-        <div class="search-bar cron-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="Avance de la vuelta Cyber Day">
-          <span id="cyber-live-bar"></span>
-        </div>
-        <p id="cyber-live-counts" class="muted cron-basic-counts"></p>
-      </div>
-      <div class="cron-basic-actions" id="cyber-actions">
-        <button type="button" id="cyber-start" class="secondary" disabled>Iniciar</button>
-        <button type="button" id="cyber-stop" class="secondary" disabled>Parar</button>
-        <button type="button" id="cyber-continue" class="secondary" disabled>Continuar</button>
-        <button type="button" id="cyber-restart" class="secondary" disabled>Reiniciar</button>
-      </div>
-      <form id="cyber-import-form" class="cron-store-form" style="margin-top:1rem">
-        <label>Importar lista Sonic (CSV o JSON)
-          <input type="file" id="cyber-file" accept=".csv,.json,text/csv,application/json" required>
-        </label>
-        <button type="submit" id="cyber-import">Importar lista</button>
-        <a id="cyber-export-csv" class="btn secondary" href="/api/admin/cyber-day/export.csv">Exportar CSV</a>
-        <a id="cyber-export-json" class="btn secondary" href="/api/admin/cyber-day/export.json">Exportar JSON</a>
-      </form>
-      <p id="cyber-import-hint" class="muted">Lista <code>cyber_junio2026</code> (seed <code>data/cyber_junio2026.json</code>, 100 queries). Duplicados se deduplican solos. Import/export: n, query, category (+ matches/precio en export).</p>
-      <div class="table-wrap" id="cyber-products-wrap" hidden>
-        <table class="results cron-table">
-          <thead>
-            <tr>
-              <th>#</th>
-              <th>Query</th>
-              <th>Categoría</th>
-              <th>Matches</th>
-              <th>Mejor precio</th>
-              <th>Error</th>
-            </tr>
-          </thead>
-          <tbody id="cyber-products-body"></tbody>
-        </table>
       </div>
     </section>
     <section class="panel">
@@ -207,6 +166,6 @@
     </section>
   </main>
   <script src="/static/prices.js?v=30"></script>
-  <script src="/static/cron.js?v=23"></script>
+  <script src="/static/cron.js?v=24"></script>
 </body>
 </html>

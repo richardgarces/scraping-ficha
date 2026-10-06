@@ -205,6 +205,15 @@ def cron_lotes(request: Request):
     return FileResponse(STATIC / "cron.html")
 
 
+@app.get("/cyber-day")
+@app.get("/cyber")
+def cyber_day_page(request: Request):
+    gate = require_admin_html(request, next_path="/cyber-day")
+    if gate is not None:
+        return gate
+    return FileResponse(STATIC / "cyber-day.html")
+
+
 @app.get("/estadisticas")
 def estadisticas(request: Request):
     gate = require_admin_html(request, next_path="/estadisticas")
@@ -319,6 +328,7 @@ def entrar(request: Request):
             admin_next = user and user.get("role") == "admin" and (
                 nxt.startswith("/ofertas")
                 or nxt.startswith("/cron")
+                or nxt.startswith("/cyber")
                 or nxt.startswith("/estadisticas")
                 or nxt.startswith("/usuarios")
                 or nxt.startswith("/analisis-producto")

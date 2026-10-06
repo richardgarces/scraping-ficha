@@ -15,16 +15,17 @@ Grupo de scraping diario con **100 queries Sonic** (Celulares, TV, Gaming…). L
 
 ## Ruta admin
 
-1. **Cron / lotes** → [`/cron`](https://precios.meincart.com/cron)
-2. Tabla **Corridas por grupo**: fila **Cyber Junio 2026** (`cyber_junio2026`)
-3. Controles: **Iniciar** · **Detener** · **Continuar** · **Reiniciar**
-4. Panel dedicado debajo (import CSV/JSON + preview de queries)
+1. Menú **Cuenta → Cyber Day** (solo `role === admin`) → [`/cyber-day`](https://precios.meincart.com/cyber-day) (alias `/cyber`)
+2. Controles: **Iniciar** · **Parar** · **Continuar** · **Reiniciar** + import/export CSV/JSON
+3. También en **Cron / lotes** (`/cron`) como grupo `cyber_junio2026` (Iniciar/Detener/Continuar/Reiniciar)
 
-API (también):
+API (admin):
 
+- `GET /api/admin/cyber-day`
+- `POST /api/admin/cyber-day/start|stop|continue|restart`
+- `POST /api/admin/cyber-day/import`
+- `GET /api/admin/cyber-day/export.csv` · `export.json`
 - `POST /api/admin/cron-batches/cyber_junio2026/start` `{ "mode": "continue"|"restart"|omit }`
-- `POST /api/admin/cron-batches/cyber_junio2026/stop`
-- `GET /api/admin/cyber-day` (detalle progreso / import)
 
 ## Comportamiento
 

@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#258fdf">
+  <title>Cyber Day</title>
+  <script>(function(){var m=localStorage.getItem("retail-theme");if(m==="day"||m==="night"){document.documentElement.dataset.theme=m;return;}var h=new Date().getHours();document.documentElement.dataset.theme=(h>=7&&h<19)?"day":"night";})();</script>
+  <link rel="stylesheet" href="/static/styles.css?v=82">
+</head>
+<body>
+  <header class="top">
+    <div>
+      <p class="eyebrow">Retail Chile</p>
+      <h1>Cyber Day</h1>
+    </div>
+    <form class="desktop-quick-search" action="/catalogo" method="get" role="search">
+      <label class="desktop-search-field"><span class="sr-only">Buscar un producto</span><input name="q" type="search" placeholder="Busca un producto…"></label>
+      <label class="quick-search-toggle" title="Buscar solo en la base de datos"><input name="quick" type="checkbox" value="1" checked><span class="quick-search-long">Búsqueda rápida</span><span class="quick-search-short">Rápida</span></label>
+      <button type="submit" aria-label="Buscar">Buscar</button>
+    </form>
+    <nav class="nav">
+      <a href="/">Explorar</a>
+      <a href="/catalogo">Catálogo</a>
+      <a href="/hoy">Ofertas de hoy</a>
+      <a href="/reales">Ofertas reales</a>
+      <a href="/tiendas">Tiendas</a>
+      <details class="nav-menu" data-login>
+        <summary>Cuenta</summary>
+        <div class="nav-menu-list">
+          <a href="/entrar" data-login-mode="entrar">Entrar</a>
+          <a href="/entrar?modo=inscribir" data-login-mode="inscribir">Inscribirse</a>
+        </div>
+      </details>
+      <details class="nav-menu" data-auth hidden>
+        <summary class="current" data-user-label>Cuenta</summary>
+        <div class="nav-menu-list">
+          <a href="/siguiendo">Siguiendo</a>
+          <a href="/cyber-day" class="current" data-admin hidden>Cyber Day</a>
+          <a href="/cron" data-admin hidden>Cron / lotes</a>
+          <a href="/analisis-producto" data-admin hidden>Análisis de producto</a>
+          <a href="/estadisticas" data-admin hidden>Estadísticas</a>
+          <a href="/usuarios" data-admin hidden>Usuarios</a>
+          <a href="/ofertas" data-admin hidden>Configurar</a>
+          <a href="#" data-logout>Salir</a>
+        </div>
+      </details>
+    </nav>
+    <div class="theme-toggle" role="group" aria-label="Apariencia">
+      <button type="button" class="secondary" data-theme-set="auto" title="Según la hora y tu ubicación">Auto</button>
+      <button type="button" class="secondary" data-theme-set="day">Día</button>
+      <button type="button" class="secondary" data-theme-set="night">Noche</button>
+    </div>
+  </header>
+  <main class="settings">
+    <p id="flash" class="summary" hidden role="status" aria-live="polite"></p>
+    <section class="panel" id="cyber-day-panel">
+      <div class="cron-head">
+        <div>
+          <h2>Cyber Junio 2026 <span class="muted">cyber_junio2026</span></h2>
+          <p class="muted">Loop continuo sobre 100 queries Sonic. Por cada query busca/refresca top ofertas; al terminar 1→100 reinicia. Telegram + push si cambia el precio u oferta.</p>
+        </div>
+        <div class="cron-controls">
+          <p id="cyber-refresh" class="muted"></p>
+        </div>
+      </div>
+      <p id="cyber-meta" class="muted">Cargando…</p>
+      <div id="cyber-live" class="cron-store-live" hidden>
+        <div class="cron-store-live-head">
+          <strong id="cyber-live-title">Cyber Day</strong>
+          <span id="cyber-live-status" class="badge">En espera</span>
+        </div>
+        <div id="cyber-live-label" class="cron-progress-label">Sin corrida</div>
+        <div class="search-bar cron-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="Avance de la vuelta Cyber Day">
+          <span id="cyber-live-bar"></span>
+        </div>
+        <p id="cyber-live-counts" class="muted cron-basic-counts"></p>
+      </div>
+      <div class="cron-basic-actions" id="cyber-actions">
+        <button type="button" id="cyber-start" class="secondary" disabled>Iniciar</button>
+        <button type="button" id="cyber-stop" class="secondary" disabled>Parar</button>
+        <button type="button" id="cyber-continue" class="secondary" disabled>Continuar</button>
+        <button type="button" id="cyber-restart" class="secondary" disabled>Reiniciar</button>
+      </div>
+      <form id="cyber-import-form" class="cron-store-form" style="margin-top:1rem">
+        <label>Importar lista Sonic (CSV o JSON)
+          <input type="file" id="cyber-file" accept=".csv,.json,text/csv,application/json" required>
+        </label>
+        <button type="submit" id="cyber-import">Importar lista</button>
+        <a id="cyber-export-csv" class="btn secondary" href="/api/admin/cyber-day/export.csv">Exportar CSV</a>
+        <a id="cyber-export-json" class="btn secondary" href="/api/admin/cyber-day/export.json">Exportar JSON</a>
+      </form>
+      <p id="cyber-import-hint" class="muted">Lista <code>cyber_junio2026</code> (seed <code>data/cyber_junio2026.json</code>, 100 queries). Duplicados se deduplican solos. Import/export: n, query, category (+ matches/precio en export). También aparece como grupo en <a href="/cron">Cron / lotes</a>.</p>
+      <div class="table-wrap" id="cyber-products-wrap" hidden>
+        <table class="results cron-table">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Query</th>
+              <th>Categoría</th>
+              <th>Matches</th>
+              <th>Mejor precio</th>
+              <th>Error</th>
+            </tr>
+          </thead>
+          <tbody id="cyber-products-body"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+  <script src="/static/prices.js?v=32"></script>
+  <script src="/static/cyber-day.js?v=1"></script>
+</body>
+</html>

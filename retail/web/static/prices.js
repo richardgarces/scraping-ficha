@@ -683,6 +683,24 @@ function applySession(user) {
     } else if (link) {
       link.hidden = true;
     }
+    let cyber = menu.querySelector('a[href="/cyber-day"]');
+    if (admin) {
+      if (!cyber) {
+        cyber = document.createElement("a");
+        cyber.href = "/cyber-day";
+        cyber.textContent = "Cyber Day";
+        cyber.setAttribute("data-admin", "");
+        const quotes = menu.querySelector('a[href="/cotizaciones"]');
+        if (quotes) quotes.after(cyber);
+        else menu.prepend(cyber);
+      }
+      cyber.hidden = false;
+      if (location.pathname === "/cyber-day" || location.pathname === "/cyber") {
+        cyber.classList.add("current");
+      }
+    } else if (cyber) {
+      cyber.hidden = true;
+    }
   });
   document.documentElement.classList.toggle("is-authed", loggedIn);
   document.documentElement.classList.toggle("is-admin", admin);
@@ -776,7 +794,9 @@ const CLICK_NAV = {
   "/super": "reales",
   "/tiendas": "tiendas",
 };
-const CLICK_ADMIN_PAGES = new Set(["/cron", "/estadisticas", "/usuarios", "/ofertas", "/cotizaciones"]);
+const CLICK_ADMIN_PAGES = new Set([
+  "/cron", "/cyber-day", "/cyber", "/estadisticas", "/usuarios", "/ofertas", "/cotizaciones",
+]);
 let fechaClickAt = 0;
 
 function trackClick(kind) {
