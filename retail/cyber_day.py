@@ -99,6 +99,138 @@ def match_key(store: str, product_id: str) -> str:
     return f"{store}:{product_id}"
 
 
+def _offer_price(offer: dict[str, Any]) -> int | None:
+    """Precio oferta comparable: todo medio de pago si existe, si no price."""
+    return _as_int(offer.get("price_all_payment")) or _as_int(offer.get("price"))
+
+
+def ficha_path(store: str, product_id: str) -> str:
+    store = str(store or "").strip()
+    product_id = str(product_id or "").strip()
+    if not store or not product_id:
+        return ""
+    from urllib.parse import quote
+
+    return f"/producto?store={quote(store, safe='')}&id={quote(product_id, safe='')}"
+
+
+def stats_from_signatures(last_matches: dict[str, Any] | None) -> dict[str, Any]:
+    """Agrega tiendas/precios desde firmas `store:pid → price:normal:card`."""
+    stores: set[str] = set()
+    normals: list[int] = []
+    offers: list[int] = []
+    best_price: int | None = None
+    best_normal: int | None = None
+    best_sig: str | None = None
+    best_url = ""
+    for key, sig in (last_matches or {}).items():
+        text_key = str(key or "")
+        if ":" not in text_key:
+            continue
+        store, product_id = text_key.split(":", 1)
+        if not store or not product_id:
+            continue
+        parts = str(sig or "").split(":")
+        try:
+            price = int(parts[0]) if parts and parts[0] not in ("", "None") else None
+        except ValueError:
+            price = None
+        if price is None or price <= 0:
+            continue
+        try:
+            normal = int(parts[1]) if len(parts) > 1 and parts[1] not in ("", "None", "0") else None
+        except ValueError:
+            normal = None
+        if normal is not None and normal <= 0:
+            normal = None
+        stores.add(store)
+        offers.append(price)
+        if normal is not None:
+            normals.append(normal)
+        if best_price is None or price < best_price:
+            best_price = price
+            best_normal = normal
+            best_sig = str(sig)
+            best_url = ficha_path(store, product_id)
+    return {
+        "last_price": best_price,
+        "last_price_normal": best_normal,
+        "last_signature": best_sig,
+        "stores_scraped": len(stores),
+        "max_price_normal": max(normals) if normals else None,
+        "min_price_normal": min(normals) if normals else None,
+        "max_offer_price": max(offers) if offers else None,
+        "best_offer_url": best_url or None,
+    }
+
+
+def summarize_match_stats(matches: list[dict[str, Any]]) -> dict[str, Any]:
+    """Agrega stats de matches vivos (precio oferta = todo medio si aplica)."""
+    stores: set[str] = set()
+    normals: list[int] = []
+    offers: list[int] = []
+    best_price: int | None = None
+    best_normal: int | None = None
+    best_sig: str | None = None
+    best_url: str | None = None
+    for offer in matches:
+        store = str(offer.get("store") or "").strip()
+        product_id = str(offer.get("product_id") or "").strip()
+        if not store or not product_id:
+            continue
+        price = _offer_price(offer)
+        if price is None or price <= 0:
+            continue
+        price_normal = _as_int(offer.get("price_normal"))
+        if price_normal is not None and price_normal <= 0:
+            price_normal = None
+        price_card = _as_int(offer.get("price_card"))
+        sig = offer_signature(price, price_normal, price_card)
+        stores.add(store)
+        offers.append(price)
+        if price_normal is not None:
+            normals.append(price_normal)
+        if best_price is None or price < best_price:
+            best_price = price
+            best_normal = price_normal
+            best_sig = sig
+            best_url = ficha_path(store, product_id) or (str(offer.get("url") or "").strip() or None)
+    return {
+        "last_price": best_price,
+        "last_price_normal": best_normal,
+        "last_signature": best_sig,
+        "stores_scraped": len(stores),
+        "max_price_normal": max(normals) if normals else None,
+        "min_price_normal": min(normals) if normals else None,
+        "max_offer_price": max(offers) if offers else None,
+        "best_offer_url": best_url,
+    }
+
+
+def _summary_patch(summary: dict[str, Any] | None) -> dict[str, Any]:
+    if not summary:
+        return {
+            "last_price": None,
+            "last_price_normal": None,
+            "last_signature": None,
+            "stores_scraped": 0,
+            "max_price_normal": None,
+            "min_price_normal": None,
+            "max_offer_price": None,
+            "best_offer_url": None,
+        }
+    return {
+        "last_price": summary.get("last_price"),
+        "last_price_normal": summary.get("last_price_normal"),
+        "last_signature": summary.get("last_signature"),
+        "stores_scraped": int(summary.get("stores_scraped") or 0),
+        "max_price_normal": summary.get("max_price_normal"),
+        "min_price_normal": summary.get("min_price_normal"),
+        "max_offer_price": summary.get("max_offer_price"),
+        "best_offer_url": summary.get("best_offer_url"),
+    }
+
+
 def slugify_list(name: str) -> str:
     text = (name or "").strip().lower().replace("-", "_")
     text = _SLUG_RE.sub("_", text)
@@ -354,6 +486,26 @@ def list_products(repo: Any, list_id: str | None = None) -> list[dict[str, Any]]
 
 def product_row_view(row: dict[str, Any]) -> dict[str, Any]:
     """Fila JSON-safe para la tabla admin (sin datetime ni firmas pesadas)."""
+    derived = stats_from_signatures(row.get("last_matches") if isinstance(row.get("last_matches"), dict) else {})
+    stores = row.get("stores_scraped")
+    if stores is None:
+        stores = derived.get("stores_scraped") or 0
+    max_normal = _as_int(row.get("max_price_normal"))
+    if max_normal is None:
+        max_normal = derived.get("max_price_normal")
+    min_normal = _as_int(row.get("min_price_normal"))
+    if min_normal is None:
+        min_normal = derived.get("min_price_normal")
+    max_offer = _as_int(row.get("max_offer_price"))
+    if max_offer is None:
+        max_offer = derived.get("max_offer_price")
+    best_url = str(row.get("best_offer_url") or "").strip() or derived.get("best_offer_url")
+    last_price = _as_int(row.get("last_price"))
+    if last_price is None:
+        last_price = derived.get("last_price")
+    last_normal = _as_int(row.get("last_price_normal"))
+    if last_normal is None:
+        last_normal = derived.get("last_price_normal")
     return {
         "id": str(row.get("id") or row.get("_id") or ""),
         "n": row.get("n"),
@@ -362,8 +514,13 @@ def product_row_view(row: dict[str, Any]) -> dict[str, Any]:
         "name": row.get("name") or row.get("query") or "",
         "category": row.get("category") or "",
         "last_match_count": int(row.get("last_match_count") or 0),
-        "last_price": _as_int(row.get("last_price")),
-        "last_price_normal": _as_int(row.get("last_price_normal")),
+        "last_price": last_price,
+        "last_price_normal": last_normal,
+        "stores_scraped": int(stores or 0),
+        "max_price_normal": max_normal,
+        "min_price_normal": min_normal,
+        "max_offer_price": max_offer,
+        "best_offer_url": best_url or None,
         "last_error": row.get("last_error"),
         "resolved": bool(row.get("resolved")),
         "last_observed_at": _iso(row.get("last_observed_at")),
@@ -400,9 +557,7 @@ def enrich_row_from_catalog(repo: Any, row: dict[str, Any], *, persist: bool = T
     patch = {
         "last_matches": sigs,
         "last_match_count": len(sigs),
-        "last_price": summary.get("last_price") if summary else None,
-        "last_price_normal": summary.get("last_price_normal") if summary else None,
-        "last_signature": summary.get("last_signature") if summary else None,
+        **_summary_patch(summary),
         "last_observed_at": now,
         "last_error": None,
         "resolved": True,
@@ -652,18 +807,27 @@ def repair_duplicates(repo: Any, list_id: str | None = None) -> dict[str, Any]:
     return {"repaired": True, "before": before, "total": len(docs), "list_id": lid}
 
 
+_EXPORT_FIELDS = (
+    "n",
+    "query",
+    "category",
+    "last_match_count",
+    "last_price",
+    "stores_scraped",
+    "max_price_normal",
+    "min_price_normal",
+    "max_offer_price",
+    "best_offer_url",
+)
+
+
 def export_rows(repo: Any, list_id: str | None = None) -> list[dict[str, Any]]:
     lid = resolve_list_id(repo, list_id)
     repair_duplicates(repo, lid)
     rows = []
     for item in list_products(repo, lid):
-        rows.append({
-            "n": item.get("n"),
-            "query": item.get("query") or item.get("name") or "",
-            "category": item.get("category") or "",
-            "last_match_count": item.get("last_match_count"),
-            "last_price": item.get("last_price"),
-        })
+        view = product_row_view(item)
+        rows.append({key: view.get(key) for key in _EXPORT_FIELDS})
     return rows
 
 
@@ -672,7 +836,7 @@ def export_csv(repo: Any, list_id: str | None = None) -> str:
     buf = io.StringIO()
     writer = csv.DictWriter(
         buf,
-        fieldnames=["n", "query", "category", "last_match_count", "last_price"],
+        fieldnames=list(_EXPORT_FIELDS),
         extrasaction="ignore",
     )
     writer.writeheader()
@@ -688,16 +852,7 @@ def export_json(repo: Any, list_id: str | None = None) -> dict[str, Any]:
     return {
         "id": lid,
         "title": meta.get("title") or meta.get("name") or lid,
-        "items": [
-            {
-                "n": row["n"],
-                "query": row["query"],
-                "category": row["category"],
-                "last_match_count": row.get("last_match_count"),
-                "last_price": row.get("last_price"),
-            }
-            for row in rows
-        ],
+        "items": rows,
     }
 
 
@@ -1147,12 +1302,12 @@ def _offer_rows_from_search(result: dict[str, Any]) -> list[dict[str, Any]]:
 
 def _rank_matches(docs: list[dict[str, Any]], limit: int) -> list[dict[str, Any]]:
     def sort_key(doc: dict[str, Any]) -> tuple:
-        price = _as_int(doc.get("price")) or 10**12
+        price = _offer_price(doc) or 10**12
         normal = _as_int(doc.get("price_normal")) or 0
         discount = max(0, normal - price) if normal > price else 0
         return (-discount, price, str(doc.get("store") or ""), str(doc.get("product_id") or ""))
 
-    ranked = sorted((d for d in docs if _as_int(d.get("price"))), key=sort_key)
+    ranked = sorted((d for d in docs if _offer_price(d)), key=sort_key)
     return ranked[:limit]
 
 
@@ -1274,26 +1429,21 @@ def detect_changes(
     prev = dict(previous or {})
     current: dict[str, str] = {}
     changes: list[dict[str, Any]] = []
-    best_price = None
-    best_normal = None
-    best_sig = None
     for offer in matches:
         store = str(offer.get("store") or "")
         product_id = str(offer.get("product_id") or "")
         if not store or not product_id:
             continue
-        price = _as_int(offer.get("price"))
+        price = _offer_price(offer)
         if price is None:
             continue
         price_normal = _as_int(offer.get("price_normal"))
+        if price_normal is not None and price_normal <= 0:
+            price_normal = None
         price_card = _as_int(offer.get("price_card"))
         sig = offer_signature(price, price_normal, price_card)
         key = match_key(store, product_id)
         current[key] = sig
-        if best_price is None or price < best_price:
-            best_price = price
-            best_normal = price_normal
-            best_sig = sig
         old = prev.get(key)
         if not old or old == sig:
             continue
@@ -1309,7 +1459,7 @@ def detect_changes(
             "store": store,
             "product_id": product_id,
             "name": offer.get("name") or query,
-            "url": offer.get("url") or "",
+            "url": offer.get("url") or ficha_path(store, product_id),
             "image_url": offer.get("image_url") or "",
             "previous_price": old_price if old_price is not None else price,
             "price": price,
@@ -1317,11 +1467,7 @@ def detect_changes(
             "query": query,
             "message": f"Cyber Day ({query}): {old} → {sig}",
         })
-    summary = {
-        "last_price": best_price,
-        "last_price_normal": best_normal,
-        "last_signature": best_sig,
-    }
+    summary = summarize_match_stats(matches) if current else None
     return current, changes, summary
 
 
@@ -1415,9 +1561,7 @@ def process_one(repo: Any, *, delay: float = 0.0, list_id: str | None = None) ->
                     "resolved": bool(tracked),
                     "last_matches": current_sigs,
                     "last_match_count": len(current_sigs),
-                    "last_price": summary.get("last_price") if summary else None,
-                    "last_price_normal": summary.get("last_price_normal") if summary else None,
-                    "last_signature": summary.get("last_signature") if summary else None,
+                    **_summary_patch(summary),
                     "last_observed_at": now,
                     "last_error": None if tracked else "Sin matches en catálogo/scrape.",
                     "updated_at": now,

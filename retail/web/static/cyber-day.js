@@ -94,11 +94,23 @@
     return `${path}${sep}list=${encodeURIComponent(currentListId)}`;
   }
 
-  function enableActionButtons() {
-    ["cyber-start", "cyber-stop", "cyber-continue", "cyber-restart"].forEach((id) => {
-      const btn = el(id);
-      if (btn) btn.disabled = false;
-    });
+  function setButtonEnabled(btn, enabled) {
+    if (!btn) return;
+    btn.disabled = !enabled;
+    btn.classList.toggle("is-disabled", !enabled);
+    btn.setAttribute("aria-disabled", enabled ? "false" : "true");
+  }
+
+  /** Sincroniza Iniciar/Parar/Continuar/Reiniciar con el status del run. */
+  function applyActionButtons(status, total) {
+    const running = status === "running";
+    const paused = status === "paused";
+    const hasList = Number(total) > 0;
+    setButtonEnabled(el("cyber-start"), hasList && !running);
+    setButtonEnabled(el("cyber-stop"), running || paused);
+    setButtonEnabled(el("cyber-continue"), hasList && paused);
+    // Reiniciar con confirm: habilitado si hay lista (también en curso).
+    setButtonEnabled(el("cyber-restart"), hasList);
   }
 
   async function loadSeedFallback(message) {
@@ -125,8 +137,13 @@
         <td>${escapeHtml(row.category || "—")}</td>
         <td>—</td>
         <td>—</td>
+        <td>—</td>
+        <td>—</td>
+        <td>—</td>
+        <td>—</td>
+        <td>—</td>
         <td class="muted">seed local</td>
-      </tr>`).join("") || `<tr><td colspan="6" class="err">Sin seed local.</td></tr>`;
+      </tr>`).join("") || `<tr><td colspan="11" class="err">Sin seed local.</td></tr>`;
       }
       if (meta) {
         meta.textContent = `Error API: ${message}. Seed local: ${items.length} queries (solo lectura; reintentá Iniciar o recargá).`;
@@ -134,10 +151,11 @@
     } catch (seedError) {
       const body = el("cyber-products-body");
       if (body) {
-        body.innerHTML = `<tr><td colspan="6" class="err">Error al cargar: ${escapeHtml(message)} · seed: ${escapeHtml(seedError.message)}</td></tr>`;
+        body.innerHTML = `<tr><td colspan="11" class="err">Error al cargar: ${escapeHtml(message)} · seed: ${escapeHtml(seedError.message)}</td></tr>`;
       }
     }
-    enableActionButtons();
+    // Seed local: no arrancar worker; botones de control deshabilitados.
+    applyActionButtons("idle", 0);
   }
 
   function showLoadError(message) {
@@ -232,17 +250,7 @@
           ? `Última vuelta: ${formatSeconds(run.last_lap_elapsed_seconds)}`
           : "";
     }
-    const start = el("cyber-start");
-    const stop = el("cyber-stop");
-    const cont = el("cyber-continue");
-    const restart = el("cyber-restart");
-    if (start) start.disabled = !total || status === "running";
-    if (stop) stop.disabled = !["running", "paused"].includes(status);
-    if (cont) {
-      cont.disabled = !total || status === "running" || (status === "idle" && processed <= 0);
-      if (["stopped", "paused"].includes(status)) cont.disabled = !total;
-    }
-    if (restart) restart.disabled = !total || status === "running";
+    applyActionButtons(status, total);
 
     const wrap = el("cyber-products-wrap");
     const body = el("cyber-products-body");
@@ -250,17 +258,28 @@
     if (wrap && body) {
       wrap.hidden = false;
       if (!rows.length) {
-        body.innerHTML = `<tr><td colspan="6" class="muted">Sin filas en la lista. Importá CSV/JSON o creá la lista con seed.</td></tr>`;
+        body.innerHTML = `<tr><td colspan="11" class="muted">Sin filas en la lista. Importá CSV/JSON o creá la lista con seed.</td></tr>`;
       } else {
-        body.innerHTML = rows.map((row) => `
+        body.innerHTML = rows.map((row) => {
+          const offerUrl = String(row.best_offer_url || "").trim();
+          const offerCell = offerUrl
+            ? `<a href="${escapeHtml(offerUrl)}" target="_blank" rel="noopener">Ver oferta</a>`
+            : "—";
+          return `
       <tr>
         <td>${escapeHtml(row.n ?? (row.order != null ? row.order + 1 : "—"))}</td>
         <td>${escapeHtml(row.query || row.name || "—")}</td>
         <td>${escapeHtml(row.category || "—")}</td>
         <td>${escapeHtml(row.last_match_count != null ? row.last_match_count : 0)}</td>
         <td>${formatPrice(row.last_price)}</td>
+        <td>${escapeHtml(row.stores_scraped != null ? row.stores_scraped : 0)}</td>
+        <td>${formatPrice(row.max_price_normal)}</td>
+        <td>${formatPrice(row.min_price_normal)}</td>
+        <td>${formatPrice(row.max_offer_price)}</td>
+        <td>${offerCell}</td>
         <td class="muted">${escapeHtml(row.last_error || "")}</td>
-      </tr>`).join("");
+      </tr>`;
+        }).join("");
       }
     }
     const refreshHint = el("cyber-refresh");
@@ -294,7 +313,7 @@
   }
 
   async function cyberAction(path, button, busyLabel) {
-    if (!button) return;
+    if (!button || button.disabled || button.classList.contains("is-disabled")) return;
     if (!loadReady) {
       showFlash("Todavía cargando el estado…", false);
       return;
@@ -304,7 +323,7 @@
       return;
     }
     const prev = button.textContent;
-    button.disabled = true;
+    setButtonEnabled(button, false);
     button.textContent = busyLabel;
     try {
       const result = await apiJson(listQuery(path), { method: "POST" });
@@ -396,6 +415,9 @@
       .catch((error) => showFlash(error.message, false));
   });
   el("cyber-restart")?.addEventListener("click", () => {
+    if (!window.confirm("¿Reiniciar Cyber Day desde la query 1? Se pierde el progreso de la vuelta actual.")) {
+      return;
+    }
     cyberAction("/api/admin/cyber-day/restart", el("cyber-restart"), "Reiniciando…")
       .catch((error) => showFlash(error.message, false));
   });
@@ -431,7 +453,7 @@
     }
   });
 
-  // Nunca dejar «Cargando listas» si el arranque falla en silencio.
-  enableActionButtons();
+  // Hasta el primer refresh: controles deshabilitados (evita Iniciar con status desconocido).
+  applyActionButtons("idle", 0);
   refreshCyber().catch((error) => showFlash(error.message, false));
 })();

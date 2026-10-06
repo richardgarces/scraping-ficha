@@ -20,6 +20,7 @@ from retail.cyber_day import (
     ensure_seed,
     export_csv,
     export_json,
+    ficha_path,
     import_products,
     is_cyber_group,
     list_all_lists,
@@ -28,6 +29,7 @@ from retail.cyber_day import (
     offer_signature,
     parse_products_payload,
     process_one,
+    product_row_view,
     products_count,
     progress_view,
     repair_duplicates,
@@ -35,6 +37,7 @@ from retail.cyber_day import (
     start_run,
     status_payload,
     stop_run,
+    summarize_match_stats,
 )
 
 
@@ -168,6 +171,11 @@ def test_detect_changes_skips_first_sighting_then_notifies():
     assert current["falabella:p1"] == offer_signature(900000, 1000000, 0)
     assert changes == []
     assert summary["last_price"] == 900000
+    assert summary["stores_scraped"] == 1
+    assert summary["max_price_normal"] == 1000000
+    assert summary["min_price_normal"] == 1000000
+    assert summary["max_offer_price"] == 900000
+    assert summary["best_offer_url"] == ficha_path("falabella", "p1")
 
     matches[0]["price"] = 850000
     current2, changes2, _ = detect_changes(current, matches, query="iPhone")
@@ -176,6 +184,62 @@ def test_detect_changes_skips_first_sighting_then_notifies():
     assert changes2[0]["price"] == 850000
     assert changes2[0]["query"] == "iPhone"
     assert "falabella:p1" in current2
+
+
+def test_match_stats_todo_medio_and_product_row_view():
+    matches = [
+        {
+            "store": "falabella",
+            "product_id": "iphone-a",
+            "price": 1499990,
+            "price_all_payment": 1349990,
+            "price_normal": 1599990,
+        },
+        {
+            "store": "paris",
+            "product_id": "iphone-b",
+            "price": 1399990,
+            "price_normal": 1499990,
+        },
+        {
+            "store": "falabella",
+            "product_id": "iphone-c",
+            "price": 1550000,
+            # sin price_normal → no entra en min/max normal
+        },
+    ]
+    stats = summarize_match_stats(matches)
+    assert stats["stores_scraped"] == 2
+    assert stats["last_price"] == 1349990  # todo medio de falabella-a
+    assert stats["max_price_normal"] == 1599990
+    assert stats["min_price_normal"] == 1499990
+    assert stats["max_offer_price"] == 1550000
+    assert stats["best_offer_url"] == "/producto?store=falabella&id=iphone-a"
+
+    row = product_row_view({
+        "n": 1,
+        "query": "iPhone 17 / 17 Pro / 17 Pro Max",
+        "category": "Celulares",
+        "last_match_count": 3,
+        "last_matches": {
+            "falabella:iphone-a": offer_signature(1349990, 1599990, 0),
+            "paris:iphone-b": offer_signature(1399990, 1499990, 0),
+            "falabella:iphone-c": offer_signature(1550000, 0, 0),
+        },
+    })
+    assert row["stores_scraped"] == 2
+    assert row["max_price_normal"] == 1599990
+    assert row["min_price_normal"] == 1499990
+    assert row["max_offer_price"] == 1550000
+    assert row["last_price"] == 1349990
+    assert row["best_offer_url"] == "/producto?store=falabella&id=iphone-a"
+    # Sin normal en firma → None (UI muestra —)
+    empty_normals = product_row_view({
+        "query": "x",
+        "last_matches": {"ripley:z": offer_signature(1000, 0, 0)},
+    })
+    assert empty_normals["max_price_normal"] is None
+    assert empty_normals["min_price_normal"] is None
 
 
 def test_notify_on_change_mocked(repo, monkeypatch):
@@ -279,12 +343,18 @@ def test_dedupe_and_repair_duplicates(repo):
 def test_export_csv_and_json(repo):
     ensure_seed(repo)
     csv_text = export_csv(repo)
-    assert "n,query,category" in csv_text.splitlines()[0]
+    header = csv_text.splitlines()[0]
+    assert "n,query,category" in header
+    assert "stores_scraped" in header
+    assert "max_price_normal" in header
+    assert "best_offer_url" in header
     assert csv_text.count("\n") >= 100
     payload = export_json(repo)
     assert payload["id"] == "cyber_junio2026"
     assert len(payload["items"]) == 100
     assert payload["items"][0]["query"]
+    assert "stores_scraped" in payload["items"][0]
+    assert "best_offer_url" in payload["items"][0]
 
 
 def test_as_cron_group_shows_queries_not_store_catalog(repo):

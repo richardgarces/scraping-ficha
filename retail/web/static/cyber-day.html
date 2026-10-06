@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#258fdf">
   <title>Cyber Day</title>
   <script>(function(){var m=localStorage.getItem("retail-theme");if(m==="day"||m==="night"){document.documentElement.dataset.theme=m;return;}var h=new Date().getHours();document.documentElement.dataset.theme=(h>=7&&h<19)?"day":"night";})();</script>
-  <link rel="stylesheet" href="/static/styles.css?v=82">
+  <link rel="stylesheet" href="/static/styles.css?v=83">
 </head>
 <body>
   <header class="top">
@@ -115,8 +115,8 @@
         <a id="cyber-export-csv" class="btn secondary" href="/api/admin/cyber-day/export.csv">Exportar CSV</a>
         <a id="cyber-export-json" class="btn secondary" href="/api/admin/cyber-day/export.json">Exportar JSON</a>
       </form>
-      <p id="cyber-import-hint" class="muted">Cada lista es independiente. Import/export: n, query, category (+ matches/precio en export). La lista oficial <code>cyber_junio2026</code> también aparece en <a href="/cron">Cron / lotes</a>.</p>
-      <div class="table-wrap" id="cyber-products-wrap">
+      <p id="cyber-import-hint" class="muted">Cada lista es independiente. Import/export: n, query, category (+ matches, precios, tiendas, link en export). La lista oficial <code>cyber_junio2026</code> también aparece en <a href="/cron">Cron / lotes</a>.</p>
+      <div class="table-wrap scroll-x" id="cyber-products-wrap">
         <table class="results cron-table">
           <thead>
             <tr>
@@ -125,17 +125,22 @@
               <th>Categoría</th>
               <th>Matches</th>
               <th>Mejor precio</th>
+              <th>Tiendas</th>
+              <th>Precio más alto normal</th>
+              <th>Precio más bajo normal</th>
+              <th>Precio más alto oferta</th>
+              <th>Mejor oferta</th>
               <th>Error</th>
             </tr>
           </thead>
           <tbody id="cyber-products-body">
-            <tr><td colspan="6" class="muted">Cargando lista…</td></tr>
+            <tr><td colspan="11" class="muted">Cargando lista…</td></tr>
           </tbody>
         </table>
       </div>
     </section>
   </main>
   <script src="/static/prices.js?v=33"></script>
-  <script src="/static/cyber-day.js?v=6"></script>
+  <script src="/static/cyber-day.js?v=7"></script>
 </body>
 </html>

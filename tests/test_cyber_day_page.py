@@ -34,7 +34,11 @@ def test_cyber_day_static_assets_exist():
     assert "Reiniciar" in html
     assert "cyber-list-select" in html
     assert "Nueva lista" in html
-    assert "cyber-day.js?v=6" in html
+    assert "cyber-day.js?v=7" in html
+    assert "Precio más alto normal" in html
+    assert "Tiendas" in html
+    assert "Mejor oferta" in html
+    assert "scroll-x" in html
     assert "/api/admin/cyber-day" in js
     assert "cyber-day/lists" in js
     assert "FETCH_TIMEOUT_MS = 8000" in js
@@ -42,6 +46,10 @@ def test_cyber_day_static_assets_exist():
     assert "(() => {" in js
     assert "function flash(" not in js  # choca con window.flash (#flash)
     assert "showFlash" in js
+    assert "applyActionButtons" in js
+    assert "stores_scraped" in js
+    assert "best_offer_url" in js
+    assert "status === \"running\"" in js or 'status === "running"' in js
     assert (root / "cyber_junio2026.json").is_file()
     prices = (root / "prices.js").read_text(encoding="utf-8")
     assert 'href = "/cyber-day"' in prices or 'href="/cyber-day"' in prices
