@@ -604,6 +604,10 @@ def test_admin_stats_includes_search_cache(monkeypatch):
     monkeypatch.setattr("retail.click_stats.load_click_stats", lambda: {"mongo": True, "totals": {}, "items": [], "by_day": []})
     monkeypatch.setattr("retail.scrape_stats.load_scrape_stats", lambda: {"mongo": True, "totals": {}, "by_day": []})
     monkeypatch.setattr("retail.search_cache.load_search_cache", lambda: cache_payload)
+    monkeypatch.setattr(
+        "retail.search_freq.load_search_freq",
+        lambda: {"redis": True, "day": "2026-10-02", "top_n": 10, "count": 0, "cached_count": 0, "items": []},
+    )
 
     response = TestClient(app).get("/api/admin/stats")
     assert response.status_code == 200

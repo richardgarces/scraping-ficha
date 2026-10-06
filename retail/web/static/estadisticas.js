@@ -202,6 +202,40 @@ function ttlLabel(seconds) {
   return `${total} s`;
 }
 
+function renderSearchFreq(freq) {
+  const data = freq || {};
+  const items = data.items || [];
+  $("search-freq-count").textContent = fmt(data.count ?? items.length);
+  $("search-freq-cached").textContent = fmt(data.cached_count ?? 0);
+  $("search-freq-day").textContent = data.day ? dayLabel(data.day) : "—";
+  const note = data.redis === false
+    ? " Redis no está disponible."
+    : "";
+  $("search-freq-meta").textContent =
+    `Top ${data.top_n || 10} del día Chile. Hit exacto o primera palabra + filtro de tokens. ${data.store_policy || "Top global + filtro tienda."}${note}`;
+  const body = $("search-freq-body");
+  if (!items.length) {
+    body.innerHTML = `<tr><td colspan="4" class="muted">${
+      data.redis === false
+        ? "No se pudo leer el ranking en Redis."
+        : "Todavía no hay búsquedas frecuentes hoy."
+    }</td></tr>`;
+    return;
+  }
+  body.innerHTML = items
+    .map((row, index) => {
+      const query = String(row.query || "").trim() || "—";
+      return `
+        <tr>
+          <td class="num">${index + 1}</td>
+          <td class="query-cell" title="${escapeHtml(query)}">${escapeHtml(query)}</td>
+          <td class="num">${fmt(row.count)}</td>
+          <td>${row.cached ? "Sí" : "No"}</td>
+        </tr>`;
+    })
+    .join("");
+}
+
 function renderSearchCache(cache) {
   const data = cache || {};
   const items = data.items || [];
@@ -336,6 +370,7 @@ function render(payload) {
   $("stats-refresh").textContent = stamp;
   renderClicks(payload.clicks || {});
   renderScrapes(payload.scrapes || {});
+  renderSearchFreq(payload.search_freq || {});
   renderSearchCache(payload.search_cache || {});
   renderVisitors(payload.by_day || []);
   renderSearches(searches.by_day || []);

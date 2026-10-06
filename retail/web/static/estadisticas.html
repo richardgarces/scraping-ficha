@@ -124,6 +124,34 @@
     <section class="panel">
       <div class="cron-head">
         <div>
+          <h2>Top 10 del día (Redis)</h2>
+          <p id="search-freq-meta" class="muted">Ranking de consultas frecuentes hoy (Santiago). Las que tienen payload sirven hits exactos y por primera palabra.</p>
+        </div>
+      </div>
+      <div class="stat-cards">
+        <article class="stat-card"><span>En ranking</span><strong id="search-freq-count">—</strong></article>
+        <article class="stat-card"><span>Con resultado cacheado</span><strong id="search-freq-cached">—</strong></article>
+        <article class="stat-card"><span>Día</span><strong id="search-freq-day">—</strong></article>
+      </div>
+      <div class="table-wrap">
+        <table class="results">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Consulta</th>
+              <th>Veces</th>
+              <th>Payload</th>
+            </tr>
+          </thead>
+          <tbody id="search-freq-body">
+            <tr><td colspan="4" class="muted">Cargando…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+    <section class="panel">
+      <div class="cron-head">
+        <div>
           <h2>Caché Redis de hoy</h2>
           <p id="search-cache-meta" class="muted">Consultas guardadas hoy en Redis para no volver a scrapear. Caducan a medianoche (Santiago).</p>
         </div>

@@ -34,6 +34,7 @@ from retail.search_cache import (
     store_search_result,
     store_store_products,
 )
+from retail.search_freq import lookup_top_search, store_top_search_result
 from retail import thumbs
 
 SOURCES = ("scrape", "db", "both")
@@ -971,7 +972,8 @@ def iter_search_events(
         ):
             if search_id and event.get("type") == "start":
                 event["search_id"] = search_id
-            if event.get("type") == "done" and ((event.get("result") or {}).get("cache") or {}).get("hit") == "result":
+            cache_hit = ((event.get("result") or {}).get("cache") or {}).get("hit")
+            if event.get("type") == "done" and cache_hit in {"result", "top", "top_prefix"}:
                 served_daily_cache = True
             if requested_query != text:
                 event["requested_query"] = requested_query
@@ -1044,6 +1046,33 @@ def _run_search_events(
             # sin `end` y con 0 filas la UI mostraba «Se cortó la consulta».
             yield {"type": "end", "result": cached_result}
             return
+
+        # Top 10 del día: hit exacto o primera palabra + filtro de tokens extra.
+        top_result = lookup_top_search(text, stores=chosen)
+        if top_result is not None:
+            top_underfilled = (
+                recover_underfilled_db
+                and source == "db"
+                and int(top_result.get("offer_count") or 0) < DB_RECOVERY_MIN_RESULTS
+                and not bool(top_result.get("recovery"))
+            )
+            if not top_underfilled:
+                top_result = dict(top_result)
+                refresh_cached_comparisons(top_result)
+                top_result["product_index"] = product_index
+                top_result["stores"] = chosen
+                top_result["cancelled"] = False
+                progress = top_result.get("progress") or []
+                for item in progress:
+                    item["cached"] = True
+                    if item.get("state") in {None, "pending"}:
+                        item["state"] = "skip"
+                hit = (top_result.get("cache") or {}).get("hit") or "top"
+                yield {"type": "start", "query": text, "progress": progress, "product_index": product_index}
+                logger.info("Redis top: «%s» (%s).", text, hit)
+                yield {"type": "done", "result": top_result}
+                yield {"type": "end", "result": top_result}
+                return
 
     repo = connect_repo()
     # Un batch que solo refresca una tienda no necesita abrir Qdrant ni crear
@@ -1296,6 +1325,10 @@ def _run_search_events(
                         result=result,
                         qdrant=qdrant,
                     )
+                    try:
+                        store_top_search_result(text, result)
+                    except Exception:
+                        logger.debug("No se pudo popular top search", exc_info=True)
             except Exception:
                 logger.debug("Post-búsqueda falló", exc_info=True)
             finally:

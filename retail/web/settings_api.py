@@ -287,11 +287,13 @@ def admin_stats(request: Request) -> dict:
     from retail.request_stats import load_stats
     from retail.scrape_stats import load_scrape_stats
     from retail.search_cache import load_search_cache
+    from retail.search_freq import load_search_freq
     from retail.search_stats import load_search_stats
 
     payload = load_stats()
     payload["searches"] = load_search_stats()
     payload["search_cache"] = load_search_cache()
+    payload["search_freq"] = load_search_freq()
     payload["clicks"] = load_click_stats()
     payload["scrapes"] = load_scrape_stats()
     try:

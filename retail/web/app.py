@@ -609,7 +609,13 @@ def _log_web_search(request: Request, query: str) -> None:
         host = request.client.host if request.client else None
         record_app_search(query, client_ip(request.headers, host), client_country(request.headers))
     except Exception:
-        return
+        pass
+    try:
+        from retail.search_freq import record_search_frequency
+
+        record_search_frequency(query)
+    except Exception:
+        pass
     try:
         from retail.funnel_stats import record_funnel_event
 
