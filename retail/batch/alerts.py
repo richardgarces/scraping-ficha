@@ -256,8 +256,18 @@ def _append_file(path: Path, payload: dict[str, Any]) -> None:
         handle.write(json.dumps(payload, ensure_ascii=False) + "\n")
 
 
+_SECRET_ENV_ALIASES: dict[str, tuple[str, ...]] = {
+    "SMTP_PASSWORD": ("SMTP_PASSWORD", "SMTP_PASS"),
+    "ALERT_EMAIL_TO": ("ALERT_EMAIL_TO", "SMTP_TO"),
+}
+
+
 def _secret(env_name: str, local_name: str) -> str:
-    return os.environ.get(env_name) or str(load_channels().get(local_name) or "")
+    for name in _SECRET_ENV_ALIASES.get(env_name, (env_name,)):
+        raw = os.environ.get(name)
+        if raw is not None and str(raw).strip():
+            return str(raw).strip()
+    return str(load_channels().get(local_name) or "")
 
 
 def _telegram(payload: dict[str, Any]) -> bool:

@@ -85,6 +85,7 @@
           <label><input type="checkbox" name="channel" value="push"> Celular (push)</label>
         </fieldset>
         <p class="muted span">El push al celular llega a quienes lo activaron en <a href="/siguiendo">Siguiendo</a>. Este interruptor habilita el envío; las llaves VAPID se generan solas o se leen de <code>WEB_PUSH_VAPID_*</code>.</p>
+        <p class="muted span">También se cargan desde el <code>.env</code> del servidor (<code>TELEGRAM_BOT_TOKEN</code>, <code>TELEGRAM_CHAT_ID</code>, <code>SMTP_*</code>, <code>ALERT_EMAIL_TO</code>). El env gana sobre archivo/Mongo; guardar con campos vacíos no borra secretos definidos ahí.</p>
         <label>Token bot Telegram <input id="telegram_bot_token" type="password" autocomplete="off"></label>
         <label>Chat ID Telegram <input id="telegram_chat_id" type="text" placeholder="@usuario o id numérico"></label>
         <p class="muted span">Se usa el chat guardado aquí (o el de la cuenta, si tiene Telegram). Un @usuario de chat privado se resuelve al id numérico al enviar.</p>

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -23,6 +24,20 @@ _CHANNEL_KEYS = (
     "smtp_from",
     "alert_email_to",
 )
+
+# Env names that fill/override channel fields (first nonempty wins per field).
+_CHANNEL_ENV_NAMES: dict[str, tuple[str, ...]] = {
+    "telegram_bot_token": ("TELEGRAM_BOT_TOKEN",),
+    "telegram_chat_id": ("TELEGRAM_CHAT_ID",),
+    "smtp_host": ("SMTP_HOST",),
+    "smtp_port": ("SMTP_PORT",),
+    "smtp_user": ("SMTP_USER",),
+    "smtp_password": ("SMTP_PASSWORD", "SMTP_PASS"),
+    "smtp_from": ("SMTP_FROM",),
+    "alert_email_to": ("ALERT_EMAIL_TO", "SMTP_TO"),
+}
+
+_SECRET_CHANNEL_KEYS = frozenset({"telegram_bot_token", "smtp_password"})
 
 
 def write_json(path: Path, data: dict[str, Any]) -> None:
@@ -55,6 +70,42 @@ def _channels_payload(data: dict[str, Any]) -> dict[str, Any]:
     return payload
 
 
+def _env_value(*names: str) -> str:
+    for name in names:
+        raw = os.environ.get(name)
+        if raw is None:
+            continue
+        text = str(raw).strip()
+        if text:
+            return text
+    return ""
+
+
+def channels_from_env() -> dict[str, Any]:
+    """Valores de canales presentes en el entorno (solo claves con valor)."""
+    found: dict[str, Any] = {}
+    for key, names in _CHANNEL_ENV_NAMES.items():
+        text = _env_value(*names)
+        if not text:
+            continue
+        if key == "smtp_port":
+            try:
+                found[key] = int(text)
+            except ValueError:
+                found[key] = 587
+        else:
+            found[key] = text
+    return found
+
+
+def _apply_env_overlay(data: dict[str, Any]) -> dict[str, Any]:
+    """Env gana cuando está definido; rellena huecos del archivo/Mongo."""
+    payload = _channels_payload(data)
+    for key, value in channels_from_env().items():
+        payload[key] = value
+    return _channels_payload(payload)
+
+
 def _channels_from_mongo(repo: Any | None = None) -> dict[str, Any] | None:
     owns = repo is None
     store = repo
@@ -78,30 +129,56 @@ def _channels_from_mongo(repo: Any | None = None) -> dict[str, Any] | None:
 
 
 def load_channels(repo: Any | None = None) -> dict[str, Any]:
-    """Lee canales desde archivo; si falta el token, recupera desde Mongo y repara el archivo."""
+    """Lee canales: archivo → Mongo (si falta token) → overlay de env (env gana)."""
     data = _default_channels()
     if CHANNELS_PATH.exists():
         try:
             data = _channels_payload({**data, **load_json(CHANNELS_PATH)})
         except Exception:
             data = _default_channels()
-    if str(data.get("telegram_bot_token") or "").strip():
-        return data
-    stored = _channels_from_mongo(repo)
-    if not stored:
-        return data
-    data = _channels_payload({**data, **stored})
+    if not str(data.get("telegram_bot_token") or "").strip():
+        stored = _channels_from_mongo(repo)
+        if stored:
+            data = _channels_payload({**data, **stored})
+    data = _apply_env_overlay(data)
+    # Repara archivo/Mongo cuando env (o Mongo) aportó el token y el archivo estaba vacío.
     if str(data.get("telegram_bot_token") or "").strip():
         try:
-            write_json(CHANNELS_PATH, data)
+            on_disk = (
+                _channels_payload(load_json(CHANNELS_PATH))
+                if CHANNELS_PATH.exists()
+                else _default_channels()
+            )
         except Exception:
-            pass
+            on_disk = _default_channels()
+        if not str(on_disk.get("telegram_bot_token") or "").strip():
+            try:
+                write_json(CHANNELS_PATH, data)
+            except Exception:
+                pass
+            owns = repo is None
+            store = repo
+            if store is None:
+                try:
+                    from retail.search import connect_repo
+
+                    store = connect_repo()
+                except Exception:
+                    store = None
+            if store is not None and hasattr(store, "save_app_setting"):
+                try:
+                    store.save_app_setting(CHANNELS_SETTING_KEY, data)
+                finally:
+                    if owns:
+                        store.close()
+            elif owns and store is not None:
+                store.close()
     return data
 
 
 def save_channels(data: dict[str, Any], repo: Any | None = None) -> dict[str, Any]:
-    """Guarda en archivo y en Mongo para no perder el bot si se borra output/."""
-    payload = _channels_payload(data)
+    """Guarda en archivo y en Mongo. El overlay de env sigue aplicando al leer."""
+    payload = _apply_env_overlay(_channels_payload(data))
     write_json(CHANNELS_PATH, payload)
     owns = repo is None
     store = repo
@@ -125,27 +202,47 @@ def save_channels(data: dict[str, Any], repo: Any | None = None) -> dict[str, An
 
 def mask_channels(data: dict[str, Any]) -> dict[str, Any]:
     public = dict(data)
+    env = channels_from_env()
     for key in ("telegram_bot_token", "smtp_password"):
         value = str(public.get(key) or "")
         public[key] = f"{MASK}{value[-4:]}" if len(value) > 4 else (MASK if value else "")
         public[f"{key}_set"] = bool(value)
+        public[f"{key}_from_env"] = key in env
+    for key in _CHANNEL_KEYS:
+        if key in _SECRET_CHANNEL_KEYS:
+            continue
+        public[f"{key}_from_env"] = key in env
     return public
 
 
 def merge_secrets(incoming: dict[str, Any]) -> dict[str, Any]:
+    """Fusiona el formulario con lo guardado. Vacío no pisa env ni secretos actuales."""
     current = load_channels()
+    env = channels_from_env()
     merged = dict(current)
     for key, value in incoming.items():
-        if key.endswith("_set"):
+        if key.endswith("_set") or key.endswith("_from_env"):
+            continue
+        if key not in _CHANNEL_KEYS and key != "smtp_port":
             continue
         text = "" if value is None else str(value)
         if text.startswith(MASK):
             continue
         if key == "smtp_port":
+            if text.strip() == "":
+                continue
             merged[key] = int(value or 587)
-        else:
-            merged[key] = text
-    return merged
+            continue
+        if not text.strip():
+            # Vacío: no borrar si viene de env o (secretos) si ya hay valor.
+            if key in env:
+                continue
+            if key in _SECRET_CHANNEL_KEYS and str(current.get(key) or "").strip():
+                continue
+            merged[key] = ""
+            continue
+        merged[key] = text
+    return _apply_env_overlay(merged)
 
 
 RULE_NAMES = {"price_drop_percent", "price_drop_amount", "cross_store_gap", "below_median"}
