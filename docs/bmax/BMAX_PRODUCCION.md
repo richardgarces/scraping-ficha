@@ -22,8 +22,11 @@ DNS: el mismo Cloudflare Tunnel que `rent.meincart.com` (Proxied). Añade el Pub
 | `prod-menu.sh` | En BMAX: env, caddy, deploy, logs, cron host, oneshot |
 | `docker-compose.prod.yml` | `web` + mongo + qdrant + redis, **sin** puertos al host |
 | `docker-compose.prod.platform.yml` | Une `precios-web` a `platform-net` |
-| `deploy/caddy/Caddyfile.platform-edge` | Solo el bloque `precios.meincart.com` |
-| `scripts/link-platform-caddy.sh` | **Fusiona** ese bloque; no pisa `rent.meincart.com` |
+| `deploy/caddy/Caddyfile.platform-edge` | Bloque `precios.meincart.com` + `handle_errors` 502/503/504 |
+| `deploy/caddy/maintenance.html` | Página «Pronto estaremos funcionando» (actualización) |
+| `scripts/link-platform-caddy.sh` | **Fusiona** ese bloque; copia el HTML a `platform-caddy/errors/`; no pisa `rent.meincart.com` |
+
+Si `precios-web` está caído o en redeploy, platform-caddy sirve `maintenance.html` en vez del 502 crudo. Tráfico sano no cambia.
 
 ## Mac → servidor
 

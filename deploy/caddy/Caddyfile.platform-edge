@@ -1,6 +1,9 @@
 # Bloque de sitio para platform-caddy — NO sustituye el Caddyfile entero.
 # Se fusiona con el existente (rent.meincart.com y el resto se conservan).
 # Instalar: ./scripts/link-platform-caddy.sh
+#
+# Página de mantenimiento (502/503/504 si precios-web no responde):
+#   deploy/caddy/maintenance.html → /srv/errors/precios-maintenance.html
 
 # --- BEGIN precios.meincart.com ---
 # http:// porque TLS termina en Cloudflare Tunnel (igual que rent.meincart.com)
@@ -30,6 +33,18 @@ http://precios.meincart.com, http://precios.meincart.cl {
 	handle {
 		reverse_proxy precios-web:8080
 	}
+
+	# Upstream caído / redeploy: página amigable en vez de 502 crudo.
+	handle_errors {
+		@gateway `{err.status_code} == 502 || {err.status_code} == 503 || {err.status_code} == 504`
+		handle @gateway {
+			root * /srv/errors
+			rewrite * /precios-maintenance.html
+			header Content-Type "text/html; charset=utf-8"
+			header Cache-Control "no-store"
+			file_server
+		}
+	}
 }
 
 # Dominio corto de las fichas. Requiere que lnk.meincart.cl quede detrás de
@@ -49,6 +64,17 @@ http://lnk.meincart.cl {
 
 	handle {
 		redir https://precios.meincart.cl 302
+	}
+
+	handle_errors {
+		@gateway `{err.status_code} == 502 || {err.status_code} == 503 || {err.status_code} == 504`
+		handle @gateway {
+			root * /srv/errors
+			rewrite * /precios-maintenance.html
+			header Content-Type "text/html; charset=utf-8"
+			header Cache-Control "no-store"
+			file_server
+		}
 	}
 }
 # --- END precios.meincart.com ---

@@ -21,6 +21,51 @@ error() { echo "ERROR: $*" >&2; }
 
 COMPOSE_BIN="$(detect_compose)" || { error "sin docker compose"; exit 1; }
 
+MAINT_SRC="${ROOT_DIR}/deploy/caddy/maintenance.html"
+ERRORS_DIR="${PLATFORM_CADDY}/errors"
+COMPOSE_FILE="${PLATFORM_CADDY}/docker-compose.yml"
+
+# Copia la página de downtime y asegura el volumen ./errors → /srv/errors en
+# platform-caddy (idempotente). Sin esto, handle_errors no puede servir el HTML.
+ensure_error_pages() {
+  [[ -f "$MAINT_SRC" ]] || { error "falta $MAINT_SRC"; return 1; }
+  mkdir -p "$ERRORS_DIR"
+  cp "$MAINT_SRC" "${ERRORS_DIR}/precios-maintenance.html"
+  chmod 644 "${ERRORS_DIR}/precios-maintenance.html"
+  info "Página mantenimiento → ${ERRORS_DIR}/precios-maintenance.html"
+
+  [[ -f "$COMPOSE_FILE" ]] || { error "falta ${COMPOSE_FILE}"; return 1; }
+
+  local current patched
+  current="$(mktemp)"
+  patched="$(mktemp)"
+  read_dest "$COMPOSE_FILE" "$current"
+
+  if grep -Fq './errors:/srv/errors' "$current"; then
+    rm -f "$current" "$patched"
+    return 0
+  fi
+
+  awk '
+    /Caddyfile:\/etc\/caddy\/Caddyfile/ {
+      print
+      print "      - ./errors:/srv/errors:ro"
+      next
+    }
+    { print }
+  ' "$current" >"$patched"
+
+  if ! grep -Fq './errors:/srv/errors' "$patched"; then
+    rm -f "$current" "$patched"
+    error "No se pudo insertar volumen ./errors en docker-compose.yml"
+    return 1
+  fi
+
+  as_priv_cp "$patched" "$COMPOSE_FILE"
+  rm -f "$current" "$patched"
+  info "Volumen ./errors:/srv/errors:ro añadido a platform-caddy compose"
+}
+
 as_priv_cp() {
   local src="$1" dst="$2"
   if [[ -w "$(dirname "$dst")" ]] && { [[ ! -e "$dst" ]] || [[ -w "$dst" ]]; }; then
@@ -96,6 +141,8 @@ upsert_site_block() {
   fi
   rm -f "$block"
 }
+
+ensure_error_pages
 
 CURRENT="$(mktemp)"
 MERGED="$(mktemp)"
