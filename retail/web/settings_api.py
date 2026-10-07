@@ -826,6 +826,127 @@ async def cyber_day_update_item(n: int, request: Request) -> dict:
         repo.close()
 
 
+def _price_changes_days(request: Request, body: dict | None = None) -> int:
+    raw = None
+    if body:
+        raw = body.get("days")
+    if raw is None:
+        raw = request.query_params.get("days")
+    try:
+        days = int(raw) if raw is not None else 30
+    except (TypeError, ValueError):
+        days = 30
+    return max(1, min(days, 90))
+
+
+@router.get("/api/admin/price-changes")
+def price_changes_month(request: Request) -> dict:
+    """Productos/queries con cambio de valor de precio en ~30 días (America/Santiago)."""
+    current_user(request, admin=True)
+    repo = connect_repo()
+    if repo is None:
+        raise HTTPException(status_code=503, detail="MongoDB no está disponible.")
+    try:
+        from retail.price_changes_month import list_price_changes
+
+        return list_price_changes(repo, days=_price_changes_days(request))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Cambios de precio falló: {exc}") from exc
+    finally:
+        repo.close()
+
+
+@router.post("/api/admin/price-changes/export.csv")
+async def price_changes_export_csv(request: Request) -> Response:
+    """Exporta filas seleccionadas en CSV compatible con Importar lista Cyber."""
+    current_user(request, admin=True)
+    repo = connect_repo()
+    if repo is None:
+        raise HTTPException(status_code=503, detail="MongoDB no está disponible.")
+    try:
+        from retail.price_changes_month import (
+            export_csv_text,
+            export_selected,
+            list_price_changes,
+        )
+
+        body: dict = {}
+        content_type = request.headers.get("content-type") or ""
+        if "application/json" in content_type:
+            raw = await request.json()
+            body = raw if isinstance(raw, dict) else {}
+        days = _price_changes_days(request, body)
+        payload = list_price_changes(repo, days=days)
+        rows = export_selected(
+            payload.get("items") or [],
+            selected_ids=body.get("ids") or body.get("selected_ids"),
+            selected_queries=body.get("queries") or body.get("selected_queries"),
+        )
+        if not rows:
+            raise HTTPException(status_code=400, detail="Seleccioná al menos un producto.")
+        text = export_csv_text(rows, include_optional=bool(body.get("optional", True)))
+        return Response(
+            content=text,
+            media_type="text/csv; charset=utf-8",
+            headers={
+                "Content-Disposition": 'attachment; filename="cambios-precio-cyber.csv"',
+            },
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Export CSV falló: {exc}") from exc
+    finally:
+        repo.close()
+
+
+@router.post("/api/admin/price-changes/export.json")
+async def price_changes_export_json(request: Request) -> JSONResponse:
+    """Exporta filas seleccionadas en JSON compatible con Importar lista Cyber."""
+    current_user(request, admin=True)
+    repo = connect_repo()
+    if repo is None:
+        raise HTTPException(status_code=503, detail="MongoDB no está disponible.")
+    try:
+        from retail.price_changes_month import (
+            export_json_payload,
+            export_selected,
+            list_price_changes,
+        )
+
+        body: dict = {}
+        content_type = request.headers.get("content-type") or ""
+        if "application/json" in content_type:
+            raw = await request.json()
+            body = raw if isinstance(raw, dict) else {}
+        days = _price_changes_days(request, body)
+        payload = list_price_changes(repo, days=days)
+        rows = export_selected(
+            payload.get("items") or [],
+            selected_ids=body.get("ids") or body.get("selected_ids"),
+            selected_queries=body.get("queries") or body.get("selected_queries"),
+        )
+        if not rows:
+            raise HTTPException(status_code=400, detail="Seleccioná al menos un producto.")
+        data = export_json_payload(
+            rows,
+            title=str(body.get("title") or "Cambios de precio (último mes)"),
+        )
+        return JSONResponse(
+            content=data,
+            media_type="application/json; charset=utf-8",
+            headers={
+                "Content-Disposition": 'attachment; filename="cambios-precio-cyber.json"',
+            },
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Export JSON falló: {exc}") from exc
+    finally:
+        repo.close()
+
+
 @router.get("/api/admin/overview")
 def admin_overview(request: Request) -> dict:
     current_user(request, admin=True)

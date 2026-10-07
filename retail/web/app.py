@@ -228,6 +228,16 @@ def cyber_day_evolution_page(request: Request):
     return FileResponse(STATIC / "cyber-day-evolucion.html")
 
 
+@app.get("/cambios-precio")
+@app.get("/cyber-day/cambios")
+def price_changes_page(request: Request):
+    """Admin: productos con cambios de valor el último mes → export Cyber."""
+    gate = require_admin_html(request, next_path="/cambios-precio")
+    if gate is not None:
+        return gate
+    return FileResponse(STATIC / "cambios-precio.html")
+
+
 @app.get("/estadisticas")
 def estadisticas(request: Request):
     gate = require_admin_html(request, next_path="/estadisticas")

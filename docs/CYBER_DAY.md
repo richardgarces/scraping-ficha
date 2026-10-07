@@ -19,6 +19,7 @@ Grupo de scraping diario con **100 queries Sonic** (Celulares, TV, Gaming…). L
 2. Selector de listas + **Nueva lista** (nombre/slug, seed / copiar / vacía)
 3. Controles: **Iniciar** · **Parar** · **Continuar** · **Reiniciar** + import/export CSV/JSON
 4. También en **Cron / lotes** (`/cron`) como grupo `cyber_junio2026` (muestra **100 queries**, no tiendas)
+5. **Cambios de precio** ([`/cambios-precio`](https://precios.meincart.com/cambios-precio)): productos/queries con cambio de valor en ~30 días (catálogo + Cyber + seguidos); multi-select y export CSV/JSON (`n`, `query`, `category`) para **Importar lista**
 
 API (admin):
 

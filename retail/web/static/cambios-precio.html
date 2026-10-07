@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#258fdf">
+  <title>Cambios de precio</title>
+  <script>(function(){var m=localStorage.getItem("retail-theme");if(m==="day"||m==="night"){document.documentElement.dataset.theme=m;return;}var h=new Date().getHours();document.documentElement.dataset.theme=(h>=7&&h<19)?"day":"night";})();</script>
+  <link rel="stylesheet" href="/static/styles.css?v=91">
+</head>
+<body>
+  <header class="top">
+    <div>
+      <p class="eyebrow">Retail Chile</p>
+      <h1>Cambios de precio</h1>
+    </div>
+    <form class="desktop-quick-search" action="/catalogo" method="get" role="search">
+      <label class="desktop-search-field"><span class="sr-only">Buscar un producto</span><input name="q" type="search" placeholder="Busca un producto…"></label>
+      <label class="quick-search-toggle" title="Buscar solo en la base de datos"><input name="quick" type="checkbox" value="1" checked><span class="quick-search-long">Búsqueda rápida</span><span class="quick-search-short">Rápida</span></label>
+      <button type="submit" aria-label="Buscar">Buscar</button>
+    </form>
+    <nav class="nav">
+      <a href="/">Explorar</a>
+      <a href="/catalogo">Catálogo</a>
+      <a href="/hoy">Ofertas de hoy</a>
+      <a href="/reales">Ofertas reales</a>
+      <a href="/tiendas">Tiendas</a>
+      <details class="nav-menu" data-login>
+        <summary>Cuenta</summary>
+        <div class="nav-menu-list">
+          <a href="/entrar" data-login-mode="entrar">Entrar</a>
+          <a href="/entrar?modo=inscribir" data-login-mode="inscribir">Inscribirse</a>
+        </div>
+      </details>
+      <details class="nav-menu" data-auth hidden>
+        <summary class="current" data-user-label>Cuenta</summary>
+        <div class="nav-menu-list">
+          <a href="/siguiendo">Siguiendo</a>
+          <a href="/cyber-day" data-admin hidden>Cyber</a>
+          <a href="/cambios-precio" class="current" data-admin hidden>Cambios de precio</a>
+          <a href="/cron" data-admin hidden>Cron / lotes</a>
+          <a href="/analisis-producto" data-admin hidden>Análisis de producto</a>
+          <a href="/estadisticas" data-admin hidden>Estadísticas</a>
+          <a href="/usuarios" data-admin hidden>Usuarios</a>
+          <a href="/ofertas" data-admin hidden>Configurar</a>
+          <a href="#" data-logout>Salir</a>
+        </div>
+      </details>
+    </nav>
+    <div class="theme-toggle" role="group" aria-label="Apariencia">
+      <button type="button" class="secondary" data-theme-set="auto" title="Según la hora y tu ubicación">Auto</button>
+      <button type="button" class="secondary" data-theme-set="day">Día</button>
+      <button type="button" class="secondary" data-theme-set="night">Noche</button>
+    </div>
+  </header>
+  <main class="settings">
+    <p id="flash" class="summary" hidden role="status" aria-live="polite"></p>
+    <section class="panel">
+      <div class="cron-head">
+        <div>
+          <h2>Último mes · export a Cyber</h2>
+          <p class="muted">Productos o queries con al menos un <strong>cambio de valor</strong> de precio en los últimos ~30 días (America/Santiago). Fuentes: catálogo, Cyber y alertas de seguidos. Seleccioná filas y exportá CSV/JSON para <a href="/cyber-day">Importar lista</a> en Cyber.</p>
+        </div>
+        <div class="cron-controls">
+          <a class="btn secondary" href="/cyber-day">Abrir Cyber</a>
+          <button type="button" class="secondary" id="reload">Actualizar</button>
+        </div>
+      </div>
+      <div class="cron-store-form" style="margin-bottom:1rem;display:flex;flex-wrap:wrap;gap:.75rem;align-items:end">
+        <label>Filtrar
+          <input type="search" id="filter-q" placeholder="Query, categoría o tienda…" autocomplete="off">
+        </label>
+        <label>Días
+          <input type="number" id="days" min="1" max="90" value="30" style="width:5rem">
+        </label>
+        <button type="button" id="select-filtered" class="secondary">Seleccionar filtrados</button>
+        <button type="button" id="select-all" class="secondary">Seleccionar todos</button>
+        <button type="button" id="clear-selection" class="secondary">Limpiar selección</button>
+        <button type="button" id="export-csv">Exportar CSV</button>
+        <button type="button" id="export-json" class="secondary">Exportar JSON</button>
+      </div>
+      <p id="meta" class="muted">Cargando…</p>
+      <div class="table-wrap scroll-x">
+        <table class="results cron-table">
+          <thead>
+            <tr>
+              <th><label class="sr-only" for="check-all">Seleccionar visibles</label><input type="checkbox" id="check-all" title="Seleccionar visibles"></th>
+              <th>#</th>
+              <th>Query</th>
+              <th>Categoría</th>
+              <th>Tienda</th>
+              <th>Precio ant.</th>
+              <th>Precio</th>
+              <th>Último cambio</th>
+              <th>Fuente</th>
+            </tr>
+          </thead>
+          <tbody id="body">
+            <tr><td colspan="9" class="muted">Cargando…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+  <script src="/static/prices.js?v=37"></script>
+  <script src="/static/cambios-precio.js?v=1"></script>
+</body>
+</html>

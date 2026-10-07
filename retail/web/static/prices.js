@@ -741,8 +741,22 @@ function applySession(user) {
       if (location.pathname === "/cyber-day" || location.pathname === "/cyber") {
         cyber.classList.add("current");
       }
+      let cambios = menu.querySelector('a[href="/cambios-precio"]');
+      if (!cambios) {
+        cambios = document.createElement("a");
+        cambios.href = "/cambios-precio";
+        cambios.textContent = "Cambios de precio";
+        cambios.setAttribute("data-admin", "");
+        cyber.after(cambios);
+      }
+      cambios.hidden = false;
+      if (location.pathname === "/cambios-precio" || location.pathname === "/cyber-day/cambios") {
+        cambios.classList.add("current");
+      }
     } else if (cyber) {
       cyber.hidden = true;
+      const cambios = menu.querySelector('a[href="/cambios-precio"]');
+      if (cambios) cambios.hidden = true;
     }
   });
   document.documentElement.classList.toggle("is-authed", loggedIn);
@@ -838,7 +852,8 @@ const CLICK_NAV = {
   "/tiendas": "tiendas",
 };
 const CLICK_ADMIN_PAGES = new Set([
-  "/cron", "/cyber-day", "/cyber", "/estadisticas", "/usuarios", "/ofertas", "/cotizaciones",
+  "/cron", "/cyber-day", "/cyber", "/cambios-precio", "/cyber-day/cambios",
+  "/estadisticas", "/usuarios", "/ofertas", "/cotizaciones",
 ]);
 let fechaClickAt = 0;
 
