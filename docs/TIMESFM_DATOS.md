@@ -43,9 +43,9 @@ El scraping Cyber registra cambios en `cyber_day_price_history`. Esos puntos se
 reutilizan para el pronóstico experimental:
 
 1. Se empujan al `price_history` del `store:product_id` ganador.
-2. Cada vuelta del worker alimenta un pronóstico de **ventana Cyber** (~3 días)
-   cuando hay ≥8 observaciones densas (`cyber_event_trend` + consejo
-   comprar/esperar), sin exigir 30 días calendario.
+2. Cada vuelta del worker guarda una muestra de precio y alimenta un pronóstico
+   de **ventana Cyber** (~3 días) con ≥3 observaciones (`cyber_event_trend` +
+   consejo comprar/esperar), sin exigir 30 días calendario.
 3. La generación diaria prioriza todos los productos de listas que matchean
    octubre 2026 y junio 2026 (slugs tipo `cyber_oct2026`, `cyber_junio2026`).
 4. Al preparar la serie diaria se vuelve a mezclar el historial Cyber por si
