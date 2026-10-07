@@ -122,6 +122,7 @@ def stats_from_signatures(last_matches: dict[str, Any] | None) -> dict[str, Any]
     best_price: int | None = None
     best_normal: int | None = None
     best_sig: str | None = None
+    best_store: str | None = None
     best_url = ""
     for key, sig in (last_matches or {}).items():
         text_key = str(key or "")
@@ -151,6 +152,7 @@ def stats_from_signatures(last_matches: dict[str, Any] | None) -> dict[str, Any]
             best_price = price
             best_normal = normal
             best_sig = str(sig)
+            best_store = store
             best_url = ficha_path(store, product_id)
     return {
         "last_price": best_price,
@@ -161,6 +163,7 @@ def stats_from_signatures(last_matches: dict[str, Any] | None) -> dict[str, Any]
         "min_price_normal": min(normals) if normals else None,
         "max_offer_price": max(offers) if offers else None,
         "best_offer_url": best_url or None,
+        "best_store": best_store,
     }
 
 
@@ -172,6 +175,7 @@ def summarize_match_stats(matches: list[dict[str, Any]]) -> dict[str, Any]:
     best_price: int | None = None
     best_normal: int | None = None
     best_sig: str | None = None
+    best_store: str | None = None
     best_url: str | None = None
     for offer in matches:
         store = str(offer.get("store") or "").strip()
@@ -194,6 +198,7 @@ def summarize_match_stats(matches: list[dict[str, Any]]) -> dict[str, Any]:
             best_price = price
             best_normal = price_normal
             best_sig = sig
+            best_store = store
             best_url = ficha_path(store, product_id) or (str(offer.get("url") or "").strip() or None)
     return {
         "last_price": best_price,
@@ -204,6 +209,7 @@ def summarize_match_stats(matches: list[dict[str, Any]]) -> dict[str, Any]:
         "min_price_normal": min(normals) if normals else None,
         "max_offer_price": max(offers) if offers else None,
         "best_offer_url": best_url,
+        "best_store": best_store,
     }
 
 
@@ -218,7 +224,9 @@ def _summary_patch(summary: dict[str, Any] | None) -> dict[str, Any]:
             "min_price_normal": None,
             "max_offer_price": None,
             "best_offer_url": None,
+            "best_store": None,
         }
+    best_store = str(summary.get("best_store") or "").strip() or None
     return {
         "last_price": summary.get("last_price"),
         "last_price_normal": summary.get("last_price_normal"),
@@ -228,6 +236,7 @@ def _summary_patch(summary: dict[str, Any] | None) -> dict[str, Any]:
         "min_price_normal": summary.get("min_price_normal"),
         "max_offer_price": summary.get("max_offer_price"),
         "best_offer_url": summary.get("best_offer_url"),
+        "best_store": best_store,
     }
 
 
@@ -609,6 +618,11 @@ def product_row_view(row: dict[str, Any]) -> dict[str, Any]:
     if max_offer is None:
         max_offer = derived.get("max_offer_price")
     best_url = str(row.get("best_offer_url") or "").strip() or derived.get("best_offer_url")
+    best_store = str(row.get("best_store") or "").strip() or derived.get("best_store")
+    if isinstance(best_store, str):
+        best_store = best_store.strip() or None
+    else:
+        best_store = None
     last_price = _as_int(row.get("last_price"))
     if last_price is None:
         last_price = derived.get("last_price")
@@ -623,6 +637,11 @@ def product_row_view(row: dict[str, Any]) -> dict[str, Any]:
         delta_streak = int(row.get("delta_streak") or 0)
     except (TypeError, ValueError):
         delta_streak = 0
+    best_store_title = None
+    if best_store:
+        from retail.store_display import public_store_label
+
+        best_store_title = public_store_label(best_store)
     return {
         "id": str(row.get("id") or row.get("_id") or ""),
         "n": row.get("n"),
@@ -647,6 +666,8 @@ def product_row_view(row: dict[str, Any]) -> dict[str, Any]:
         "min_price_normal": min_normal,
         "max_offer_price": max_offer,
         "best_offer_url": best_url or None,
+        "best_store": best_store,
+        "best_store_title": best_store_title,
         "last_error": row.get("last_error"),
         "resolved": bool(row.get("resolved")),
         "last_observed_at": _iso(row.get("last_observed_at")),
@@ -804,6 +825,7 @@ def update_item(
             "min_price_normal": None,
             "max_offer_price": None,
             "best_offer_url": None,
+            "best_store": None,
             "last_observed_at": None,
             "last_error": None,
             "resolved": False,
@@ -1038,6 +1060,8 @@ _EXPORT_FIELDS = (
     "category",
     "last_match_count",
     "last_price",
+    "best_store",
+    "best_store_title",
     "stores_scraped",
     "max_price_normal",
     "min_price_normal",

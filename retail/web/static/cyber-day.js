@@ -188,8 +188,9 @@
         <td>—</td>
         <td>—</td>
         <td>—</td>
+        <td>—</td>
         <td class="muted">seed local</td>
-      </tr>`).join("") || `<tr><td colspan="10" class="err">Sin seed local.</td></tr>`;
+      </tr>`).join("") || `<tr><td colspan="11" class="err">Sin seed local.</td></tr>`;
       }
       if (meta) {
         meta.textContent = `Error API: ${message}. Seed local: ${items.length} queries (solo lectura; reintentá Iniciar o recargá).`;
@@ -197,7 +198,7 @@
     } catch (seedError) {
       const body = el("cyber-products-body");
       if (body) {
-        body.innerHTML = `<tr><td colspan="10" class="err">Error al cargar: ${escapeHtml(message)} · seed: ${escapeHtml(seedError.message)}</td></tr>`;
+        body.innerHTML = `<tr><td colspan="11" class="err">Error al cargar: ${escapeHtml(message)} · seed: ${escapeHtml(seedError.message)}</td></tr>`;
       }
     }
     // Seed local: no arrancar worker; botones de control deshabilitados.
@@ -313,7 +314,7 @@
     if (wrap && body && !editingActive) {
       wrap.hidden = false;
       if (!rows.length) {
-        body.innerHTML = `<tr><td colspan="10" class="muted">Sin filas en la lista. Importá CSV/JSON o creá la lista con seed.</td></tr>`;
+        body.innerHTML = `<tr><td colspan="11" class="muted">Sin filas en la lista. Importá CSV/JSON o creá la lista con seed.</td></tr>`;
       } else {
         body.innerHTML = rows.map((row) => {
           const n = row.n ?? (row.order != null ? row.order + 1 : "");
@@ -322,6 +323,8 @@
           const offerCell = offerUrl
             ? `<a href="${escapeHtml(offerUrl)}" target="_blank" rel="noopener">Ver oferta</a>`
             : "—";
+          const storeName = String(row.best_store_title || row.best_store || "").trim();
+          const storeCell = storeName || "—";
           return `
       <tr data-n="${escapeHtml(n)}">
         <td>${escapeHtml(n || "—")}</td>
@@ -338,6 +341,7 @@
         </td>
         <td>${escapeHtml(row.category || "—")}</td>
         ${priceCellHtml(row)}
+        <td>${escapeHtml(storeCell)}</td>
         <td>${escapeHtml(row.stores_scraped != null ? row.stores_scraped : 0)}</td>
         <td>${formatPrice(row.max_price_normal)}</td>
         <td>${formatPrice(row.min_price_normal)}</td>

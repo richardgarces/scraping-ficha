@@ -41,7 +41,7 @@ def test_cyber_day_static_assets_exist():
     assert "Eliminar lista" in html
     assert "Importar / actualizar lista activa" in html
     assert "reemplaza las queries" in html
-    assert "cyber-day.js?v=15" in html
+    assert "cyber-day.js?v=16" in html
     assert "styles.css?v=86" in html
     assert "application/json; charset=utf-8" in js  # import raw JSON (no FormData/multipart)
     assert "new FormData()" not in js
@@ -55,6 +55,7 @@ def test_cyber_day_static_assets_exist():
     assert "lista activa" in cron
     assert "last_match_count" not in js  # columna UI quitada; sigue en API/export
     assert "Precio más alto normal" in html
+    assert "Tienda mejor precio" in html
     assert "Tiendas" in html
     assert "Mejor oferta" in html
     assert "scroll-x" in html
@@ -73,6 +74,7 @@ def test_cyber_day_static_assets_exist():
     assert "applyActionButtons" in js
     assert "stores_scraped" in js
     assert "best_offer_url" in js
+    assert "best_store_title" in js
     assert "priceCellHtml" in js
     assert "down_again" in js
     assert "up_again" in js

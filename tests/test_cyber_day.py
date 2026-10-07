@@ -184,6 +184,7 @@ def test_detect_changes_skips_first_sighting_then_notifies():
     assert summary["min_price_normal"] == 1000000
     assert summary["max_offer_price"] == 900000
     assert summary["best_offer_url"] == ficha_path("falabella", "p1")
+    assert summary["best_store"] == "falabella"
 
     matches[0]["price"] = 850000
     current2, changes2, _ = detect_changes(current, matches, query="iPhone")
@@ -423,6 +424,7 @@ def test_match_stats_todo_medio_and_product_row_view():
     assert stats["min_price_normal"] == 1499990
     assert stats["max_offer_price"] == 1550000
     assert stats["best_offer_url"] == "/producto?store=falabella&id=iphone-a"
+    assert stats["best_store"] == "falabella"
 
     row = product_row_view({
         "n": 1,
@@ -441,6 +443,8 @@ def test_match_stats_todo_medio_and_product_row_view():
     assert row["max_offer_price"] == 1550000
     assert row["last_price"] == 1349990
     assert row["best_offer_url"] == "/producto?store=falabella&id=iphone-a"
+    assert row["best_store"] == "falabella"
+    assert row["best_store_title"]
     # Sin normal en firma → None (UI muestra —)
     empty_normals = product_row_view({
         "query": "x",
@@ -621,6 +625,7 @@ def test_export_csv_and_json(repo):
     assert "n,query,category" in header
     assert "stores_scraped" in header
     assert "max_price_normal" in header
+    assert "best_store" in header
     assert "best_offer_url" in header
     assert csv_text.count("\n") >= 100
     payload = export_json(repo)
@@ -628,6 +633,7 @@ def test_export_csv_and_json(repo):
     assert len(payload["items"]) == 100
     assert payload["items"][0]["query"]
     assert "stores_scraped" in payload["items"][0]
+    assert "best_store" in payload["items"][0]
     assert "best_offer_url" in payload["items"][0]
 
 
