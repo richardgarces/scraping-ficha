@@ -27,7 +27,10 @@ API (admin):
 - `POST /api/admin/cyber-day/start|stop|continue|restart?list=slug`
 - `POST /api/admin/cyber-day/import`
 - `GET /api/admin/cyber-day/export.csv` · `export.json`
+- `GET /api/admin/cyber-day/items/{n}/evolution?list=slug&day=YYYY-MM-DD` — evolución del mejor precio ese día (America/Santiago)
 - `POST /api/admin/cron-batches/cyber_junio2026/start` `{ "mode": "continue"|"restart"|omit }`
+
+Informe UI: [`/cyber-day/evolucion?list=slug&n=12`](/cyber-day/evolucion) (columna **Evolución → Informe** en la tabla). Historial en Mongo `cyber_day_price_history` (un punto por cambio de precio/tienda/normal en el día).
 
 ## Comportamiento
 

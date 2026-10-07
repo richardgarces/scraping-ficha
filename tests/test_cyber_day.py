@@ -14,9 +14,11 @@ from retail.cyber_day import (
     _offer_change_covers_best,
     _prev_best_price_patch,
     _price_move_label,
+    append_best_price_observation,
     as_cron_group,
     continue_run,
     create_list,
+    day_evolution_report,
     dedupe_items,
     delete_list,
     detect_changes,
@@ -25,6 +27,7 @@ from retail.cyber_day import (
     export_csv,
     export_json,
     ficha_path,
+    history_collection,
     import_products,
     is_cyber_group,
     list_all_lists,
@@ -533,6 +536,8 @@ def test_notify_on_change_mocked(repo, monkeypatch):
     assert first["ok"] is True
     assert first["changed"] == 0
     assert sent["n"] == 0
+    assert first.get("history_recorded") is True
+    assert history_collection(repo).count_documents({"n": first.get("n") or 1}) == 1
 
     # Segunda observación con precio distinto
     def fake_collect_drop(repo, query, **_kwargs):
@@ -558,6 +563,8 @@ def test_notify_on_change_mocked(repo, monkeypatch):
     assert second["ok"] is True
     assert second["changed"] == 1
     assert sent["n"] == 1
+    assert second.get("history_recorded") is True
+    assert history_collection(repo).count_documents({"n": first.get("n") or 1}) == 2
 
     from retail.cyber_day import products_collection
 
@@ -594,6 +601,67 @@ def test_notify_on_change_mocked(repo, monkeypatch):
     stored2 = products_collection(repo).find_one({"n": first.get("n") or 1})
     assert stored2.get("last_price") == 750000
     assert stored2.get("last_delta_direction") == "up"
+
+
+def test_append_best_price_observation_dedupes_same_day(repo):
+    ensure_seed(repo)
+    summary = {
+        "last_price": 100000,
+        "last_price_normal": 120000,
+        "best_store": "falabella",
+    }
+    matches = [{
+        "store": "falabella",
+        "product_id": "abc",
+        "name": "TV",
+        "price": 100000,
+        "price_normal": 120000,
+    }]
+    at = datetime(2026, 10, 6, 15, 0, tzinfo=timezone.utc)
+    first = append_best_price_observation(
+        repo,
+        list_id=CYBER_GROUP_ID,
+        n=1,
+        query="TV OLED",
+        summary=summary,
+        matches=matches,
+        at=at,
+    )
+    assert first is not None
+    assert first["day"] == "2026-10-06"
+    again = append_best_price_observation(
+        repo,
+        list_id=CYBER_GROUP_ID,
+        n=1,
+        query="TV OLED",
+        summary=summary,
+        matches=matches,
+        at=datetime(2026, 10, 6, 16, 0, tzinfo=timezone.utc),
+    )
+    assert again is None
+    changed = append_best_price_observation(
+        repo,
+        list_id=CYBER_GROUP_ID,
+        n=1,
+        query="TV OLED",
+        summary={**summary, "last_price": 90000, "best_store": "ripley"},
+        matches=[{
+            "store": "ripley",
+            "product_id": "xyz",
+            "name": "TV",
+            "price": 90000,
+            "price_normal": 120000,
+        }],
+        at=datetime(2026, 10, 6, 17, 0, tzinfo=timezone.utc),
+    )
+    assert changed is not None
+    report = day_evolution_report(repo, 1, list_id=CYBER_GROUP_ID, day="2026-10-06")
+    assert report["ok"] is True
+    assert report["timezone"] == "America/Santiago"
+    assert len(report["observations"]) == 2
+    assert report["stats"]["min"] == 90000
+    assert report["stats"]["current"] == 90000
+    assert report["stats"]["change"] == -10000
 
 
 def test_parse_import_json_and_csv():

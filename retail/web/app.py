@@ -215,6 +215,19 @@ def cyber_day_page(request: Request):
     return FileResponse(STATIC / "cyber-day.html")
 
 
+@app.get("/cyber-day/evolucion")
+@app.get("/cyber/evolucion")
+def cyber_day_evolution_page(request: Request):
+    """Informe diario de evolución de precio por query Cyber (admin)."""
+    next_path = request.url.path
+    if request.url.query:
+        next_path = f"{next_path}?{request.url.query}"
+    gate = require_admin_html(request, next_path=next_path)
+    if gate is not None:
+        return gate
+    return FileResponse(STATIC / "cyber-day-evolucion.html")
+
+
 @app.get("/estadisticas")
 def estadisticas(request: Request):
     gate = require_admin_html(request, next_path="/estadisticas")

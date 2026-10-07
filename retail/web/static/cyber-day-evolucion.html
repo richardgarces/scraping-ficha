@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#258fdf">
+  <title>Evolución Cyber — día</title>
+  <script>(function(){var m=localStorage.getItem("retail-theme");if(m==="day"||m==="night"){document.documentElement.dataset.theme=m;return;}var h=new Date().getHours();document.documentElement.dataset.theme=(h>=7&&h<19)?"day":"night";})();</script>
+  <link rel="stylesheet" href="/static/styles.css?v=87">
+</head>
+<body>
+  <header class="top">
+    <div>
+      <p class="eyebrow">Cyber · informe del día</p>
+      <h1 id="page-title">Evolución del precio</h1>
+    </div>
+    <nav class="nav">
+      <a href="/cyber-day" id="back-cyber">← Volver a Cyber</a>
+      <a href="/cron" data-admin hidden>Cron / lotes</a>
+    </nav>
+    <div class="theme-toggle" role="group" aria-label="Apariencia">
+      <button type="button" class="secondary" data-theme-set="auto" title="Según la hora y tu ubicación">Auto</button>
+      <button type="button" class="secondary" data-theme-set="day">Día</button>
+      <button type="button" class="secondary" data-theme-set="night">Noche</button>
+    </div>
+  </header>
+  <main class="settings">
+    <p id="flash" class="summary" hidden role="status" aria-live="polite"></p>
+    <section class="panel" id="cyber-evolution-panel">
+      <p id="cyber-evo-meta" class="muted">Cargando…</p>
+      <section class="price-history-card price-history-combined" aria-labelledby="combined-chart-title">
+        <div class="price-history-heading">
+          <div>
+            <h3 id="combined-chart-title">Evolución del precio</h3>
+            <p class="muted">Cada punto es una observación real. No rellenamos horarios sin medición.</p>
+          </div>
+          <div class="price-chart-legend" id="chart-legend" aria-label="Leyenda"></div>
+        </div>
+        <div id="chart-summary" class="price-summary" aria-label="Resumen del período"></div>
+        <div id="chart-combined" class="price-chart-scroll" tabindex="0" aria-label="Gráfico de precios observados hoy"></div>
+        <p id="chart-tooltip" class="chart-tooltip" role="status" aria-live="polite">Toca o enfoca un punto para ver su detalle.</p>
+        <p id="chart-combined-note" class="muted chart-note"></p>
+      </section>
+    </section>
+  </main>
+  <script src="/static/prices.js?v=35"></script>
+  <script src="/static/price-history.js?v=1"></script>
+  <script src="/static/cyber-day-evolucion.js?v=1"></script>
+</body>
+</html>

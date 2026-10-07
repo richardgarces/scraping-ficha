@@ -347,6 +347,236 @@ def products_collection(repo: Any):
     return repo.db["cyber_day_products"]
 
 
+def history_collection(repo: Any):
+    """Puntos de mejor precio Cyber por lista/query/día (America/Santiago)."""
+    coll = getattr(repo, "cyber_day_price_history", None)
+    if coll is not None:
+        return coll
+    return repo.db["cyber_day_price_history"]
+
+
+def ensure_history_indexes(repo: Any) -> None:
+    coll = history_collection(repo)
+    try:
+        coll.create_index(
+            [("list_id", 1), ("n", 1), ("day", 1), ("at", 1)],
+            name="cyber_history_list_n_day_at",
+        )
+    except Exception as exc:
+        print(f"cyber-day: índice historial falló: {exc}", flush=True)
+
+
+def _santiago_day_key(moment: datetime | None = None) -> str:
+    from retail.pricing import santiago_day
+
+    return santiago_day(moment or _now()).isoformat()
+
+
+def _best_offer_meta(
+    matches: list[dict[str, Any]] | None,
+    *,
+    price: int | None,
+    store: str | None,
+) -> dict[str, Any]:
+    """Datos del match ganador (product_id, nombre, normal) para historial."""
+    want_store = str(store or "").strip()
+    for offer in matches or []:
+        offer_store = str(offer.get("store") or "").strip()
+        if want_store and offer_store != want_store:
+            continue
+        offer_price = _offer_price(offer)
+        if price is not None and offer_price != price:
+            continue
+        normal = _as_int(offer.get("price_normal"))
+        if normal is not None and normal <= 0:
+            normal = None
+        return {
+            "product_id": str(offer.get("product_id") or "").strip(),
+            "name": str(offer.get("name") or "").strip(),
+            "url": str(offer.get("url") or "").strip()
+            or ficha_path(offer_store, str(offer.get("product_id") or "")),
+            "price_normal": normal,
+            "store": offer_store,
+        }
+    return {
+        "product_id": "",
+        "name": "",
+        "url": ficha_path(want_store, "") if want_store else "",
+        "price_normal": None,
+        "store": want_store,
+    }
+
+
+def append_best_price_observation(
+    repo: Any,
+    *,
+    list_id: str,
+    n: Any,
+    query: str,
+    summary: dict[str, Any] | None,
+    matches: list[dict[str, Any]] | None = None,
+    at: datetime | None = None,
+) -> dict[str, Any] | None:
+    """Registra un punto si el mejor precio/tienda/normal del día cambió (o es el primero).
+
+    Persistencia: colección `cyber_day_price_history`, clave lógica list_id + n + day
+    (día calendario America/Santiago). No duplica la última firma del mismo día.
+    """
+    price = _as_int((summary or {}).get("last_price"))
+    if price is None or price <= 0:
+        return None
+    try:
+        query_n = int(n)
+    except (TypeError, ValueError):
+        return None
+    lid = resolve_list_id(repo, list_id)
+    moment = at or _now()
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=timezone.utc)
+    day = _santiago_day_key(moment)
+    store = str((summary or {}).get("best_store") or "").strip()
+    price_normal = _as_int((summary or {}).get("last_price_normal"))
+    if price_normal is not None and price_normal <= 0:
+        price_normal = None
+    meta = _best_offer_meta(matches, price=price, store=store)
+    if price_normal is None:
+        price_normal = meta.get("price_normal")
+    if not store:
+        store = str(meta.get("store") or "").strip()
+
+    coll = history_collection(repo)
+    try:
+        last = coll.find_one(
+            {"list_id": lid, "n": query_n, "day": day},
+            sort=[("at", -1)],
+        )
+    except Exception as exc:
+        print(f"cyber-day: leer historial falló: {exc}", flush=True)
+        last = None
+    if last is not None:
+        same_price = _as_int(last.get("price")) == price
+        same_store = str(last.get("store") or "").strip() == store
+        same_normal = _as_int(last.get("price_normal")) == price_normal
+        if same_price and same_store and same_normal:
+            return None
+
+    doc: dict[str, Any] = {
+        "list_id": lid,
+        "n": query_n,
+        "query": str(query or "").strip(),
+        "day": day,
+        "at": moment,
+        "price": price,
+        "price_normal": price_normal,
+        "store": store or None,
+        "product_id": meta.get("product_id") or None,
+        "name": meta.get("name") or str(query or "").strip() or None,
+        "url": meta.get("url") or None,
+    }
+    try:
+        result = coll.insert_one(doc)
+        doc["id"] = str(result.inserted_id)
+    except Exception as exc:
+        print(f"cyber-day: guardar historial falló: {exc}", flush=True)
+        return None
+    return doc
+
+
+def day_evolution_report(
+    repo: Any,
+    n: Any,
+    *,
+    list_id: str | None = None,
+    day: str | None = None,
+) -> dict[str, Any]:
+    """Informe de evolución del día para una query Cyber (admin)."""
+    try:
+        query_n = int(n)
+    except (TypeError, ValueError) as exc:
+        raise CyberDayError("n inválido.") from exc
+    if query_n < 1:
+        raise CyberDayError("n inválido.")
+    lid = resolve_list_id(repo, list_id)
+    day_key = str(day or "").strip() or _santiago_day_key()
+    if len(day_key) != 10 or day_key[4] != "-" or day_key[7] != "-":
+        raise CyberDayError("day debe ser YYYY-MM-DD.")
+
+    product = products_collection(repo).find_one({"list_id": lid, "n": query_n})
+    if product is None:
+        # Legacy sin list_id en filas muy antiguas de la lista oficial.
+        if lid == CYBER_LIST_ID:
+            product = products_collection(repo).find_one({"n": query_n, "list_id": {"$in": [None, ""]}})
+    query = str((product or {}).get("query") or (product or {}).get("name") or "").strip()
+    category = str((product or {}).get("category") or "").strip()
+
+    rows = list(
+        history_collection(repo)
+        .find({"list_id": lid, "n": query_n, "day": day_key})
+        .sort([("at", 1)])
+    )
+    from retail.store_display import public_store_label
+
+    observations: list[dict[str, Any]] = []
+    offer_prices: list[int] = []
+    for row in rows:
+        price = _as_int(row.get("price"))
+        if price is None or price <= 0:
+            continue
+        normal = _as_int(row.get("price_normal"))
+        if normal is not None and normal <= 0:
+            normal = None
+        store = str(row.get("store") or "").strip() or None
+        offer_prices.append(price)
+        observations.append({
+            "at": _iso(row.get("at")),
+            "price": price,
+            "offer": price,
+            "price_normal": normal,
+            "normal": normal,
+            "store": store,
+            "store_title": public_store_label(store) if store else None,
+            "product_id": str(row.get("product_id") or "").strip() or None,
+            "name": str(row.get("name") or query or "").strip() or None,
+            "url": str(row.get("url") or "").strip() or None,
+            "day": day_key,
+        })
+
+    stats: dict[str, Any] | None = None
+    if offer_prices:
+        first = offer_prices[0]
+        current = offer_prices[-1]
+        change = current - first
+        if change == 0:
+            change_label = "Sin cambio"
+        elif change > 0:
+            change_label = f"+{_money_clp(abs(change))}"
+        else:
+            change_label = f"−{_money_clp(abs(change))}"
+        stats = {
+            "current": current,
+            "min": min(offer_prices),
+            "max": max(offer_prices),
+            "average": int(round(sum(offer_prices) / len(offer_prices))),
+            "first": first,
+            "count": len(offer_prices),
+            "change": change,
+            "change_label": change_label,
+        }
+
+    return {
+        "ok": True,
+        "list_id": lid,
+        "n": query_n,
+        "query": query,
+        "category": category,
+        "day": day_key,
+        "timezone": "America/Santiago",
+        "observations": observations,
+        "stats": stats,
+        "product": product_row_view({**product, "id": str(product["_id"])}) if product else None,
+    }
+
+
 def resolve_list_id(repo: Any, list_id: str | None = None) -> str:
     key = str(list_id or "").strip()
     if key:
@@ -1989,6 +2219,17 @@ def process_one(repo: Any, *, delay: float = 0.0, list_id: str | None = None) ->
 
         new_best = summary.get("last_price") if summary else None
         new_store = summary.get("best_store") if summary else None
+        history_point = None
+        if summary and new_best is not None:
+            history_point = append_best_price_observation(
+                repo,
+                list_id=lid,
+                n=item.get("n"),
+                query=query,
+                summary=summary,
+                matches=tracked,
+                at=now,
+            )
         coll.update_one(
             {"_id": item["_id"]},
             {
@@ -2013,6 +2254,7 @@ def process_one(repo: Any, *, delay: float = 0.0, list_id: str | None = None) ->
             "changed": changed,
             "notified": notified,
             "price": summary.get("last_price") if summary else None,
+            "history_recorded": bool(history_point),
         })
         if not tracked:
             run["last_error"] = f"Sin matches: {query}"

@@ -756,6 +756,31 @@ def cyber_day_restart(request: Request) -> dict:
         repo.close()
 
 
+@router.get("/api/admin/cyber-day/items/{n}/evolution")
+def cyber_day_item_evolution(n: int, request: Request) -> dict:
+    """Evolución de mejor precio Cyber del día (America/Santiago) para una query."""
+    current_user(request, admin=True)
+    repo = connect_repo()
+    if repo is None:
+        raise HTTPException(status_code=503, detail="MongoDB no está disponible.")
+    try:
+        from retail.cyber_day import CyberDayError, day_evolution_report
+
+        day = request.query_params.get("day")
+        return day_evolution_report(
+            repo,
+            n,
+            list_id=_cyber_list_param(request),
+            day=str(day).strip() if day else None,
+        )
+    except CyberDayError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Cyber Day evolution falló: {exc}") from exc
+    finally:
+        repo.close()
+
+
 @router.patch("/api/admin/cyber-day/items/{n}")
 @router.put("/api/admin/cyber-day/items/{n}")
 async def cyber_day_update_item(n: int, request: Request) -> dict:

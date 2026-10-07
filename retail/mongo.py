@@ -212,6 +212,7 @@ class ProductRepository:
         self.daily_real_offers = self.db["daily_real_offers"]
         self.cyber_day_products = self.db["cyber_day_products"]
         self.cyber_day_lists = self.db["cyber_day_lists"]
+        self.cyber_day_price_history = self.db["cyber_day_price_history"]
         self.app_requests = self.db[APP_REQUESTS_COLLECTION]
         self.short_links = self.db["short_links"]
         # Validar los mismos índices para cada producto agrega muchas idas a
@@ -493,6 +494,13 @@ class ProductRepository:
             quote_events.create_index(
                 [("quote_id", ASCENDING), ("at", ASCENDING)],
                 name="business_quote_event_quote_at",
+            )
+        except OperationFailure:
+            pass
+        try:
+            self.cyber_day_price_history.create_index(
+                [("list_id", ASCENDING), ("n", ASCENDING), ("day", ASCENDING), ("at", ASCENDING)],
+                name="cyber_history_list_n_day_at",
             )
         except OperationFailure:
             pass

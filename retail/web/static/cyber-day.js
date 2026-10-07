@@ -220,8 +220,9 @@
         <td>—</td>
         <td>—</td>
         <td>—</td>
+        <td>—</td>
         <td class="muted">seed local</td>
-      </tr>`).join("") || `<tr><td colspan="11" class="err">Sin seed local.</td></tr>`;
+      </tr>`).join("") || `<tr><td colspan="12" class="err">Sin seed local.</td></tr>`;
       }
       if (meta) {
         meta.textContent = `Error API: ${message}. Seed local: ${items.length} queries (solo lectura; reintentá Iniciar o recargá).`;
@@ -229,7 +230,7 @@
     } catch (seedError) {
       const body = el("cyber-products-body");
       if (body) {
-        body.innerHTML = `<tr><td colspan="11" class="err">Error al cargar: ${escapeHtml(message)} · seed: ${escapeHtml(seedError.message)}</td></tr>`;
+        body.innerHTML = `<tr><td colspan="12" class="err">Error al cargar: ${escapeHtml(message)} · seed: ${escapeHtml(seedError.message)}</td></tr>`;
       }
     }
     // Seed local: no arrancar worker; botones de control deshabilitados.
@@ -345,7 +346,7 @@
     if (wrap && body && !editingActive) {
       wrap.hidden = false;
       if (!rows.length) {
-        body.innerHTML = `<tr><td colspan="11" class="muted">Sin filas en la lista. Importá CSV/JSON o creá la lista con seed.</td></tr>`;
+        body.innerHTML = `<tr><td colspan="12" class="muted">Sin filas en la lista. Importá CSV/JSON o creá la lista con seed.</td></tr>`;
       } else {
         body.innerHTML = rows.map((row) => {
           const n = row.n ?? (row.order != null ? row.order + 1 : "");
@@ -353,6 +354,15 @@
           const offerUrl = String(row.best_offer_url || "").trim();
           const offerCell = offerUrl
             ? `<a href="${escapeHtml(offerUrl)}" target="_blank" rel="noopener">Ver oferta</a>`
+            : "—";
+          const evoParams = new URLSearchParams();
+          if (n !== "" && n != null) evoParams.set("n", String(n));
+          if (currentListId) evoParams.set("list", currentListId);
+          const evoHref = evoParams.has("n")
+            ? `/cyber-day/evolucion?${evoParams.toString()}`
+            : "";
+          const evoCell = evoHref
+            ? `<a href="${escapeHtml(evoHref)}">Informe</a>`
             : "—";
           return `
       <tr data-n="${escapeHtml(n)}">
@@ -376,6 +386,7 @@
         <td>${formatPrice(row.min_price_normal)}</td>
         <td>${formatPrice(row.max_offer_price)}</td>
         <td>${offerCell}</td>
+        <td>${evoCell}</td>
         <td class="muted">${escapeHtml(row.last_error || "")}</td>
       </tr>`;
         }).join("");
