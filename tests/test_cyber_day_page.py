@@ -45,7 +45,7 @@ def test_cyber_day_static_assets_exist():
     assert "Importar / actualizar lista activa" in html
     assert "reemplaza las queries" in html
     assert "cyber-day.js?v=20" in html
-    assert "styles.css?v=87" in html
+    assert "styles.css?v=88" in html
     assert "application/json; charset=utf-8" in js  # import raw JSON (no FormData/multipart)
     assert "new FormData()" not in js
     assert "<h1>Cyber</h1>" in html

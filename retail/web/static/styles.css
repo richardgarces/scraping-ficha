@@ -2176,10 +2176,30 @@ html[data-theme="day"] .panel { backdrop-filter: none; }
   filter: grayscale(0.2);
 }
 .table-wrap.scroll-x { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+/* Cyber Day: no encoger Query/Categoría; el wrap ya hace scroll-x. */
+#cyber-products-wrap .results {
+  min-width: 1680px;
+  width: max-content;
+  max-width: none;
+}
+#cyber-products-wrap .results th:nth-child(2),
+#cyber-products-wrap .results td:nth-child(2) {
+  min-width: 28rem;
+  white-space: normal;
+}
+#cyber-products-wrap .results th:nth-child(3),
+#cyber-products-wrap .results td:nth-child(3) {
+  min-width: 9rem;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
 input.cyber-query-input {
-  width: min(28rem, 100%);
-  min-width: 12rem;
+  display: block;
   box-sizing: border-box;
+  width: 100%;
+  min-width: 28rem;
+  /* Navegadores modernos: el input crece con el texto completo. */
+  field-sizing: content;
   padding: 0.35rem 0.5rem;
   border: 1px solid var(--line);
   border-radius: 8px;
