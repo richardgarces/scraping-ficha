@@ -32,38 +32,46 @@ def test_same_product_price_expires_after_exactly_five_days(repo, monkeypatch):
     assert not repo.claim_user_notification_send("u1", "email", "product:lider:p1", 1000)
 
 
-def test_price_round_trip_keeps_each_prices_original_expiration(repo, monkeypatch):
+def test_increase_inside_five_days_is_throttled_further_drop_is_not(repo, monkeypatch):
     assert repo.claim_user_notification_send("u1", "telegram", "tv", 1000)
     monkeypatch.setattr("retail.mongo._now", lambda: NOW + timedelta(days=1))
-    assert repo.claim_user_notification_send("u1", "telegram", "tv", 1200)
-    assert not repo.claim_user_notification_send("u1", "telegram", "tv", 1000)
-    monkeypatch.setattr("retail.mongo._now", lambda: NOW + timedelta(days=5))
-    assert repo.claim_user_notification_send("u1", "telegram", "tv", 1000)
+    # Subida dentro de la ventana: no reenviar.
     assert not repo.claim_user_notification_send("u1", "telegram", "tv", 1200)
+    # Nueva bajada: sí, aunque no hayan pasado 5 días.
+    assert repo.claim_user_notification_send("u1", "telegram", "tv", 900)
+    assert not repo.claim_user_notification_send("u1", "telegram", "tv", 950)
+    assert not repo.claim_user_notification_send("u1", "telegram", "tv", 900)
+    monkeypatch.setattr("retail.mongo._now", lambda: NOW + timedelta(days=6))
+    assert repo.claim_user_notification_send("u1", "telegram", "tv", 900)
     history = repo.user_notification_sends.find_one()["recent_sends"]
-    assert len(history) == 2
+    assert any(item.get("price") == 900 for item in history)
 
 
 def test_other_prices_products_users_and_channels_are_independent(repo):
     assert repo.claim_user_notification_send("u1", "email", "tv", 1000)
     assert repo.claim_user_notification_send("u1", "email", "tv", 999)
-    assert repo.claim_user_notification_send("u1", "email", "tv", 1100)
+    # Subida tras la última bajada: throttle de 5 días.
+    assert not repo.claim_user_notification_send("u1", "email", "tv", 1100)
     assert repo.claim_user_notification_send("u1", "email", "phone", 1000)
     assert repo.claim_user_notification_send("u2", "email", "tv", 1000)
     assert repo.claim_user_notification_send("u1", "push", "tv", 1000)
-    assert not repo.claim_user_notification_send("u1", "email", "tv", 1000)
+    assert not repo.claim_user_notification_send("u1", "email", "tv", 999)
 
 
-def test_existing_last_price_survives_first_send_at_another_price(repo, monkeypatch):
+def test_existing_last_price_blocks_same_or_higher_allows_further_drop(repo, monkeypatch):
     repo.user_notification_sends.insert_one({
         "user_id": "u1", "channel": "email", "entity_key": "tv",
         "last_price": 1000, "last_sent_at": NOW - timedelta(days=4),
     })
     assert not repo.claim_user_notification_send("u1", "email", "tv", 1000)
-    assert repo.claim_user_notification_send("u1", "email", "tv", 1200)
-    assert not repo.claim_user_notification_send("u1", "email", "tv", 1000)
+    assert not repo.claim_user_notification_send("u1", "email", "tv", 1200)
+    assert repo.claim_user_notification_send("u1", "email", "tv", 900)
+    assert not repo.claim_user_notification_send("u1", "email", "tv", 900)
     monkeypatch.setattr("retail.mongo._now", lambda: NOW + timedelta(days=1))
-    assert repo.claim_user_notification_send("u1", "email", "tv", 1000)
+    assert not repo.claim_user_notification_send("u1", "email", "tv", 900)
+    assert repo.claim_user_notification_send("u1", "email", "tv", 850)
+    monkeypatch.setattr("retail.mongo._now", lambda: NOW + timedelta(days=6))
+    assert repo.claim_user_notification_send("u1", "email", "tv", 850)
 
 
 @pytest.mark.parametrize("existing", [False, True])
@@ -89,14 +97,24 @@ def test_price_changes_ignore_previous_price_and_share_offer_history(repo):
     assert not repo.claim_price_alert_send("u1", "lider", "p1", 1000, 900, channel="telegram")
 
 
-def test_legacy_price_change_sends_block_any_previous_price_for_five_days(repo, monkeypatch):
+def test_legacy_price_change_sends_block_until_five_days_or_further_drop(repo, monkeypatch):
     repo.price_alert_sends.insert_one({
         "user_id": "u1", "store": "lider", "product_id": "p1",
         "previous_price": 2000, "price": 1000, "created_at": NOW - timedelta(days=4),
     })
     assert not repo.claim_price_alert_send("u1", "lider", "p1", 1200, 1000)
+    assert not repo.claim_price_alert_send("u1", "lider", "p1", 2000, 1100)
+    # Nueva bajada respecto al legacy: sí dentro de la ventana.
+    assert repo.claim_price_alert_send("u1", "lider", "p1", 1000, 900)
+
+    repo.price_alert_sends.insert_one({
+        "user_id": "u2", "store": "lider", "product_id": "p2",
+        "previous_price": 2000, "price": 1000, "created_at": NOW - timedelta(days=4),
+    })
+    assert not repo.claim_price_alert_send("u2", "lider", "p2", 1200, 1000)
     monkeypatch.setattr("retail.mongo._now", lambda: NOW + timedelta(days=1))
-    assert repo.claim_price_alert_send("u1", "lider", "p1", 2000, 1000)
+    # A los 5 días del legacy el mismo precio vuelve a poder enviarse.
+    assert repo.claim_price_alert_send("u2", "lider", "p2", 2000, 1000)
 
 
 def test_global_email_and_each_webhook_use_same_price_history(repo, monkeypatch):

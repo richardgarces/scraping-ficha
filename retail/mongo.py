@@ -3809,19 +3809,31 @@ class ProductRepository:
         *,
         channel: str = "email",
     ) -> bool:
-        """Comparte la ventana por producto/precio con los demás tipos de aviso."""
+        """Comparte la ventana 5 días / nueva bajada con los demás tipos de aviso."""
+        from retail.notification_throttle import should_send_price_notification
+
         if not user_id or not store or not product_id:
             return False
-        # Los envíos anteriores a esta regla incluían el precio de origen en
-        # su clave. Respetarlos aunque ahora el precio anterior sea distinto.
-        if self.price_alert_sends.find_one({
-            "user_id": str(user_id),
-            "store": store,
-            "product_id": product_id,
-            "price": int(price),
-            "created_at": {"$gt": _now() - timedelta(days=NOTIFICATION_COOLDOWN_DAYS)},
-        }, {"_id": 1}):
-            return False
+        # Documentos legacy en price_alert_sends: misma regla (solo reenviar si bajó más).
+        legacy = self.price_alert_sends.find_one(
+            {
+                "user_id": str(user_id),
+                "store": store,
+                "product_id": product_id,
+                "created_at": {"$gt": _now() - timedelta(days=NOTIFICATION_COOLDOWN_DAYS)},
+            },
+            {"price": 1, "created_at": 1},
+            sort=[("created_at", -1)],
+        )
+        if legacy is not None:
+            if not should_send_price_notification(
+                last_sent_at=legacy.get("created_at"),
+                last_notified_price=legacy.get("price"),
+                new_price=int(price),
+                now=_now(),
+                cooldown_days=NOTIFICATION_COOLDOWN_DAYS,
+            ):
+                return False
         product = self.collection.find_one(
             {"store": store, "product_id": product_id}, {"compare_code": 1},
         ) or {}
@@ -3838,13 +3850,16 @@ class ProductRepository:
         *,
         cooldown_days: int = NOTIFICATION_COOLDOWN_DAYS,
     ) -> bool:
-        """Reserva atómicamente producto/precio por destinatario y canal durante 5 días."""
+        """Reserva envío: cooldown 5 días, salvo nueva bajada vs último precio notificado."""
         from pymongo.errors import DuplicateKeyError
+
+        from retail.notification_throttle import mongo_claim_filter
 
         if not user_id or not channel or not entity_key:
             return False
         now = _now()
-        cutoff = now - timedelta(days=max(1, int(cooldown_days)))
+        days = max(1, int(cooldown_days))
+        cutoff = now - timedelta(days=days)
         price = int(price) if price is not None else None
         key = {
             "user_id": str(user_id),
@@ -3853,21 +3868,19 @@ class ProductRepository:
         }
         try:
             result = self.user_notification_sends.update_one(
-                {
-                    **key,
-                    "$nor": [
-                        {"recent_sends": {"$elemMatch": {"price": price, "sent_at": {"$gt": cutoff}}}},
-                        {"last_price": price, "last_sent_at": {"$gt": cutoff}},
-                    ],
-                },
+                mongo_claim_filter(
+                    user_id=user_id,
+                    channel=channel,
+                    entity_key=entity_key,
+                    price=price,
+                    cutoff=cutoff,
+                ),
                 [{"$set": {
                     **{field: {"$literal": value} for field, value in key.items()},
                     "created_at": {"$ifNull": ["$created_at", now]},
                     "last_sent_at": now,
                     "last_price": price,
-                    # Conservar todos los precios de la ventana evita repetir
-                    # A después de notificar B. También incorpora el historial
-                    # antiguo, que solo guardaba el último precio.
+                    # Historial de la ventana: sirve para deshacer un claim si el envío falla.
                     "recent_sends": {"$setUnion": [
                         {"$filter": {
                             "input": {"$concatArrays": [
