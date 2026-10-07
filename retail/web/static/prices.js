@@ -193,6 +193,40 @@ function priceTag(row) {
   return "";
 }
 
+/** Precio de lista publicado por la tienda (no el habitual calculado). */
+function publishedNormal(row) {
+  if (!row || row.precio_normal) return null;
+  const normal = Number(row.price_normal);
+  if (!Number.isFinite(normal) || normal <= 0) return null;
+  return normal;
+}
+
+/**
+ * Bloque Precio / Precio normal / Ahorro de las tarjetas deal.
+ * Muestra Precio normal solo cuando la tienda publicó `price_normal`.
+ */
+function dealPricesBlock({ price, savingHtml, normal = null }) {
+  const hasNormal = normal != null && Number(normal) > 0;
+  const normalCol = hasNormal
+    ? `<div>
+            <span class="deal-label">Precio normal</span>
+            <span class="price deal-normal">${money(normal)}</span>
+          </div>`
+    : "";
+  return `
+        <div class="deal-prices${hasNormal ? " has-normal" : ""}">
+          <div>
+            <span class="deal-label">Precio</span>
+            <span class="price">${money(price)}</span>
+          </div>
+          ${normalCol}
+          <div>
+            <span class="deal-label">Ahorro</span>
+            <span class="deal-saving">${savingHtml}</span>
+          </div>
+        </div>`;
+}
+
 /**
  * Escalera de precios de la tienda. Se omite cada peldaño que repite al anterior
  * para no mostrar tres veces la misma cifra.
@@ -204,8 +238,9 @@ function priceLadder(row) {
   if (needsCard(row) && row.price_internet && row.price_internet !== row.price) {
     lines.push(`<span>Internet ${money(row.price_internet)}</span>`);
   }
-  if (!row.precio_normal && row.price_normal && row.price_normal > (row.price ?? 0)) {
-    lines.push(`<span>Normal <span class="strike">${money(row.price_normal)}</span></span>`);
+  const normal = publishedNormal(row);
+  if (normal != null && normal > (row.price ?? 0)) {
+    lines.push(`<span>Normal <span class="strike">${money(normal)}</span></span>`);
   }
   return lines.length ? `<div class="ladder">${lines.join(" · ")}</div>` : "";
 }

@@ -208,7 +208,7 @@ def test_first_search_waits_for_stores_before_elige_tienda_error():
     # Ocultar filtros de resultado antes de validar tiendas (evita «Sin filtros» bajo el error).
     early = app.split("function runSearch(query)")[1].split("pendingSearchQuery = null;")[0]
     assert "setResultFiltersVisible(false);" in early
-    assert "app.js?v=58" in page
+    assert "app.js?v=59" in page
 
 
 def test_refresh_meta_still_fills_stores_if_explore_fails():

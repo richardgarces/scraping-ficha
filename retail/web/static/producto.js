@@ -1717,7 +1717,7 @@ function _ensurePricesScript() {
         return;
       }
       const s = document.createElement('script');
-      s.src = '/static/prices.js?v=35';
+      s.src = '/static/prices.js?v=36';
       s.async = false;
       s.onload = () => resolve();
       s.onerror = () => reject(new Error('No se pudo cargar prices.js'));

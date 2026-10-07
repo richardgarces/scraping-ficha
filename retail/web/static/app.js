@@ -918,16 +918,11 @@ function searchDealCard(row) {
           ${storeLogo(row.display_store || row.store, row.store_title || row.store)}
           <div class="deal-ctas">${cta}${offer}</div>
         </div>
-        <div class="deal-prices">
-          <div>
-            <span class="deal-label">Precio</span>
-            <span class="price">${money(row.price)}</span>
-          </div>
-          <div>
-            <span class="deal-label">Ahorro</span>
-            <span class="deal-saving">${saving ? money(saving) : "—"}${discountBadge(row)}</span>
-          </div>
-        </div>
+        ${dealPricesBlock({
+          price: row.price,
+          normal: publishedNormal(row),
+          savingHtml: `${saving ? money(saving) : "—"}${discountBadge(row)}`,
+        })}
         ${hints}
         ${reason ? `<p class="deal-reason"><span>Motivo</span> ${attr(reason)}</p>` : ""}
         <button type="button" class="watch-btn" data-code="${attr(row.compare_code)}" data-name="${attr(row.name)}" data-price="${row.price ?? ""}" data-store="${attr(row.store)}" data-id="${attr(row.product_id)}" data-following="false" aria-pressed="false">Seguir cambios</button>

@@ -1650,7 +1650,9 @@ button.secondary.current { background: var(--accent); color: var(--btn-ink); }
 }
 .deal-cta:hover { color: var(--accent); border-color: var(--accent); }
 .deal-prices { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: auto; }
+.deal-prices.has-normal { grid-template-columns: 1fr 1fr 1fr; }
 .deal-prices .price { display: block; }
+.deal-normal { color: var(--muted); font-weight: 700; font-variant-numeric: tabular-nums; }
 .deal-label { display: block; font-size: 11px; color: var(--muted); letter-spacing: 0.04em; text-transform: uppercase; margin-bottom: 2px; }
 .deal-saving { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; font-size: 20px; font-weight: 800; color: var(--saving); font-variant-numeric: tabular-nums; }
 .deal-reason { margin: 0; font-size: 12px; color: var(--muted); }

@@ -221,16 +221,11 @@ function dealCard(item) {
           ${storeLogo(item.display_store || item.store, item.store_title || item.store)}
           ${cta}
         </div>
-        <div class="deal-prices">
-          <div>
-            <span class="deal-label">Precio</span>
-            <span class="price">${money(item.price)}</span>
-          </div>
-          <div>
-            <span class="deal-label">Ahorro</span>
-            <span class="deal-saving">${item.saving ? money(item.saving) : "—"}${item.discount ? discountBadge(item.discount, 1) : ""}</span>
-          </div>
-        </div>
+        ${dealPricesBlock({
+          price: item.price,
+          normal: publishedNormal(item),
+          savingHtml: `${item.saving ? money(item.saving) : "—"}${item.discount ? discountBadge(item.discount, 1) : ""}`,
+        })}
         <p class="deal-reason"><span>Motivo</span> ${attr(ruleLabel(item.rule))}</p>
         ${analysis}
       </div>

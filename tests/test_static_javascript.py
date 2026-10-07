@@ -48,6 +48,24 @@ def test_search_cards_toggle_price_alerts_and_restore_after_error() -> None:
     assert "hydrateFollowingButtons()" in script
 
 
+def test_deal_cards_show_precio_normal_when_published() -> None:
+    prices = Path("retail/web/static/prices.js").read_text(encoding="utf-8")
+    app = Path("retail/web/static/app.js").read_text(encoding="utf-8")
+    hoy = Path("retail/web/static/hoy.js").read_text(encoding="utf-8")
+    styles = Path("retail/web/static/styles.css").read_text(encoding="utf-8")
+    index = Path("retail/web/static/index.html").read_text(encoding="utf-8")
+    assert "function publishedNormal(row)" in prices
+    assert "function dealPricesBlock(" in prices
+    assert "Precio normal" in prices
+    assert "dealPricesBlock({" in app
+    assert "publishedNormal(row)" in app
+    assert "dealPricesBlock({" in hoy
+    assert ".deal-prices.has-normal" in styles
+    assert "app.js?v=59" in index
+    assert "prices.js?v=36" in index
+    assert "styles.css?v=78-precio-normal" in index
+
+
 def test_product_page_has_contextual_back_link() -> None:
     page = Path("retail/web/static/producto.html").read_text(encoding="utf-8")
     script = Path("retail/web/static/producto.js").read_text(encoding="utf-8")
