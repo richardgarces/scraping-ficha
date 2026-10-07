@@ -30,6 +30,7 @@ from retail.cyber_day import (
     list_all_lists,
     load_seed_items,
     normalize_import_row,
+    notify_cyber_change,
     offer_signature,
     parse_products_payload,
     price_direction,
@@ -247,6 +248,86 @@ def test_query_best_price_change_up_and_down():
     assert offer_changes == []  # ripley es primera observación
     assert not _offer_change_covers_best(offer_changes, best)
     assert "ripley:new" in sigs
+
+
+def test_notify_cyber_change_reaches_all_subscribed_users(repo, monkeypatch):
+    """Push/Telegram Cyber van a usuarios finales suscritos, no solo admins."""
+    sent_tg: list[str] = []
+    sent_push: list[str] = []
+    admin_tg = {"n": 0}
+
+    users = [
+        {
+            "_id": "admin-1",
+            "role": "admin",
+            "status": "approved",
+            "telegram_chat_id": "111",
+            "notification_preferences": {"channels": ["telegram", "push"]},
+            "push_subscriptions": [{"endpoint": "https://push.example/admin"}],
+        },
+        {
+            "_id": "user-2",
+            "role": "user",
+            "status": "approved",
+            "telegram_chat_id": "222",
+            "notification_preferences": {"channels": ["telegram", "push"]},
+            "push_subscriptions": [{"endpoint": "https://push.example/user"}],
+        },
+        {
+            "_id": "user-3",
+            "role": "user",
+            "status": "approved",
+            "telegram_chat_id": "333",
+            "notification_preferences": {"channels": ["telegram"]},
+            # sin push
+        },
+    ]
+
+    monkeypatch.setattr(
+        "retail.price_alerts.notify_price_changes",
+        lambda *_a, **_k: 0,
+    )
+    monkeypatch.setattr(repo, "list_notification_users", lambda: users)
+    monkeypatch.setattr(
+        "retail.batch.alerts.bind_user_chats",
+        lambda *_a, **_k: None,
+    )
+    monkeypatch.setattr(
+        "retail.batch.alerts._telegram_text",
+        lambda *_a, **_k: admin_tg.__setitem__("n", admin_tg["n"] + 1) or True,
+    )
+    monkeypatch.setattr(
+        "retail.batch.alerts.send_to_user",
+        lambda user, *_a, **_k: sent_tg.append(str(user.get("_id"))) or True,
+    )
+    monkeypatch.setattr(
+        "retail.web_push.send_user_push",
+        lambda user, *_a, **_k: sent_push.append(str(user.get("_id"))) or True,
+    )
+    monkeypatch.setattr(
+        "retail.batch.rules.load_rules",
+        lambda: {"channels": ["telegram", "push", "email"]},
+    )
+    monkeypatch.setattr(
+        repo,
+        "claim_user_notification_send",
+        lambda *_a, **_k: True,
+    )
+
+    change = {
+        "store": "falabella",
+        "product_id": "iphone-x",
+        "name": "iPhone",
+        "previous_price": 800000,
+        "price": 700000,
+        "query": "iPhone",
+        "image_url": "",
+    }
+    total = notify_cyber_change(repo, change)
+    assert admin_tg["n"] == 1
+    assert set(sent_tg) == {"admin-1", "user-2", "user-3"}
+    assert set(sent_push) == {"admin-1", "user-2"}
+    assert total >= 1 + len(sent_tg) + len(sent_push)
 
 
 def test_price_direction_streak_and_patch():

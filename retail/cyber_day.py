@@ -1523,36 +1523,92 @@ def _offer_change_covers_best(changes: list[dict[str, Any]], best_change: dict[s
     return False
 
 
+def _cyber_product_entity_key(repo: Any, store: str, product_id: str) -> str:
+    """Misma clave que price_alerts/claim_price_alert_send para no duplicar envíos."""
+    fallback = f"product:{store}:{product_id}" if store and product_id else "cyber:unknown"
+    collection = getattr(repo, "collection", None)
+    if collection is None or not store or not product_id:
+        return fallback
+    try:
+        product = collection.find_one(
+            {"store": store, "product_id": product_id},
+            {"compare_code": 1},
+        ) or {}
+    except Exception:
+        return fallback
+    return str(product.get("compare_code") or fallback)
+
+
+def _cyber_notification_users(repo: Any) -> list[dict[str, Any]]:
+    """Cuentas aprobadas con canales personales (Telegram/push), no solo admins."""
+    if hasattr(repo, "list_notification_users"):
+        try:
+            return list(repo.list_notification_users() or [])
+        except Exception as exc:
+            print(f"cyber-day: list_notification_users falló: {exc}", flush=True)
+    users = getattr(repo, "users", None)
+    if users is None:
+        return []
+    try:
+        return list(users.find({"status": "approved"}))
+    except Exception as exc:
+        print(f"cyber-day: lectura de usuarios falló: {exc}", flush=True)
+        return []
+
+
 def notify_cyber_change(repo: Any, change: dict[str, Any]) -> int:
-    """Telegram admin + push admin + alertas a quienes siguen (subidas y bajadas)."""
+    """Telegram admin + Telegram/push a todas las cuentas suscritas (subidas y bajadas)."""
     sent = 0
     store = str(change.get("store") or "")
     product_id = str(change.get("product_id") or "")
     price = int(change.get("price") or 0)
     previous = _as_int(change.get("previous_price"))
-    entity = f"cyber:{store}:{product_id}"
+    admin_entity = f"cyber:{store}:{product_id}"
+    entity_key = _cyber_product_entity_key(repo, store, product_id)
     direction = _price_move_label(previous, price)
     from retail.price_alerts import notify_price_changes, price_change_message
 
+    # Seguidores del producto (email/telegram/push vía price_alerts).
     try:
         sent += int(notify_price_changes(repo, [change]) or 0)
     except Exception as exc:
         print(f"cyber-day: notify followers falló: {exc}", flush=True)
 
+    users = _cyber_notification_users(repo)
     try:
-        from retail.batch.alerts import _telegram_text
+        from retail.batch.alerts import bind_user_chats, _telegram_text, send_to_user
+
+        # Excluye chats personales del broadcast admin (evita doble Telegram).
+        bind_user_chats(repo, users)
 
         claimed = True
         if hasattr(repo, "claim_user_notification_send"):
-            claimed = repo.claim_user_notification_send("cyber_day", "telegram", entity, price)
-        if claimed:
-            _, body = price_change_message(change)
-            query = str(change.get("query") or "")
-            prefix = f"Cyber Day · {query}\n\n" if query else "Cyber Day · cambio de precio\n\n"
-            if _telegram_text(prefix + body, image_url=change.get("image_url")):
+            claimed = repo.claim_user_notification_send("cyber_day", "telegram", admin_entity, price)
+        _, body = price_change_message(change)
+        query = str(change.get("query") or "")
+        prefix = f"Cyber Day · {query}\n\n" if query else "Cyber Day · cambio de precio\n\n"
+        text = prefix + body
+        image_url = change.get("image_url")
+        if claimed and _telegram_text(text, image_url=image_url):
+            sent += 1
+
+        # Telegram personal: toda cuenta aprobada con Telegram vinculado.
+        for user in users:
+            user_id = str(user.get("_id") or user.get("id") or "")
+            if not user_id:
+                continue
+            prefs = user.get("notification_preferences") or {}
+            channels = prefs.get("channels") or []
+            # Sin preferencias explícitas: si tiene chat, avisar (igual que “vinculó Telegram”).
+            if channels and "telegram" not in channels:
+                continue
+            if hasattr(repo, "claim_user_notification_send"):
+                if not repo.claim_user_notification_send(user_id, "telegram", entity_key, price):
+                    continue
+            if send_to_user(user, text, image_url=image_url):
                 sent += 1
     except Exception as exc:
-        print(f"cyber-day: telegram admin falló: {exc}", flush=True)
+        print(f"cyber-day: telegram falló: {exc}", flush=True)
 
     try:
         from retail.batch.rules import load_rules
@@ -1561,29 +1617,34 @@ def notify_cyber_change(repo: Any, change: dict[str, Any]) -> int:
         system_channels = set(load_rules().get("channels") or [])
         if "push" not in system_channels:
             print("cyber-day: push omitido (canal push desactivado en reglas)", flush=True)
-        else:
-            users = getattr(repo, "users", None)
-            if users is not None:
-                for user in users.find({"role": "admin", "status": "approved"}):
-                    prefs = user.get("notification_preferences") or {}
-                    if "push" not in (prefs.get("channels") or []) or not user.get("push_subscriptions"):
-                        continue
-                    user_id = str(user.get("_id"))
-                    if hasattr(repo, "claim_user_notification_send"):
-                        if not repo.claim_user_notification_send(user_id, "push", entity, price):
-                            continue
-                    payload = {
-                        **change,
-                        "message": change.get("message")
-                        or (
-                            f"Cyber Day: {change.get('name')} {direction} "
-                            f"{_money_clp(previous)} → {_money_clp(price)}"
-                        ),
-                    }
-                    if send_user_push(user, payload, repo=repo, tag=entity):
-                        sent += 1
+            return sent
+
+        payload = {
+            **change,
+            "message": change.get("message")
+            or (
+                f"Cyber Day: {change.get('name')} {direction} "
+                f"{_money_clp(previous)} → {_money_clp(price)}"
+            ),
+        }
+        # Push: toda cuenta aprobada con suscripción activa (no solo admin).
+        for user in users:
+            prefs = user.get("notification_preferences") or {}
+            channels = prefs.get("channels") or []
+            if channels and "push" not in channels:
+                continue
+            if not user.get("push_subscriptions"):
+                continue
+            user_id = str(user.get("_id") or user.get("id") or "")
+            if not user_id:
+                continue
+            if hasattr(repo, "claim_user_notification_send"):
+                if not repo.claim_user_notification_send(user_id, "push", entity_key, price):
+                    continue
+            if send_user_push(user, payload, repo=repo, tag=entity_key):
+                sent += 1
     except Exception as exc:
-        print(f"cyber-day: push admin falló: {exc}", flush=True)
+        print(f"cyber-day: push falló: {exc}", flush=True)
     return sent
 
 
