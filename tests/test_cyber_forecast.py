@@ -11,6 +11,7 @@ from retail.cyber_day import (
     CYBER_GROUP_ID,
     append_best_price_observation,
     create_list,
+    day_evolution_report,
     ensure_seed,
 )
 from retail.cyber_forecast import (
@@ -22,6 +23,7 @@ from retail.cyber_forecast import (
     cyber_product_keys,
     ensure_forecast_for_product,
     ensure_cyber_list_forecasts,
+    experimental_forecast_for_cyber_query,
     feed_cyber_observation_to_product_history,
     forecast_cyber_list_ids,
     latest_forecast,
@@ -335,6 +337,47 @@ def test_record_cyber_lap_samples_feeds_even_if_price_unchanged(repo):
     assert second["inserted"] == 0  # misma vuelta + día
     assert third["inserted"] == 1
     assert cyber_change_count(repo, store, product_id, list_ids=["cyber_oct2026"]) >= 2
+
+
+def test_experimental_forecast_for_cyber_query_from_day_history(repo):
+    ensure_seed(repo)
+    create_list(repo, name="Cyber Oct 2026", slug="cyber_oct2026", use_seed=False)
+    store, product_id = "falabella", "EVO-TV"
+    repo.cyber_day_products.insert_one({
+        "list_id": "cyber_oct2026",
+        "n": 4,
+        "order": 4,
+        "query": "TV OLED",
+        "last_price": 480_000,
+        "best_store": store,
+        "last_product_id": product_id,
+    })
+    for index in range(CYBER_FORECAST_MIN_OBSERVATIONS + 1):
+        repo.cyber_day_price_history.insert_one({
+            "list_id": "cyber_oct2026",
+            "n": 4,
+            "query": "TV OLED",
+            "day": "2026-10-06",
+            "at": NOW + timedelta(minutes=index * 20),
+            "price": 500_000 - index * 5000,
+            "store": store,
+            "product_id": product_id,
+        })
+    payload = experimental_forecast_for_cyber_query(
+        repo,
+        list_id="cyber_oct2026",
+        n=4,
+        current_price=480_000,
+    )
+    assert payload["ok"] is True
+    assert payload["source"] == "query_history"
+    assert payload["summary"] is not None
+    assert payload["summary"]["model"] == CYBER_EVENT_MODEL
+    assert payload["summary"]["buy_advice"]["advice"] in {"comprar", "esperar", "observar"}
+    report = day_evolution_report(repo, 4, list_id="cyber_oct2026", day="2026-10-06")
+    assert report["forecast"]["summary"]["model"] == CYBER_EVENT_MODEL
+    assert report["forecast"]["summary"]["range_low"] is not None
+    assert report["forecast"]["summary"]["range_high"] is not None
 
 
 def test_prepare_cyber_event_without_30_calendar_days(repo):

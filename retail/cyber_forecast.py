@@ -1053,3 +1053,206 @@ def maybe_refresh_after_cyber_observation(
             prefer_cyber_event=True,
         )
     return {"fed_history": fed, "cyber_changes": changes, "forecast": forecast_result}
+
+
+def cyber_history_points_for_query(
+    repo: Any,
+    list_id: str,
+    n: Any,
+) -> list[dict[str, Any]]:
+    """Observaciones Cyber de una query (día actual + muestras previas del evento)."""
+    from retail.cyber_day import history_collection, resolve_list_id
+
+    try:
+        query_n = int(n)
+    except (TypeError, ValueError):
+        return []
+    if query_n < 1:
+        return []
+    lid = resolve_list_id(repo, list_id)
+    points: list[dict[str, Any]] = []
+    for row in history_collection(repo).find({"list_id": lid, "n": query_n}).sort([("at", 1)]):
+        price = _as_int(row.get("price"))
+        if price is None:
+            continue
+        at = row.get("at")
+        if not isinstance(at, datetime):
+            continue
+        if at.tzinfo is None:
+            at = at.replace(tzinfo=timezone.utc)
+        normal = _as_int(row.get("price_normal"))
+        points.append({
+            "price": price,
+            "price_offer": price,
+            "price_normal": normal,
+            "price_basis": "all_payment",
+            "scraped_at": at,
+            "source": "cyber_day",
+            "cyber_list_id": row.get("list_id"),
+            "cyber_n": row.get("n"),
+            "cyber_day": row.get("day") or _day_key(at),
+            "store": _norm_store(row.get("store")),
+            "product_id": _norm_product_id(row.get("product_id")),
+        })
+    return points
+
+
+def resolve_cyber_query_product_identity(
+    product: dict[str, Any] | None,
+    history_points: list[dict[str, Any]] | None = None,
+    day_observations: list[dict[str, Any]] | None = None,
+) -> tuple[str, str]:
+    """Resuelve store:product_id desde la query Cyber o sus observaciones."""
+    if isinstance(product, dict):
+        store = _norm_store(product.get("best_store"))
+        product_id = _norm_product_id(product.get("last_product_id"))
+        if store and product_id:
+            return store, product_id
+        for match_store, match_pid in _match_keys_from_last_matches(product.get("last_matches")):
+            if match_store and match_pid:
+                return match_store, match_pid
+    for source in (day_observations or [], history_points or []):
+        for row in reversed(list(source)):
+            if not isinstance(row, dict):
+                continue
+            store = _norm_store(row.get("store"))
+            product_id = _norm_product_id(row.get("product_id"))
+            if store and product_id:
+                return store, product_id
+    return "", ""
+
+
+def _summary_from_cyber_points(
+    points: list[dict[str, Any]],
+    *,
+    current_price: Any = None,
+    store: str = "",
+    product_id: str = "",
+    list_id: str = "",
+) -> dict[str, Any] | None:
+    """Construye un resumen experimental a partir de puntos Cyber (sin persistir)."""
+    from retail.forecast_presentation import forecast_summary
+
+    if len(points) < CYBER_FORECAST_MIN_OBSERVATIONS:
+        return None
+    prices = [float(point["price"]) for point in points]
+    times = [point["scraped_at"] for point in points if isinstance(point.get("scraped_at"), datetime)]
+    first_at = times[0] if times else _now()
+    last_at = times[-1] if times else _now()
+    span_seconds = max(0.0, (last_at - first_at).total_seconds())
+    horizon = remaining_cyber_horizon(points)
+    point_forecast = project_cyber_event_prices(prices, horizon=horizon, span_seconds=span_seconds)
+    current = float(current_price) if _as_int(current_price) else prices[-1]
+    advice = cyber_buy_advice(current=current, prices=prices, point_forecast=point_forecast)
+    doc = {
+        "forecast_key": f"{store}:{product_id}" if store and product_id else f"cyber_query:{list_id}",
+        "store": store,
+        "product_id": product_id,
+        "horizon": horizon,
+        "generated_at": _now(),
+        "model": CYBER_EVENT_MODEL,
+        "point_forecast": point_forecast,
+        "quantiles": {},
+        "buy_advice": advice,
+        "metadata": {
+            "source": "cyber_day_evolution",
+            "mode": "cyber_event",
+            "observation_count": len(prices),
+            "cyber_observation_count": len(points),
+            "cyber_list_ids": [list_id] if list_id else [],
+            "cyber_event_days": CYBER_EVENT_DAYS,
+            "cyber_distinct_days": cyber_distinct_days(points),
+            "cyber_span_seconds": span_seconds,
+            "buy_advice": advice,
+            "ephemeral": True,
+        },
+    }
+    return forecast_summary(doc, current)
+
+
+def experimental_forecast_for_cyber_query(
+    repo: Any,
+    *,
+    list_id: str,
+    n: Any,
+    product: dict[str, Any] | None = None,
+    day_observations: list[dict[str, Any]] | None = None,
+    current_price: Any = None,
+) -> dict[str, Any]:
+    """Pronóstico experimental para el informe diario Cyber de una query.
+
+    Prioridad:
+    1. Serie densa de la query (día + muestras Cyber previas) → cyber_event_trend
+    2. Pronóstico guardado del producto vinculado (si existe)
+    3. Estado vacío con motivo si faltan observaciones
+    """
+    from retail.cyber_day import resolve_list_id
+    from retail.forecast_presentation import forecast_summary
+
+    lid = resolve_list_id(repo, list_id)
+    history_points = cyber_history_points_for_query(repo, lid, n)
+    store, product_id = resolve_cyber_query_product_identity(
+        product, history_points, day_observations,
+    )
+    current = _as_int(current_price)
+    if current is None and history_points:
+        current = _as_int(history_points[-1].get("price"))
+    if current is None and isinstance(product, dict):
+        current = _as_int(product.get("last_price"))
+
+    query_summary = _summary_from_cyber_points(
+        history_points,
+        current_price=current,
+        store=store,
+        product_id=product_id,
+        list_id=lid,
+    )
+    if query_summary is not None:
+        return {
+            "ok": True,
+            "summary": query_summary,
+            "source": "query_history",
+            "store": store or None,
+            "product_id": product_id or None,
+            "observation_count": len(history_points),
+            "empty_reason": None,
+        }
+
+    stored_summary = None
+    if store and product_id:
+        existing = latest_forecast(repo, store, product_id)
+        if existing is not None and str(existing.get("model") or "").lower() != "simulated":
+            stored_summary = forecast_summary(existing, current)
+    if stored_summary is not None:
+        return {
+            "ok": True,
+            "summary": stored_summary,
+            "source": "stored_forecast",
+            "store": store,
+            "product_id": product_id,
+            "observation_count": len(history_points),
+            "empty_reason": None,
+        }
+
+    needed = CYBER_FORECAST_MIN_OBSERVATIONS
+    have = len(history_points)
+    if have <= 0:
+        empty_reason = (
+            "Todavía no hay precios del día para estimar un pronóstico. "
+            "Cuando el worker registre observaciones Cyber, aparecerá aquí."
+        )
+    else:
+        empty_reason = (
+            f"Aún hay pocas observaciones ({have} de {needed} mínimas) para un "
+            "pronóstico confiable de la ventana Cyber. Seguí el informe cuando "
+            "haya más vueltas."
+        )
+    return {
+        "ok": True,
+        "summary": None,
+        "source": "none",
+        "store": store or None,
+        "product_id": product_id or None,
+        "observation_count": have,
+        "empty_reason": empty_reason,
+    }

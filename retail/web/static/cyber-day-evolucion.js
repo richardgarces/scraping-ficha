@@ -256,6 +256,73 @@
     return "middle";
   }
 
+  const FORECAST_TRENDS = {
+    down: ["Probable baja", "El precio estimado es menor que el actual."],
+    up: ["Probable alza", "El precio estimado es mayor que el actual."],
+    stable: ["Probablemente estable", "No se estima un cambio importante."],
+  };
+
+  const FORECAST_CONFIDENCE = { low: "Baja", medium: "Media", high: "Alta" };
+
+  const FORECAST_BUY = {
+    comprar: { className: "forecast-buy-yes", fallback: "Conviene comprar" },
+    esperar: { className: "forecast-buy-wait", fallback: "Mejor esperar" },
+    observar: { className: "forecast-buy-watch", fallback: "Sin señal clara" },
+  };
+
+  function forecastDate(value) {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "Fecha no disponible";
+    return date.toLocaleString("es-CL", {
+      dateStyle: "medium",
+      timeStyle: "short",
+      timeZone: SANTIAGO_TZ,
+    });
+  }
+
+  function buyAdviceMarkup(summary) {
+    const advice = summary && summary.buy_advice;
+    if (!advice || !advice.advice) return "";
+    const meta = FORECAST_BUY[advice.advice] || FORECAST_BUY.observar;
+    const label = advice.label || meta.fallback;
+    const reason = advice.reason || "";
+    return `
+      <div class="forecast-buy ${attr(meta.className)}" role="status">
+        <span>¿Conviene comprar en Cyber?</span>
+        <strong>${attr(label)}</strong>
+        <small>${attr(reason)}</small>
+      </div>`;
+  }
+
+  function renderForecast(payload) {
+    const box = $("cyber-evo-forecast-content");
+    if (!box) return;
+    const forecast = payload && payload.forecast;
+    const summary = forecast && forecast.summary;
+    if (!summary) {
+      const empty = (forecast && forecast.empty_reason)
+        || "Todavía no hay suficientes precios del día para un pronóstico experimental.";
+      box.innerHTML = `<p class="muted">${attr(empty)}</p>`;
+      return;
+    }
+    const trend = FORECAST_TRENDS[summary.trend] || FORECAST_TRENDS.stable;
+    const isCyber = summary.mode === "cyber_event" || summary.model === "cyber_event_trend";
+    const rangeNote = summary.range_has_uncertainty
+      ? "Rango de incertidumbre calculado por el modelo."
+      : "Banda entre los valores proyectados para el resto de la ventana Cyber.";
+    const horizonNote = isCyber
+      ? `${summary.horizon_days} día${summary.horizon_days === 1 ? "" : "s"} restantes de ventana Cyber · ${summary.observation_count || 0} observaciones`
+      : `${summary.horizon_days} días estimados · ${summary.observation_count || 0} días analizados`;
+    box.innerHTML = `
+      ${buyAdviceMarkup(summary)}
+      <div class="forecast-grid">
+        <div class="forecast-stat"><span>Tendencia probable</span><strong class="forecast-${attr(summary.trend)}">${attr(trend[0])}</strong><small>${attr(trend[1])}</small></div>
+        <div class="forecast-stat"><span>Rango esperado</span><strong>${money(summary.range_low)} – ${money(summary.range_high)}</strong><small>${attr(rangeNote)}</small></div>
+        <div class="forecast-stat"><span>Nivel de confianza</span><strong>${attr(FORECAST_CONFIDENCE[summary.confidence] || "Baja")}</strong><small title="${attr(summary.confidence_reason || "")}">${attr(summary.confidence_reason || "")}</small></div>
+        <div class="forecast-stat"><span>Generado</span><strong>${attr(forecastDate(summary.generated_at))}</strong><small>${attr(horizonNote)}</small></div>
+      </div>`;
+  }
+
   function renderChart(payload) {
     const observations = (payload.observations || []).map((row) => ({
       ...row,
@@ -396,9 +463,14 @@
         ].filter(Boolean).join(" · ");
       }
       renderChart(payload);
+      renderForecast(payload);
     } catch (error) {
       showFlash(error.message || String(error), false);
       $("cyber-evo-meta").textContent = "No se pudo cargar el informe.";
+      const forecastBox = $("cyber-evo-forecast-content");
+      if (forecastBox) {
+        forecastBox.innerHTML = `<p class="muted">No se pudo cargar el pronóstico experimental.</p>`;
+      }
     }
   }
 

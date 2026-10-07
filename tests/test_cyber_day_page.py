@@ -74,14 +74,19 @@ def test_cyber_day_static_assets_exist():
     evo_html = (root / "cyber-day-evolucion.html").read_text(encoding="utf-8")
     evo_js = (root / "cyber-day-evolucion.js").read_text(encoding="utf-8")
     assert "Evolución del precio" in evo_html
-    assert "cyber-day-evolucion.js?v=2" in evo_html
-    assert "styles.css?v=89" in evo_html
+    assert "cyber-day-evolucion.js?v=3" in evo_html
+    assert "styles.css?v=90" in evo_html
     assert "chart-observations" in evo_html
+    assert "Pronóstico experimental" in evo_html
+    assert "cyber-evo-forecast" in evo_html
     assert "Menor valor" in evo_js
     assert "Mayor descuento" in evo_js
     assert "Tienda:" in evo_js
     assert "/api/admin/cyber-day/items/" in evo_js
     assert "evolution" in evo_js
+    assert "renderForecast" in evo_js
+    assert "Conviene comprar" in evo_js
+    assert "Mejor esperar" in evo_js
     assert "cyber-delete-list" in js
     assert 'method: "DELETE"' in js
     assert "cyber-query-input" in js
@@ -159,10 +164,16 @@ def test_cyber_day_update_item_api_admin(monkeypatch, mongo_uri):
         assert evo_payload["list_id"] == "cyber_junio2026"
         assert evo_payload["timezone"] == "America/Santiago"
         assert isinstance(evo_payload["observations"], list)
+        assert "forecast" in evo_payload
+        assert evo_payload["forecast"]["ok"] is True
+        assert evo_payload["forecast"]["summary"] is None or isinstance(
+            evo_payload["forecast"]["summary"], dict
+        )
         monkeypatch.setattr("retail.web.app.require_admin_html", lambda *a, **k: None)
         page = client.get("/cyber-day/evolucion?list=cyber_junio2026&n=1")
         assert page.status_code == 200
         assert "Evolución del precio" in page.text
+        assert "Pronóstico experimental" in page.text
     finally:
         repo.close = real_close
         real_close()

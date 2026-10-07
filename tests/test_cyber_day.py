@@ -849,6 +849,11 @@ def test_append_best_price_observation_dedupes_same_day(repo):
     assert report["extremes"]["mayor_descuento"]["value"] == 30000
     assert report["extremes"]["menor_descuento"]["value"] == 20000
     assert all(obs.get("store_title") for obs in report["observations"])
+    assert report["forecast"]["ok"] is True
+    # Con solo 2 puntos del día aún no alcanza el mínimo experimental.
+    assert report["forecast"]["summary"] is None
+    empty_reason = (report["forecast"]["empty_reason"] or "").lower()
+    assert "pocas observaciones" in empty_reason or "mínimas" in empty_reason
 
 
 def test_parse_import_json_and_csv():

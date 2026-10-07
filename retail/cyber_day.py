@@ -668,6 +668,28 @@ def day_evolution_report(
             "current_store_title": current_obs.get("store_title"),
         }
 
+    forecast_payload: dict[str, Any] | None = None
+    try:
+        from retail.cyber_forecast import experimental_forecast_for_cyber_query
+
+        forecast_payload = experimental_forecast_for_cyber_query(
+            repo,
+            list_id=lid,
+            n=query_n,
+            product=product,
+            day_observations=observations,
+            current_price=(stats or {}).get("current") if stats else None,
+        )
+    except Exception as exc:
+        print(f"cyber-day: forecast del informe falló: {exc}", flush=True)
+        forecast_payload = {
+            "ok": False,
+            "summary": None,
+            "source": "none",
+            "observation_count": 0,
+            "empty_reason": "El pronóstico experimental no está disponible temporalmente.",
+        }
+
     return {
         "ok": True,
         "list_id": lid,
@@ -679,6 +701,7 @@ def day_evolution_report(
         "observations": observations,
         "stats": stats,
         "extremes": extremes,
+        "forecast": forecast_payload,
         "product": product_row_view({**product, "id": str(product["_id"])}) if product else None,
     }
 
