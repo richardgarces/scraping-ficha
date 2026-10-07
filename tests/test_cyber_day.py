@@ -350,26 +350,63 @@ def test_price_direction_streak_and_patch():
     # Dirección real manda si el estado guardado no coincide
     assert price_direction(80, 90, last_delta_direction="up", delta_streak=3) == "down"
 
-    first_drop = _prev_best_price_patch({"last_price": 100}, 90)
+    first_drop = _prev_best_price_patch(
+        {"last_price": 100, "best_store": "falabella"},
+        90,
+        "paris",
+    )
     assert first_drop == {
         "prev_best_price": 100,
         "last_delta_direction": "down",
         "delta_streak": 1,
+        "prev_best_store": "falabella",
     }
+    # Segunda baja misma tienda: racha 2, no pisa prev_best_store
     second_drop = _prev_best_price_patch(
-        {"last_price": 90, "last_delta_direction": "down", "delta_streak": 1},
+        {
+            "last_price": 90,
+            "best_store": "paris",
+            "last_delta_direction": "down",
+            "delta_streak": 1,
+            "prev_best_store": "falabella",
+        },
         80,
+        "paris",
     )
     assert second_drop["last_delta_direction"] == "down"
     assert second_drop["delta_streak"] == 2
     assert second_drop["prev_best_price"] == 90
+    assert "prev_best_store" not in second_drop
+
+    # Nueva tienda gana la baja: actualiza prev a la ganadora anterior
+    third_drop = _prev_best_price_patch(
+        {
+            "last_price": 80,
+            "best_store": "paris",
+            "last_delta_direction": "down",
+            "delta_streak": 2,
+            "prev_best_store": "falabella",
+        },
+        70,
+        "ripley",
+    )
+    assert third_drop["delta_streak"] == 3
+    assert third_drop["prev_best_store"] == "paris"
 
     rebound_up = _prev_best_price_patch(
-        {"last_price": 80, "last_delta_direction": "down", "delta_streak": 2},
+        {
+            "last_price": 70,
+            "best_store": "ripley",
+            "last_delta_direction": "down",
+            "delta_streak": 3,
+            "prev_best_store": "paris",
+        },
         95,
+        "ripley",
     )
     assert rebound_up["last_delta_direction"] == "up"
     assert rebound_up["delta_streak"] == 1
+    assert rebound_up["prev_best_store"] is None
 
     again_up = _prev_best_price_patch(
         {"last_price": 95, "last_delta_direction": "up", "delta_streak": 1},
@@ -377,9 +414,16 @@ def test_price_direction_streak_and_patch():
     )
     assert again_up["delta_streak"] == 2
     assert again_up["last_delta_direction"] == "up"
+    assert again_up["prev_best_store"] is None
 
     unchanged = _prev_best_price_patch(
-        {"last_price": 110, "last_delta_direction": "up", "delta_streak": 2, "prev_best_price": 95},
+        {
+            "last_price": 110,
+            "last_delta_direction": "up",
+            "delta_streak": 2,
+            "prev_best_price": 95,
+            "prev_best_store": "paris",
+        },
         110,
     )
     assert unchanged == {}
@@ -389,10 +433,15 @@ def test_price_direction_streak_and_patch():
         "prev_best_price": 90,
         "last_delta_direction": "down",
         "delta_streak": 2,
+        "best_store": "paris",
+        "prev_best_store": "falabella",
     })
     assert view["price_direction"] == "down_again"
     assert view["last_delta_direction"] == "down"
     assert view["delta_streak"] == 2
+    assert view["best_store"] == "paris"
+    assert view["prev_best_store"] == "falabella"
+    assert view["prev_best_store_title"]
 
 
 def test_match_stats_todo_medio_and_product_row_view():

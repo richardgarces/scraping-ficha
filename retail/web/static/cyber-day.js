@@ -94,6 +94,24 @@
   }
 
   /**
+   * Celda TIENDA MEJOR PRECIO:
+   * Con racha de bajas ≥2 y tienda previa distinta: `Actual (previa)`.
+   * Si no hay previa o es la misma: solo la actual.
+   */
+  function bestStoreCellText(row) {
+    const current = String(row?.best_store_title || row?.best_store || "").trim();
+    if (!current) return "—";
+    const prev = String(row?.prev_best_store_title || row?.prev_best_store || "").trim();
+    const streak = Number(row?.delta_streak) || 0;
+    const dir = String(row?.last_delta_direction || row?.price_direction || "");
+    const downStreak = streak >= 2 && (dir === "down" || dir === "down_again");
+    if (prev && downStreak && prev.toLowerCase() !== current.toLowerCase()) {
+      return `${current} (${prev})`;
+    }
+    return current;
+  }
+
+  /**
    * Celda MEJOR PRECIO:
    * verde=bajó, azul=volvió a bajar, rojo=subió, naranjo=volvió a subir,
    * blanco=sin cambio/primer precio. Flecha ↑/↓ = última acción.
@@ -329,8 +347,6 @@
           const offerCell = offerUrl
             ? `<a href="${escapeHtml(offerUrl)}" target="_blank" rel="noopener">Ver oferta</a>`
             : "—";
-          const storeName = String(row.best_store_title || row.best_store || "").trim();
-          const storeCell = storeName || "—";
           return `
       <tr data-n="${escapeHtml(n)}">
         <td>${escapeHtml(n || "—")}</td>
@@ -347,7 +363,7 @@
         </td>
         <td>${escapeHtml(row.category || "—")}</td>
         ${priceCellHtml(row)}
-        <td>${escapeHtml(storeCell)}</td>
+        <td>${escapeHtml(bestStoreCellText(row))}</td>
         <td>${escapeHtml(row.stores_scraped != null ? row.stores_scraped : 0)}</td>
         <td>${formatPrice(row.max_price_normal)}</td>
         <td>${formatPrice(row.min_price_normal)}</td>

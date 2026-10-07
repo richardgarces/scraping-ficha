@@ -240,7 +240,11 @@ def _summary_patch(summary: dict[str, Any] | None) -> dict[str, Any]:
     }
 
 
-def _prev_best_price_patch(item: dict[str, Any] | None, new_price: Any) -> dict[str, Any]:
+def _prev_best_price_patch(
+    item: dict[str, Any] | None,
+    new_price: Any,
+    new_store: Any = None,
+) -> dict[str, Any]:
     """Si el mejor precio cambia, guarda el anterior y la racha de dirección.
 
     Primera observación: sin prev. Si el precio se mantiene, no toca prev
@@ -248,9 +252,16 @@ def _prev_best_price_patch(item: dict[str, Any] | None, new_price: Any) -> dict[
 
     last_delta_direction: 'up'|'down' de la última variación.
     delta_streak: 1 = primera en esa dirección; ≥2 = consecutiva (volvió a…).
+
+    prev_best_store: tienda que tenía el mejor precio antes de una baja con
+    cambio de ganador. Se limpia al subir o en primer precio (reset blanco).
+    Si baja pero gana la misma tienda, no pisa el prev (sigue mostrando quién
+    tenía el mejor antes en la racha de bajas).
     """
     old = _as_int((item or {}).get("last_price"))
     new = _as_int(new_price)
+    old_store = str((item or {}).get("best_store") or "").strip() or None
+    incoming_store = str(new_store or "").strip() or None
     if old is not None and new is not None and old != new:
         direction = "down" if new < old else "up"
         prev_dir = (item or {}).get("last_delta_direction")
@@ -258,16 +269,27 @@ def _prev_best_price_patch(item: dict[str, Any] | None, new_price: Any) -> dict[
             streak = int((item or {}).get("delta_streak") or 1) + 1
         else:
             streak = 1
-        return {
+        patch: dict[str, Any] = {
             "prev_best_price": old,
             "last_delta_direction": direction,
             "delta_streak": streak,
         }
+        if direction == "up":
+            patch["prev_best_store"] = None
+        elif (
+            direction == "down"
+            and old_store
+            and incoming_store
+            and old_store != incoming_store
+        ):
+            patch["prev_best_store"] = old_store
+        return patch
     if old is None:
         return {
             "prev_best_price": None,
             "last_delta_direction": None,
             "delta_streak": 0,
+            "prev_best_store": None,
         }
     return {}
 
@@ -623,6 +645,7 @@ def product_row_view(row: dict[str, Any]) -> dict[str, Any]:
         best_store = best_store.strip() or None
     else:
         best_store = None
+    prev_best_store = str(row.get("prev_best_store") or "").strip() or None
     last_price = _as_int(row.get("last_price"))
     if last_price is None:
         last_price = derived.get("last_price")
@@ -637,11 +660,12 @@ def product_row_view(row: dict[str, Any]) -> dict[str, Any]:
         delta_streak = int(row.get("delta_streak") or 0)
     except (TypeError, ValueError):
         delta_streak = 0
-    best_store_title = None
-    if best_store:
-        from retail.store_display import public_store_label
+    from retail.store_display import public_store_label
 
-        best_store_title = public_store_label(best_store)
+    best_store_title = public_store_label(best_store) if best_store else None
+    prev_best_store_title = (
+        public_store_label(prev_best_store) if prev_best_store else None
+    )
     return {
         "id": str(row.get("id") or row.get("_id") or ""),
         "n": row.get("n"),
@@ -668,6 +692,8 @@ def product_row_view(row: dict[str, Any]) -> dict[str, Any]:
         "best_offer_url": best_url or None,
         "best_store": best_store,
         "best_store_title": best_store_title,
+        "prev_best_store": prev_best_store,
+        "prev_best_store_title": prev_best_store_title,
         "last_error": row.get("last_error"),
         "resolved": bool(row.get("resolved")),
         "last_observed_at": _iso(row.get("last_observed_at")),
@@ -702,11 +728,12 @@ def enrich_row_from_catalog(repo: Any, row: dict[str, Any], *, persist: bool = T
     sigs, _changes, summary = detect_changes(None, matches, query=query)
     now = _now()
     new_price = summary.get("last_price") if summary else None
+    new_store = summary.get("best_store") if summary else None
     patch = {
         "last_matches": sigs,
         "last_match_count": len(sigs),
         **_summary_patch(summary),
-        **_prev_best_price_patch(row, new_price),
+        **_prev_best_price_patch(row, new_price, new_store),
         "last_observed_at": now,
         "last_error": None,
         "resolved": True,
@@ -826,6 +853,7 @@ def update_item(
             "max_offer_price": None,
             "best_offer_url": None,
             "best_store": None,
+            "prev_best_store": None,
             "last_observed_at": None,
             "last_error": None,
             "resolved": False,
@@ -1062,6 +1090,8 @@ _EXPORT_FIELDS = (
     "last_price",
     "best_store",
     "best_store_title",
+    "prev_best_store",
+    "prev_best_store_title",
     "stores_scraped",
     "max_price_normal",
     "min_price_normal",
@@ -1958,6 +1988,7 @@ def process_one(repo: Any, *, delay: float = 0.0, list_id: str | None = None) ->
             run["notified_count"] = int(run.get("notified_count") or 0) + changed
 
         new_best = summary.get("last_price") if summary else None
+        new_store = summary.get("best_store") if summary else None
         coll.update_one(
             {"_id": item["_id"]},
             {
@@ -1969,7 +2000,7 @@ def process_one(repo: Any, *, delay: float = 0.0, list_id: str | None = None) ->
                     "last_matches": current_sigs,
                     "last_match_count": len(current_sigs),
                     **_summary_patch(summary),
-                    **_prev_best_price_patch(item, new_best),
+                    **_prev_best_price_patch(item, new_best, new_store),
                     "last_observed_at": now,
                     "last_error": None if tracked else "Sin matches en catálogo/scrape.",
                     "updated_at": now,
