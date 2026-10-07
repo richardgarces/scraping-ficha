@@ -84,10 +84,33 @@ if [ "${FORECAST_SIMULATE:-0}" != "1" ]; then
 fi
 
 # El modo real escribe directo en Mongo. Solo la simulación produce un JSON.
+# Incluye prioridad + enriquecimiento Cyber (oct/junio 2026) salvo FORECAST_INCLUDE_CYBER=0.
 MONGODB_URI="$MONGODB_URI" MONGODB_DB="$MONGODB_DB" \
   "$VENV_DIR/bin/python3" "$ROOT_DIR/timesfm_poc/forecast_from_mongo.py" "${FORECAST_ARGS[@]}"
 
 if [ "${FORECAST_SIMULATE:-0}" != "1" ]; then
+  echo "Ensuring experimental forecasts for Cyber oct/junio 2026 products…"
+  PYTHONPATH="$ROOT_DIR" MONGODB_URI="$MONGODB_URI" MONGODB_DB="$MONGODB_DB" \
+    "$VENV_DIR/bin/python3" - <<'PY'
+from retail.mongo import ProductRepository
+from retail.cyber_forecast import ensure_cyber_list_forecasts
+import os
+
+repo = ProductRepository(os.environ["MONGODB_URI"], database=os.environ.get("MONGODB_DB", "scraping"))
+try:
+    stats = ensure_cyber_list_forecasts(repo, use_timesfm=True)
+    print(
+        "cyber forecasts:",
+        f"lists={stats.get('list_ids')}",
+        f"candidates={stats.get('candidates')}",
+        f"written={stats.get('written')}",
+        f"fresh={stats.get('fresh')}",
+        f"blocked={stats.get('blocked')}",
+        f"missing_with_many_changes={stats.get('missing_forecast_with_many_changes')}",
+    )
+finally:
+    repo.close()
+PY
   echo "Building adaptive scraping priorities and seasonal patterns…"
   PYTHONPATH="$ROOT_DIR" MONGODB_URI="$MONGODB_URI" MONGODB_DB="$MONGODB_DB" \
     "$VENV_DIR/bin/python3" "$ROOT_DIR/scripts/build_scrape_priorities.py"

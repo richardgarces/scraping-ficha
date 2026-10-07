@@ -29,10 +29,103 @@ def parse_args():
     p.add_argument("--horizon", type=int, default=30)
     p.add_argument("--min-history-days", type=int, default=30)
     p.add_argument("--simulate", action="store_true", help="No usar timesfm, simular forecasts")
+    p.add_argument(
+        "--include-cyber",
+        dest="include_cyber",
+        action="store_true",
+        default=None,
+        help="Prioriza productos de listas Cyber oct/junio 2026",
+    )
+    p.add_argument(
+        "--no-include-cyber",
+        dest="include_cyber",
+        action="store_false",
+        help="No priorizar ni enriquecer con historial Cyber",
+    )
     return p.parse_args()
 
 
-def read_products_from_mongo(uri, dbname, collection_name, limit, min_history_days=30):
+def _enrich_docs_with_cyber_history(uri, dbname, docs):
+    """Mezcla cyber_day_price_history en price_history de candidatos Cyber."""
+    if not docs:
+        return docs
+    try:
+        from pymongo import MongoClient
+        from retail.cyber_forecast import (
+            cyber_history_points_for_product,
+            forecast_cyber_list_ids,
+            merge_price_history_with_cyber,
+        )
+        from retail.mongo import ProductRepository
+    except Exception:
+        return docs
+    repo = ProductRepository(uri, database=dbname)
+    try:
+        list_ids = forecast_cyber_list_ids(repo)
+        if not list_ids:
+            return docs
+        for document in docs:
+            store = str(document.get("store") or "").strip().lower()
+            product_id = str(document.get("product_id") or "").strip()
+            if not store or not product_id:
+                continue
+            cyber_points = cyber_history_points_for_product(
+                repo, store, product_id, list_ids=list_ids,
+            )
+            if not cyber_points:
+                continue
+            document["price_history"] = merge_price_history_with_cyber(
+                document.get("price_history"),
+                cyber_points,
+            )
+            document["_cyber_enriched"] = True
+            document["_cyber_observation_count"] = len(cyber_points)
+            document["_cyber_list_ids"] = list_ids
+    finally:
+        repo.close()
+    return docs
+
+
+def read_cyber_products_from_mongo(uri, dbname, collection_name, min_history_days=30):
+    """Carga productos ligados a listas Cyber oct/junio 2026 (historial enriquecido)."""
+    try:
+        from pymongo import MongoClient
+        from retail.cyber_forecast import cyber_product_keys, forecast_cyber_list_ids
+        from retail.mongo import ProductRepository
+    except Exception:
+        return []
+    repo = ProductRepository(uri, database=dbname)
+    try:
+        list_ids = forecast_cyber_list_ids(repo)
+        keys = cyber_product_keys(repo, list_ids)
+        if not keys:
+            return []
+        client = MongoClient(uri)
+        col = client[dbname][collection_name]
+        projection = {
+            "_id": 1, "store": 1, "product_id": 1, "name": 1, "price": 1,
+            "catalog_id": 1,
+            "availability": 1, "status": 1, "stock_status": 1,
+            "availability_status": 1, "price_history": 1,
+        }
+        docs = []
+        seen = set()
+        for store, product_id in keys:
+            document = col.find_one({"store": store, "product_id": product_id}, projection)
+            if document is None:
+                continue
+            key = (store, product_id)
+            if key in seen:
+                continue
+            seen.add(key)
+            docs.append(document)
+        client.close()
+        return _enrich_docs_with_cyber_history(uri, dbname, docs)
+    finally:
+        repo.close()
+
+
+def read_products_from_mongo(uri, dbname, collection_name, limit, min_history_days=30, include_cyber=True):
     try:
         from pymongo import MongoClient
     except Exception:
@@ -57,6 +150,24 @@ def read_products_from_mongo(uri, dbname, collection_name, limit, min_history_da
     # con muchos registros pueden quedar bajo el mínimo requerido.
     candidate_cap = max(int(limit) * 50, 1000)
     docs = []
+    seen_keys = set()
+    # Primero: todos los productos de listas Cyber oct/junio 2026 (pronóstico experimental).
+    if include_cyber:
+        try:
+            cyber_docs = read_cyber_products_from_mongo(
+                uri, dbname, collection_name, min_history_days=min_history_days,
+            )
+            for item in cyber_docs:
+                key = (
+                    str(item.get("store") or "").strip().lower(),
+                    str(item.get("product_id") or "").strip(),
+                )
+                if key in seen_keys or not key[0] or not key[1]:
+                    continue
+                seen_keys.add(key)
+                docs.append(item)
+        except Exception as exc:
+            print("cyber forecast priority skipped:", exc)
     # El plan de la noche anterior permite dedicar primero la capacidad de
     # TimesFM a consultas volátiles o cercanas a una oportunidad. Si aún no
     # existe un plan, el comportamiento vuelve a ser el recorrido normal.
@@ -69,16 +180,28 @@ def read_products_from_mongo(uri, dbname, collection_name, limit, min_history_da
             if item.get("catalog_id")
         ]
         if priority_ids:
-            docs.extend(
-                col.find({**query, "catalog_id": {"$in": priority_ids}}, projection).limit(candidate_cap)
-            )
+            for item in col.find({**query, "catalog_id": {"$in": priority_ids}}, projection).limit(candidate_cap):
+                key = (
+                    str(item.get("store") or "").strip().lower(),
+                    str(item.get("product_id") or "").strip(),
+                )
+                if key in seen_keys:
+                    continue
+                seen_keys.add(key)
+                docs.append(item)
+                if len(docs) >= candidate_cap:
+                    break
     except Exception:
         pass
     if len(docs) < candidate_cap:
-        seen = {item.get("_id") for item in docs}
         for item in col.find(query, projection).limit(candidate_cap):
-            if item.get("_id") in seen:
+            key = (
+                str(item.get("store") or "").strip().lower(),
+                str(item.get("product_id") or "").strip(),
+            )
+            if key in seen_keys:
                 continue
+            seen_keys.add(key)
             docs.append(item)
             if len(docs) >= candidate_cap:
                 break
@@ -224,6 +347,11 @@ def write_forecasts_to_mongo(uri, dbname, collection_name, forecasts_docs):
 
 def main():
     args = parse_args()
+    include_cyber = (
+        args.include_cyber
+        if args.include_cyber is not None
+        else os.environ.get("FORECAST_INCLUDE_CYBER", "1") != "0"
+    )
     docs = generate_forecasts(
         mongo_uri=args.mongo_uri,
         mongo_db=args.mongo_db,
@@ -233,6 +361,7 @@ def main():
         horizon=args.horizon,
         min_history_days=args.min_history_days,
         simulate=args.simulate,
+        include_cyber=include_cyber,
     )
     # if docs were returned and not written, write to output
     if docs:
@@ -244,26 +373,52 @@ def main():
         print("Forecasts written to:", out_path)
 
 
-def generate_forecasts(*, mongo_uri: str | None = None, mongo_db: str = "scraping", collection: str = "products", forecasts_collection: str = "forecasts", sample: int = 10, horizon: int = 30, simulate: bool = False, use_timesfm: bool | None = None, min_history_days: int = 30) -> list[dict]:
+def generate_forecasts(*, mongo_uri: str | None = None, mongo_db: str = "scraping", collection: str = "products", forecasts_collection: str = "forecasts", sample: int = 10, horizon: int = 30, simulate: bool = False, use_timesfm: bool | None = None, min_history_days: int = 30, include_cyber: bool = True) -> list[dict]:
     """Generate forecasts for a sample of products.
 
     If `mongo_uri` is provided and `simulate` is False, reads products from Mongo.
     If TimesFM is available, will attempt real forecasts unless `use_timesfm` is False.
     Returns the list of forecast documents. If writing to Mongo succeeds, returns an empty list.
+
+    Con `include_cyber` (default), todos los productos elegibles de listas Cyber
+    octubre/junio 2026 entran primero (historial enriquecido) y no cuentan contra
+    el cupo `sample` del resto del catálogo.
     """
     products: list[dict] = []
     rejected = Counter()
+    cyber_prepared = 0
     if not simulate and mongo_uri:
-        docs = read_products_from_mongo(mongo_uri, mongo_db, collection, sample, min_history_days)
+        docs = read_products_from_mongo(
+            mongo_uri, mongo_db, collection, sample, min_history_days,
+            include_cyber=include_cyber,
+        )
+        non_cyber_count = 0
         for document in docs:
+            is_cyber = bool(
+                document.get("_cyber_enriched") or document.get("_cyber_observation_count")
+            )
+            # Cupo `sample` solo limita productos fuera de Cyber; Cyber va completo.
+            if not is_cyber and non_cyber_count >= sample:
+                continue
             prepared, reason = prepare_product(document, min_history_days)
             if prepared is None:
                 rejected[reason or "invalid"] += 1
                 continue
+            if is_cyber:
+                prepared["cyber_observation_count"] = int(
+                    document.get("_cyber_observation_count") or 0
+                )
+                prepared["cyber_list_ids"] = list(document.get("_cyber_list_ids") or [])
+                prepared["source_tag"] = "cyber_day"
+                cyber_prepared += 1
+            else:
+                prepared["source_tag"] = "timesfm_poc"
+                non_cyber_count += 1
             products.append(prepared)
-            if len(products) >= sample:
-                break
-        print(f"Prepared {len(products)} products; rejected: {dict(rejected)}")
+        print(
+            f"Prepared {len(products)} products "
+            f"(cyber={cyber_prepared}, other={non_cyber_count}); rejected: {dict(rejected)}"
+        )
 
     if simulate:
         for i in range(sample):
@@ -302,6 +457,20 @@ def generate_forecasts(*, mongo_uri: str | None = None, mongo_db: str = "scrapin
     now = datetime.datetime.utcnow()
     docs: list[dict] = []
     for i, product in enumerate(products):
+        source = product.get("source_tag") or "timesfm_poc"
+        metadata = {
+            "source": source,
+            "frequency": "daily",
+            "timezone": "America/Santiago",
+            "observation_count": product["observation_count"],
+            "history_start": product["history_start"],
+            "history_end": product["history_end"],
+            "minimum_history_days": min_history_days,
+            "one_observation_per_day": True,
+        }
+        if product.get("cyber_observation_count"):
+            metadata["cyber_observation_count"] = product["cyber_observation_count"]
+            metadata["cyber_list_ids"] = product.get("cyber_list_ids") or []
         doc = {
             "forecast_key": product["forecast_key"],
             "store": product["store"],
@@ -313,16 +482,7 @@ def generate_forecasts(*, mongo_uri: str | None = None, mongo_db: str = "scrapin
             "model": model_used,
             "point_forecast": forecasts[i],
             "quantiles": quantiles[i] if quantiles is not None else {},
-            "metadata": {
-                "source": "timesfm_poc",
-                "frequency": "daily",
-                "timezone": "America/Santiago",
-                "observation_count": product["observation_count"],
-                "history_start": product["history_start"],
-                "history_end": product["history_end"],
-                "minimum_history_days": min_history_days,
-                "one_observation_per_day": True,
-            },
+            "metadata": metadata,
         }
         docs.append(doc)
 

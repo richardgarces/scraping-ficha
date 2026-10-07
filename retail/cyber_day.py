@@ -479,6 +479,14 @@ def append_best_price_observation(
     except Exception as exc:
         print(f"cyber-day: guardar historial falló: {exc}", flush=True)
         return None
+    # Pronóstico experimental: volcar el cambio al price_history del producto
+    # y, si hay muchos cambios o falta forecast, intentar generarlo.
+    try:
+        from retail.cyber_forecast import maybe_refresh_after_cyber_observation
+
+        maybe_refresh_after_cyber_observation(repo, doc)
+    except Exception as exc:
+        print(f"cyber-day: forecast tras historial falló: {exc}", flush=True)
     return doc
 
 
@@ -2477,6 +2485,23 @@ def _finish_lap(repo: Any, run: dict[str, Any], total: int, *, list_id: str | No
         "list_id": lid,
     })
     save_run(repo, run, list_id=lid)
+    # Tras cada vuelta: si hay muchos cambios Cyber sin pronóstico, completar gaps.
+    try:
+        from retail.cyber_forecast import ensure_cyber_list_forecasts, matches_forecast_cyber_list
+
+        if matches_forecast_cyber_list(lid):
+            forecast_stats = ensure_cyber_list_forecasts(repo, list_id=lid, use_timesfm=False)
+            run["last_forecast_pass"] = {
+                "at": _iso(now),
+                "written": forecast_stats.get("written"),
+                "blocked": forecast_stats.get("blocked"),
+                "missing_forecast_with_many_changes": forecast_stats.get(
+                    "missing_forecast_with_many_changes"
+                ),
+            }
+            save_run(repo, run, list_id=lid)
+    except Exception as exc:
+        print(f"cyber-day: ensure forecasts al cerrar vuelta falló: {exc}", flush=True)
     print(
         f"cyber-day [{lid}] lap {next_lap - 1} done in {elapsed}s; "
         f"starting lap {next_lap} ({total} queries)",

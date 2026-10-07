@@ -32,6 +32,16 @@ API (admin):
 
 Informe UI: [`/cyber-day/evolucion?list=slug&n=12`](/cyber-day/evolucion) (columna **Evolución → Informe** en la tabla). Historial en Mongo `cyber_day_price_history` (un punto por cambio de precio/tienda/normal en el día).
 
+### Pronóstico experimental
+
+Los cambios de mejor precio de las listas **Cyber octubre 2026** y **Cyber junio 2026** (`cyber_oct2026` / `cyber_junio2026` y alias cercanos) se vuelcan al `price_history` del producto de catálogo y alimentan el **Pronóstico experimental** de la ficha (`/api/forecasts/...`).
+
+- Tras cada observación nueva: se alimenta el historial; con ≥5 cambios Cyber (o forecast viejo) se intenta generar/actualizar.
+- Al cerrar cada vuelta del worker: pasada de gaps sobre esa lista.
+- Cron BMAX (`run_on_bmax.sh`): prioriza todos los productos Cyber elegibles (historial enriquecido) y vuelve a asegurar forecasts con TimesFM cuando hay ≥30 días distintos.
+
+Si hay muchos cambios pero aún no hay 30 días de precios válidos, el panel sigue indicando que faltan datos; el contador `missing_forecast_with_many_changes` en el run marca el gap.
+
 ## Comportamiento
 
 - Por cada query: catálogo + scrape ligero + refresh top matches.
