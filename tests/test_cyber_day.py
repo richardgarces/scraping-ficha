@@ -14,10 +14,12 @@ from retail.cyber_day import (
     _offer_change_covers_best,
     _prev_best_price_patch,
     _price_move_label,
+    _rank_matches,
     append_best_price_observation,
     as_cron_group,
     continue_run,
     create_list,
+    cyber_match_accepted,
     day_evolution_report,
     dedupe_items,
     delete_list,
@@ -166,6 +168,91 @@ def test_progress_percent_and_eta():
     assert view["percent"] == 25.0
     assert view["lap"] == 2
     assert view["processed"] == 25
+
+
+def test_rank_matches_prefers_lowest_price_not_largest_discount():
+    """Charge/Boombox con descuento CLP enorme no debe tapar un Go más barato."""
+    docs = [
+        {
+            "store": "ripley",
+            "product_id": "charge6",
+            "name": "PARLANTE BLUETOOTH JBL CHARGE 6",
+            "brand": "JBL",
+            "price": 139990,
+            "price_normal": 229990,
+        },
+        {
+            "store": "ripley",
+            "product_id": "boombox",
+            "name": "PARLANTE BLUETOOTH JBL BOOMBOX 4",
+            "brand": "JBL",
+            "price": 349990,
+            "price_normal": 549990,
+        },
+        {
+            "store": "falabella",
+            "product_id": "go-essential",
+            "name": "Parlante Go Essential 2 Azul",
+            "brand": "JBL",
+            "price": 21990,
+            "price_normal": 36990,
+        },
+        {
+            "store": "lider",
+            "product_id": "onthego",
+            "name": "Parlante Bluetooth JBL ON the go essential",
+            "brand": "JBL",
+            "price": 234990,
+            "price_normal": 329990,
+        },
+    ]
+    ranked = _rank_matches(docs, 3)
+    assert [d["product_id"] for d in ranked] == ["go-essential", "charge6", "onthego"]
+    summary = summarize_match_stats(ranked)
+    assert summary["last_price"] == 21990
+    assert summary["best_store"] == "falabella"
+
+
+def test_cyber_match_accepted_requires_brand_and_product_type():
+    query = "JBL parlante Bluetooth"
+    assert cyber_match_accepted(query, {
+        "store": "falabella",
+        "product_id": "go",
+        "name": "Parlante Go Essential 2 Azul",
+        "brand": "JBL",
+        "price": 21990,
+        "price_normal": 36990,
+    })
+    assert cyber_match_accepted(query, {
+        "store": "falabella",
+        "product_id": "go-bt",
+        "name": "Parlante Bluetooth GO5",
+        "brand": "JBL",
+        "price": 39990,
+        "price_normal": 59990,
+    })
+    # Sin marca JBL (Barbie) o sin «parlante» (audífonos): no competir por mejor precio.
+    assert not cyber_match_accepted(query, {
+        "store": "ripley",
+        "product_id": "barbie",
+        "name": "PARLANTE BLUETOOTH BARBIE MINI",
+        "brand": "BARBIE",
+        "price": 6990,
+    })
+    assert not cyber_match_accepted(query, {
+        "store": "ripley",
+        "product_id": "tunes",
+        "name": "AUDÍFONOS JBL TUNE 520BT BLUETOOTH",
+        "brand": "JBL",
+        "price": 19990,
+    })
+    assert not cyber_match_accepted(query, {
+        "store": "knasta",
+        "product_id": "agg",
+        "name": "Parlante Bluetooth JBL GO 4",
+        "brand": "JBL",
+        "price": 19990,
+    })
 
 
 def test_detect_changes_skips_first_sighting_then_notifies():

@@ -936,15 +936,11 @@ def catalog_matches_for_query(repo: Any, query: str) -> list[dict[str, Any]]:
     query = (query or "").strip()
     if not query:
         return []
-    seen: dict[str, dict[str, Any]] = {}
     try:
-        for doc in repo.find_by_query(query, limit=max(TOP_MATCHES * 3, 20)):
-            key = match_key(str(doc.get("store") or ""), str(doc.get("product_id") or ""))
-            if key != ":":
-                seen[key] = doc
+        return _rank_matches(_gather_catalog_candidates(repo, query), TOP_MATCHES)
     except Exception as exc:
-        print(f"cyber-day: catalog find_by_query falló ({query}): {exc}", flush=True)
-    return _rank_matches(list(seen.values()), TOP_MATCHES)
+        print(f"cyber-day: catalog gather falló ({query}): {exc}", flush=True)
+        return []
 
 
 def enrich_row_from_catalog(repo: Any, row: dict[str, Any], *, persist: bool = True) -> dict[str, Any]:
@@ -1955,15 +1951,120 @@ def _offer_rows_from_search(result: dict[str, Any]) -> list[dict[str, Any]]:
     return rows
 
 
+# Conectividad: puede faltar en el título si ya calzan marca + tipo de producto.
+_SOFT_QUERY_TOKENS = frozenset({
+    "bluetooth", "inalambrico", "inalambrica", "wireless", "wifi", "bt",
+})
+# Agregadores: no compiten como «tienda» del mejor precio Cyber.
+_EXCLUDED_MATCH_STORES = frozenset({"knasta"})
+
+
+def _doc_as_product(doc: dict[str, Any]):
+    from retail.models import Product
+
+    return Product.from_dict(doc if isinstance(doc, dict) else {})
+
+
+def cyber_match_accepted(query: str, doc: dict[str, Any]) -> bool:
+    """Match usable para mejor precio Cyber: relevancia + marca/tipo obligatorios.
+
+    ``score_product`` acepta 2 de 3 keywords; eso deja pasar Barbie/audífonos en
+    «JBL parlante Bluetooth». Exigimos que todo token no-suave de la query
+    aparezca en name/brand (p. ej. jbl + parlante); bluetooth puede faltar.
+    """
+    from retail.relevance import score_product, tokenize
+
+    store = str(doc.get("store") or "").strip().lower()
+    if not store or store in _EXCLUDED_MATCH_STORES:
+        return False
+    if _offer_price(doc) is None:
+        return False
+    product = _doc_as_product(doc)
+    if not (product.name or "").strip():
+        return False
+    rel = score_product(query, product)
+    if not rel.accepted:
+        return False
+    matched = set(rel.matched or [])
+    required = [tok for tok in tokenize(query) if tok not in _SOFT_QUERY_TOKENS]
+    return all(tok in matched for tok in required)
+
+
 def _rank_matches(docs: list[dict[str, Any]], limit: int) -> list[dict[str, Any]]:
+    """Mejor precio primero; el descuento absoluto solo desempatar.
+
+    Antes se ordenaba por mayor descuento CLP, así Boombox/Charge con lista
+    inflada desplazaban parlantes baratos (y a Falabella) fuera del top N.
+    """
     def sort_key(doc: dict[str, Any]) -> tuple:
         price = _offer_price(doc) or 10**12
         normal = _as_int(doc.get("price_normal")) or 0
         discount = max(0, normal - price) if normal > price else 0
-        return (-discount, price, str(doc.get("store") or ""), str(doc.get("product_id") or ""))
+        return (price, -discount, str(doc.get("store") or ""), str(doc.get("product_id") or ""))
 
     ranked = sorted((d for d in docs if _offer_price(d)), key=sort_key)
     return ranked[:limit]
+
+
+def _store_text_candidates(
+    repo: Any,
+    query: str,
+    store: str,
+    *,
+    limit: int = 8,
+) -> list[dict[str, Any]]:
+    """Candidatos de una tienda vía $text (evita que Ripley/Lider saturen el cupo global)."""
+    from retail.mongo import SEARCH_FIND_MAX_TIME_MS, SEARCH_FIND_PROJECTION
+    from retail.relevance import text_search_clause
+
+    store = str(store or "").strip().lower()
+    text = " ".join(str(query or "").split())
+    if not store or not text or getattr(repo, "collection", None) is None:
+        return []
+    clause = text_search_clause(text) or text
+    want = max(limit * 4, 24)
+    try:
+        cursor = (
+            repo.collection.find(
+                {"store": store, "$text": {"$search": clause}},
+                {**SEARCH_FIND_PROJECTION, "score": {"$meta": "textScore"}},
+            )
+            .sort([("score", {"$meta": "textScore"})])
+            .limit(want)
+            .max_time_ms(SEARCH_FIND_MAX_TIME_MS)
+        )
+        rows = list(cursor)
+    except Exception as exc:
+        print(f"cyber-day: text store={store} ({text}): {exc}", flush=True)
+        return []
+    accepted = [doc for doc in rows if cyber_match_accepted(text, doc)]
+    return _rank_matches(accepted, limit)
+
+
+def _gather_catalog_candidates(repo: Any, query: str) -> list[dict[str, Any]]:
+    """Pool de catálogo: búsqueda global + cupo por tienda preferida, filtrado."""
+    query = " ".join(str(query or "").split())
+    if not query:
+        return []
+    seen: dict[str, dict[str, Any]] = {}
+    pool_limit = max(TOP_MATCHES * 10, 60)
+    try:
+        for doc in repo.find_by_query(query, limit=pool_limit):
+            key = match_key(str(doc.get("store") or ""), str(doc.get("product_id") or ""))
+            if key != ":" and cyber_match_accepted(query, doc):
+                seen[key] = doc
+    except Exception as exc:
+        print(f"cyber-day: find_by_query falló ({query}): {exc}", flush=True)
+
+    per_store = max(2, min(6, TOP_MATCHES))
+    for store in PREFERRED_SCRAPE_STORES:
+        if store in _EXCLUDED_MATCH_STORES:
+            continue
+        for doc in _store_text_candidates(repo, query, store, limit=per_store):
+            key = match_key(str(doc.get("store") or ""), str(doc.get("product_id") or ""))
+            if key != ":":
+                seen[key] = doc
+    return list(seen.values())
 
 
 def boost_catalog_priority(repo: Any, catalog_id: str, *, reason: str = "cyber_day") -> None:
@@ -1996,15 +2097,12 @@ def collect_query_matches(
 ) -> list[dict[str, Any]]:
     """Catálogo local (+ scrape acotado opcional); top matches rankeados."""
     lid = resolve_list_id(repo, list_id)
-    seen: dict[str, dict[str, Any]] = {}
     touch_worker(repo, lid)
-    try:
-        for doc in repo.find_by_query(query, limit=max(TOP_MATCHES * 3, 20)):
-            key = match_key(str(doc.get("store") or ""), str(doc.get("product_id") or ""))
-            if key != ":":
-                seen[key] = doc
-    except Exception as exc:
-        print(f"cyber-day: find_by_query falló ({query}): {exc}", flush=True)
+    seen: dict[str, dict[str, Any]] = {}
+    for doc in _gather_catalog_candidates(repo, query):
+        key = match_key(str(doc.get("store") or ""), str(doc.get("product_id") or ""))
+        if key != ":":
+            seen[key] = doc
 
     # Por defecto solo DB: el scrape live de todas las tiendas bloqueaba el loop
     # (timeouts Movistar, etc.) y el heartbeat caducaba → «worker sin heartbeat».
@@ -2032,7 +2130,7 @@ def collect_query_matches(
             for offer in _offer_rows_from_search(result):
                 store = str(offer.get("store") or "")
                 product_id = str(offer.get("product_id") or "")
-                if store and product_id:
+                if store and product_id and cyber_match_accepted(query, offer):
                     seen[match_key(store, product_id)] = offer
         except Exception as exc:
             print(f"cyber-day: search_products falló ({query}): {exc}", flush=True)
