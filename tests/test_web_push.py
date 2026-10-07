@@ -219,7 +219,7 @@ def test_push_message_links_to_internal_product_card():
         "extra": {"store_title": "Tienda Chile"},
     }, tag="audifonos")
     assert message["title"] == "Audífonos"
-    assert "Tienda Chile · $12.990" in message["body"]
+    assert "Tienda · $12.990" in message["body"]
     assert message["url"] == "https://lnk.meincart.cl/o/123456789"
     assert message["tag"] == "precio-audifonos"
 

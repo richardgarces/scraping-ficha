@@ -501,7 +501,11 @@ def drops(rows: list[tuple[datetime | None, int]]) -> list[tuple[datetime | None
 
 def _cheaper_label(cheaper: dict[str, Any]) -> tuple[str, str]:
     """Nombre de tienda y precio formateado para copys de «más barato en»."""
-    label = str(cheaper.get("store_title") or cheaper.get("store") or "otra tienda")
+    from retail.store_display import clean_store_display_name
+
+    label = clean_store_display_name(
+        cheaper.get("store_title") or cheaper.get("store") or "otra tienda"
+    ) or "otra tienda"
     try:
         price = int(cheaper.get("price") or 0)
     except (TypeError, ValueError):

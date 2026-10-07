@@ -391,12 +391,12 @@ def cron_batch_alerts(run_id: str, request: Request) -> dict:
     titles = {spec.id: spec.title for spec in list_stores()}
     for item in found["items"]:
         store = item.get("store") or ""
-        from retail.store_display import display_store
+        from retail.store_display import display_store, public_store_label
 
         item["display_store"], item["store_title"] = display_store(item, titles)
         rival = item.get("second_store") or ""
         if rival:
-            item["second_store_title"] = titles.get(rival, rival)
+            item["second_store_title"] = public_store_label(rival, titles)
     return found
 
 

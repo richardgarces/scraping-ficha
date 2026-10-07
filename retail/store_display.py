@@ -7,10 +7,22 @@ from urllib.parse import urlparse
 # Id interno del agregador: se mantiene en Mongo/API, nunca se muestra en la UI.
 _HIDDEN_AGGREGATOR_IDS = frozenset({"knasta"})
 _PUBLIC_FALLBACK_TITLE = "Otro"
+# Sufijo de marca país en títulos de retail («Easy Chile» → «Easy»).
+# No toca compuestos (Chileautos) ni marcas que empiezan por Chile (Chile Perfume).
+_CHILE_SUFFIX = re.compile(r"(?i)\s+Chile\s*$")
 
 
 def _clean(value: Any) -> str:
     return " ".join(str(value or "").split()).strip()
+
+
+def clean_store_display_name(label: str | None) -> str:
+    """Quita el sufijo «Chile» del nombre visible; no altera ids/slugs internos."""
+    text = _clean(label)
+    if not text:
+        return ""
+    cleaned = _CHILE_SUFFIX.sub("", text).strip()
+    return cleaned or text
 
 
 def public_store_key(store_id: str | None) -> str:
@@ -29,7 +41,7 @@ def public_store_label(store_id: str | None, titles: Mapping[str, str] | None = 
     known = dict(titles or {})
     if not known and key:
         known, _sites = _catalog()
-    return known.get(key) or key or _PUBLIC_FALLBACK_TITLE
+    return clean_store_display_name(known.get(key) or key or _PUBLIC_FALLBACK_TITLE)
 
 
 def _catalog() -> tuple[dict[str, str], dict[str, str]]:
@@ -38,7 +50,7 @@ def _catalog() -> tuple[dict[str, str], dict[str, str]]:
     titles: dict[str, str] = {}
     sites: dict[str, str] = {}
     for spec in list_stores():
-        titles[spec.id] = spec.title or spec.id
+        titles[spec.id] = clean_store_display_name(spec.title or spec.id)
         host = str(spec.site or "").lower().removeprefix("www.").split("/", 1)[0]
         if host:
             sites[host] = spec.id
@@ -50,7 +62,8 @@ def _catalog() -> tuple[dict[str, str], dict[str, str]]:
 
 def _knasta_destination(row: Mapping[str, Any]) -> tuple[str, str]:
     titles, sites = _catalog()
-    seller = _clean(row.get("seller") or row.get("retail_label"))
+    # Normalizar seller («Falabella Chile» → «Falabella») antes de mapear al catálogo.
+    seller = clean_store_display_name(row.get("seller") or row.get("retail_label"))
     seller_key = seller.casefold()
     if seller and seller_key not in {"knasta", "otro", "otros"}:
         for store_id, title in titles.items():
@@ -69,7 +82,7 @@ def _knasta_destination(row: Mapping[str, Any]) -> tuple[str, str]:
                 return store_id, titles.get(store_id, store_id)
         label = re.sub(r"[^a-z0-9]+", " ", host.split(".")[0], flags=re.I).strip().title()
         if label:
-            return "otro", label
+            return "otro", clean_store_display_name(label)
     return "otro", _PUBLIC_FALLBACK_TITLE
 
 
@@ -88,7 +101,7 @@ def display_store(row: Mapping[str, Any], titles: Mapping[str, str] | None = Non
     title = _clean(row.get("store_title")) or known.get(store_id) or store_id or _PUBLIC_FALLBACK_TITLE
     if title.casefold() in {"knasta", "knaste"}:
         title = _PUBLIC_FALLBACK_TITLE
-    return store_id, title
+    return store_id, clean_store_display_name(title)
 
 
 def display_store_title(row: Mapping[str, Any], titles: Mapping[str, str] | None = None) -> str:

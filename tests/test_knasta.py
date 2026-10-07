@@ -108,7 +108,7 @@ def test_knasta_muestra_tienda_final_o_otro():
             "seller": "Falabella",
             "url": "https://www.falabella.com/falabella-cl/product/1",
         }
-    ) == ("falabella", "Falabella Chile")
+    ) == ("falabella", "Falabella")
     assert display_store({"store": "knasta", "seller": "Abc"}) == ("otro", "Abc")
     assert display_store({"store": "knasta", "url": "https://tienda-ejemplo.cl/producto/1"}) == (
         "otro",

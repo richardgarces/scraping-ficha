@@ -99,9 +99,16 @@
    * Si no hay previa o es la misma: solo la actual.
    */
   function bestStoreCellText(row) {
-    const current = String(row?.best_store_title || row?.best_store || "").trim();
+    const label = (store, title) => {
+      if (typeof publicStoreLabel === "function") {
+        return String(publicStoreLabel(store, title || store) || "").trim();
+      }
+      const raw = String(title || store || "").trim();
+      return raw.replace(/\s+Chile\s*$/i, "").trim() || raw;
+    };
+    const current = label(row?.best_store, row?.best_store_title || row?.best_store);
     if (!current) return "—";
-    const prev = String(row?.prev_best_store_title || row?.prev_best_store || "").trim();
+    const prev = label(row?.prev_best_store, row?.prev_best_store_title || row?.prev_best_store);
     const streak = Number(row?.delta_streak) || 0;
     const dir = String(row?.last_delta_direction || row?.price_direction || "");
     const downStreak = streak >= 2 && (dir === "down" || dir === "down_again");

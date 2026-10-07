@@ -269,7 +269,8 @@ test("la tienda seleccionada sin corrida previa aparece en la tabla", () => {
   cron.renderStoreJobs(payload);
   assert.equal(wrap.hidden, false);
   assert.match(tbody.innerHTML, /data-tienda="falabella"/);
-  assert.match(tbody.innerHTML, /Falabella Chile/);
+  assert.match(tbody.innerHTML, /Falabella/);
+  assert.doesNotMatch(tbody.innerHTML, /Falabella Chile/);
   assert.match(tbody.innerHTML, /data-start-store="falabella"/);
   assert.match(tbody.innerHTML, /Correr scraping/);
   assert.match(tbody.innerHTML, /cron-store-selected/);

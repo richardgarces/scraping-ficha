@@ -281,10 +281,12 @@ def _discount(payload: dict[str, Any]) -> tuple[float | None, Any]:
 
 
 def _notification_text(payload: dict[str, Any]) -> str:
+    from retail.store_display import clean_store_display_name
+
     percent, reference = _discount(payload)
     extra = payload.get("extra") or {}
     lines = [f"🔔 {payload.get('name') or payload.get('query') or 'Oferta'}"]
-    store = extra.get("store_title") or payload.get("store")
+    store = clean_store_display_name(extra.get("store_title") or payload.get("store"))
     if store:
         lines.append(f"🏬 {store}")
     lines.append(f"💰 Precio para todo medio de pago: {_money(payload.get('price'))}")
@@ -369,9 +371,13 @@ def product_email_html(
     heading: str | None = None,
 ) -> str:
     """Tarjeta compatible con clientes de correo, inspirada en la ficha web."""
+    from retail.store_display import clean_store_display_name
+
     extra = payload.get("extra") or {}
     name = str(payload.get("name") or payload.get("query") or "Producto")
-    store = str(extra.get("store_title") or payload.get("store_title") or payload.get("store") or "Tienda")
+    store = clean_store_display_name(
+        extra.get("store_title") or payload.get("store_title") or payload.get("store") or "Tienda"
+    ) or "Tienda"
     store_logo = _safe_http_url(
         _store_logo_url(extra.get("display_store") or extra.get("store") or payload.get("store"))
     )

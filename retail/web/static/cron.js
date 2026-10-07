@@ -179,10 +179,19 @@ async function stopGroup(button) {
   await refresh().catch((error) => flash(error.message, false));
 }
 
+function storeJobTitle(job) {
+  if (!job) return "";
+  if (typeof publicStoreLabel === "function") {
+    return publicStoreLabel(job.id || job.public_id, job.title);
+  }
+  const raw = String(job.title || job.id || "").trim();
+  return raw.replace(/\s+Chile\s*$/i, "").trim() || raw;
+}
+
 function storeStatusCell(job) {
   const badge = statusBadge(job.status);
   const actions = [];
-  const title = job.title || (typeof publicStoreLabel === "function" ? publicStoreLabel(job.id) : job.id);
+  const title = storeJobTitle(job);
   if (["running", "paused"].includes(job.status)) {
     const stopping = stoppingStores.has(job.id) || job.progress?.phase === "stopping";
     const stopTitle = `Detener scraping de ${title}`;
@@ -583,7 +592,7 @@ function fillStores(payload) {
   const options = [`<option value="">Elegir tienda…</option>`].concat(
     stores.map(
       (store) =>
-        `<option value="${escapeHtml(store.id)}">${escapeHtml(store.title)} · ${escapeHtml(store.group_title || store.group || "")}</option>`
+        `<option value="${escapeHtml(store.id)}">${escapeHtml(storeJobTitle(store))} · ${escapeHtml(store.group_title || store.group || "")}</option>`
     )
   );
   select.innerHTML = options.join("");
@@ -619,7 +628,7 @@ function renderStoreLive(jobs) {
   const bar = $("store-live-bar");
   const query = $("store-live-query");
   const counts = $("store-live-counts");
-  if (title) title.textContent = job.title || (typeof publicStoreLabel === "function" ? publicStoreLabel(job.id) : job.id);
+  if (title) title.textContent = storeJobTitle(job);
   if (status) {
     status.textContent = job.status === "paused" ? "Pausado" : "En curso";
     status.className = job.status === "paused" ? "badge off" : "badge";
@@ -644,7 +653,7 @@ function renderStoreLive(jobs) {
   if (actions) {
     if (["running", "paused"].includes(job.status)) {
       const stopping = stoppingStores.has(job.id) || progress.phase === "stopping";
-      const stopTitle = `Detener scraping de ${job.title || (typeof publicStoreLabel === "function" ? publicStoreLabel(job.id) : job.id)}`;
+      const stopTitle = `Detener scraping de ${storeJobTitle(job)}`;
       actions.innerHTML = `<button type="button" class="secondary cron-stop" data-stop-store="${escapeHtml(job.id)}"
         title="${escapeHtml(stopTitle)}" aria-label="${escapeHtml(stopTitle)}"${stopping ? " disabled" : ""}>
         ${stopping ? "Deteniendo…" : "Detener"}
@@ -696,7 +705,7 @@ function renderStoreJobs(payload) {
           const processed = job.progress?.processed ?? job.last_run?.processed ?? 0;
           const items = job.progress?.items ?? job.last_run?.items ?? 0;
           const query = job.progress?.current_query;
-          const label = job.title || (typeof publicStoreLabel === "function" ? publicStoreLabel(job.id) : job.id);
+          const label = storeJobTitle(job);
           const base = items
             ? `${label}: ${processed}/${items} productos`
             : `${label}: arrancando…`;
@@ -705,7 +714,7 @@ function renderStoreJobs(payload) {
         .join(" · ");
     } else if (selected) {
       const job = displayJobs.find((item) => item.id === selected);
-      const label = job ? (job.title || (typeof publicStoreLabel === "function" ? publicStoreLabel(job.id) : job.id)) : "";
+      const label = job ? storeJobTitle(job) : "";
       meta.textContent = job?.last_run
         ? `Última corrida de ${label}: ${formatWhen(job.last_run.finished_at || job.last_run.started_at)}`
         : "";
@@ -731,7 +740,7 @@ function renderStoreJobs(payload) {
       return `
     <tr class="${highlight.trim()}" data-status="${escapeHtml(job.status)}" data-tienda="${escapeHtml(job.id)}">
       <td>
-        <strong>${escapeHtml(job.title || publicId)}</strong>
+        <strong>${escapeHtml(storeJobTitle(job) || publicId)}</strong>
         <div class="muted">${escapeHtml(publicId)}${groups ? ` · ${escapeHtml(groups)}` : ""}</div>
       </td>
       <td>${storeStatusCell(job)}</td>

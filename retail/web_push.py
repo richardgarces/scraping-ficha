@@ -242,9 +242,11 @@ def push_click_url(payload: dict[str, Any]) -> str:
 
 
 def push_message(payload: dict[str, Any], *, tag: str = "") -> dict[str, Any]:
+    from retail.store_display import clean_store_display_name
+
     extra = payload.get("extra") if isinstance(payload.get("extra"), dict) else {}
     name = str(payload.get("name") or payload.get("query") or "Producto")
-    store = str(extra.get("store_title") or payload.get("store") or "").strip()
+    store = clean_store_display_name(extra.get("store_title") or payload.get("store") or "")
     price = payload.get("price")
     try:
         money = f"${int(float(price)):,}".replace(",", ".") if price not in (None, "") else ""

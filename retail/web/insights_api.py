@@ -636,10 +636,10 @@ def super_ofertas(
 
 
 def _title_real_offer(item: dict[str, Any], titles: dict[str, str]) -> None:
-    from retail.store_display import display_store
+    from retail.store_display import display_store, public_store_label
 
     item["display_store"], item["store_title"] = display_store(item, titles)
-    item["rival_store_title"] = titles.get(item.get("rival_store") or "", item.get("rival_store"))
+    item["rival_store_title"] = public_store_label(item.get("rival_store"), titles)
     for row in item.get("stores") or []:
         row["display_store"], row["store_title"] = display_store(row, titles)
 

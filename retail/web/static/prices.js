@@ -375,13 +375,21 @@ function publicStoreId(store) {
   return id;
 }
 
+/** Quita el sufijo de marca «Chile» («Easy Chile» → «Easy»). No toca Chileautos. */
+function cleanStoreDisplayName(label) {
+  const text = String(label || "").replace(/\s+/g, " ").trim();
+  if (!text) return "";
+  const cleaned = text.replace(/\s+Chile\s*$/i, "").trim();
+  return cleaned || text;
+}
+
 /** Nombre visible cuando faltaría caer al id crudo. */
 function publicStoreLabel(store, title) {
-  const label = String(title || "").trim();
+  const label = cleanStoreDisplayName(title);
   if (label && !/^knast[ae]$/i.test(label)) return label;
   const id = String(store || "").toLowerCase();
   if (id === "knasta" || id === "knaste") return "Otro";
-  return label || store || "";
+  return label || cleanStoreDisplayName(store) || "";
 }
 
 /** Nombre de la tienda con su marca a la izquierda. */
