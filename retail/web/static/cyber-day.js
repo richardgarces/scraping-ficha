@@ -192,6 +192,66 @@
     return `<td class="${meta.cls}" title="${meta.title}">${text}${arrowHtml}${streakHtml}</td>`;
   }
 
+  function discountCellHtml(row) {
+    const label = String(row?.discount_label || "—");
+    const signal = String(row?.discount_signal || "");
+    const title = row?.discount_amount != null
+      ? `Ahorro ${formatPrice(row.discount_amount)} vs normal ${formatPrice(row.last_price_normal)}`
+      : "Sin precio normal comparable";
+    if (!signal) return `<td class="muted" title="${escapeHtml(title)}">—</td>`;
+    return `<td class="cyber-discount ${escapeHtml(signal)}" title="${escapeHtml(title)}">${escapeHtml(label)}</td>`;
+  }
+
+  function adviceCellHtml(row, evoHref) {
+    const advice = row?.buy_advice || {};
+    const key = String(advice.advice || "observar");
+    const label = String(advice.label || {
+      comprar: "Comprar",
+      esperar: "Esperar",
+      observar: "Observar",
+    }[key] || "Observar");
+    const reason = String(advice.reason || "");
+    const chip = `<span class="cyber-advice-chip ${escapeHtml(key)}" title="${escapeHtml(reason)}">${escapeHtml(label)}</span>`;
+    if (!evoHref) return `<td>${chip}</td>`;
+    return `<td><a class="cyber-advice-link" href="${escapeHtml(evoHref)}">${chip}</a></td>`;
+  }
+
+  function renderDashboard(dashboard) {
+    const node = el("cyber-dashboard");
+    if (!node) return;
+    if (!dashboard || !dashboard.total) {
+      node.hidden = true;
+      node.innerHTML = "";
+      return;
+    }
+    node.hidden = false;
+    const drops = (dashboard.top_drops || []).slice(0, 5).map((item) => {
+      const pct = item.delta_pct != null ? ` (${item.delta_pct}%)` : "";
+      return `<li><strong>#${escapeHtml(item.n)}</strong> ${escapeHtml(item.query || "")}: ${formatPrice(item.prev_best_price)}→${formatPrice(item.last_price)}${escapeHtml(pct)}</li>`;
+    }).join("") || "<li class=\"muted\">Sin bajadas registradas</li>";
+    const rises = (dashboard.top_rises || []).slice(0, 5).map((item) => {
+      const pct = item.delta_pct != null ? ` (+${item.delta_pct}%)` : "";
+      return `<li><strong>#${escapeHtml(item.n)}</strong> ${escapeHtml(item.query || "")}: ${formatPrice(item.prev_best_price)}→${formatPrice(item.last_price)}${escapeHtml(pct)}</li>`;
+    }).join("") || "<li class=\"muted\">Sin subidas registradas</li>";
+    const stores = (dashboard.top_stores || []).slice(0, 6).map((item) => (
+      `<li><strong>${escapeHtml(item.store_title || item.store)}</strong> · ${escapeHtml(item.wins)} wins</li>`
+    )).join("") || "<li class=\"muted\">Sin tiendas aún</li>";
+    const advice = dashboard.advice_counts || {};
+    node.innerHTML = `
+      <div class="cyber-dash-kpis">
+        <div><span>Cobertura</span><strong>${escapeHtml(dashboard.coverage_pct)}%</strong><small>${escapeHtml(dashboard.with_price)}/${escapeHtml(dashboard.total)} con precio</small></div>
+        <div><span>Bajaron</span><strong class="down">${escapeHtml(dashboard.down)}</strong><small>mejor precio ↓</small></div>
+        <div><span>Subieron</span><strong class="up">${escapeHtml(dashboard.up)}</strong><small>mejor precio ↑</small></div>
+        <div><span>Sin cambio</span><strong>${escapeHtml(dashboard.unchanged)}</strong><small>estable / primer precio</small></div>
+        <div><span>Pronóstico</span><strong>${escapeHtml(advice.comprar || 0)} / ${escapeHtml(advice.esperar || 0)} / ${escapeHtml(advice.observar || 0)}</strong><small>comprar · esperar · observar</small></div>
+      </div>
+      <div class="cyber-dash-lists">
+        <div><h3>Top bajadas</h3><ul>${drops}</ul></div>
+        <div><h3>Top subidas</h3><ul>${rises}</ul></div>
+        <div><h3>Tiendas ganadoras</h3><ul>${stores}</ul></div>
+      </div>`;
+  }
+
   function listQuery(path) {
     if (!currentListId) return path;
     const sep = path.includes("?") ? "&" : "?";
@@ -254,16 +314,19 @@
         <td>—</td>
         <td>—</td>
         <td>—</td>
+        <td>—</td>
+        <td>—</td>
         <td class="muted">seed local</td>
-      </tr>`).join("") || `<tr><td colspan="13" class="err">Sin seed local.</td></tr>`;
+      </tr>`).join("") || `<tr><td colspan="15" class="err">Sin seed local.</td></tr>`;
       }
       if (meta) {
         meta.textContent = `Error API: ${message}. Seed local: ${items.length} queries (solo lectura; reintentá Iniciar o recargá).`;
       }
+      renderDashboard(null);
     } catch (seedError) {
       const body = el("cyber-products-body");
       if (body) {
-        body.innerHTML = `<tr><td colspan="13" class="err">Error al cargar: ${escapeHtml(message)} · seed: ${escapeHtml(seedError.message)}</td></tr>`;
+        body.innerHTML = `<tr><td colspan="15" class="err">Error al cargar: ${escapeHtml(message)} · seed: ${escapeHtml(seedError.message)}</td></tr>`;
       }
     }
     // Seed local: no arrancar worker; botones de control deshabilitados.
@@ -367,6 +430,7 @@
           : "";
     }
     applyActionButtons(status, total, currentListsCount);
+    renderDashboard(payload?.dashboard);
 
     const wrap = el("cyber-products-wrap");
     const body = el("cyber-products-body");
@@ -379,7 +443,7 @@
     if (wrap && body && !editingActive) {
       wrap.hidden = false;
       if (!rows.length) {
-        body.innerHTML = `<tr><td colspan="13" class="muted">Sin filas en la lista. Importá CSV/JSON o creá la lista con seed.</td></tr>`;
+        body.innerHTML = `<tr><td colspan="15" class="muted">Sin filas en la lista. Importá CSV/JSON o creá la lista con seed.</td></tr>`;
       } else {
         body.innerHTML = rows.map((row) => {
           const n = row.n ?? (row.order != null ? row.order + 1 : "");
@@ -414,6 +478,8 @@
         </td>
         <td>${escapeHtml(row.category || "—")}</td>
         ${priceCellHtml(row)}
+        ${discountCellHtml(row)}
+        ${adviceCellHtml(row, evoHref)}
         <td>${escapeHtml(bestStoreCellText(row))}</td>
         <td title="${escapeHtml(row.last_change_at || "")}">${escapeHtml(changeAt)}</td>
         <td>${escapeHtml(row.stores_scraped != null ? row.stores_scraped : 0)}</td>

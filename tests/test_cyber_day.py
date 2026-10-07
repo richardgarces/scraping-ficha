@@ -574,6 +574,7 @@ def test_price_direction_streak_and_patch():
         "delta_streak": 2,
         "best_store": "paris",
         "prev_best_store": "falabella",
+        "last_price_normal": 200,
     })
     assert view["price_direction"] == "down_again"
     assert view["last_delta_direction"] == "down"
@@ -582,6 +583,58 @@ def test_price_direction_streak_and_patch():
     assert view["prev_best_store"] == "falabella"
     assert view["prev_best_store_title"]
     assert view["last_change_at"] is None
+    assert view["discount_pct"] == 60
+    assert view["discount_signal"] == "fuerte"
+
+
+def test_discount_insight_and_event_dashboard():
+    from retail.cyber_day import discount_insight, event_dashboard_from_products
+
+    strong = discount_insight(60_000, 100_000)
+    assert strong["discount_pct"] == 40
+    assert strong["discount_signal"] == "fuerte"
+    habitual = discount_insight(95_000, 100_000)
+    assert habitual["discount_signal"] == "habitual"
+    empty = discount_insight(100_000, None)
+    assert empty["discount_label"] == "—"
+
+    products = [
+        {
+            "n": 1,
+            "query": "A",
+            "last_price": 80,
+            "prev_best_price": 100,
+            "price_direction": "down",
+            "best_store": "falabella",
+            "buy_advice": {"advice": "comprar"},
+        },
+        {
+            "n": 2,
+            "query": "B",
+            "last_price": 120,
+            "prev_best_price": 100,
+            "price_direction": "up",
+            "best_store": "paris",
+            "buy_advice": {"advice": "esperar"},
+        },
+        {
+            "n": 3,
+            "query": "C",
+            "last_price": 50,
+            "price_direction": "",
+            "best_store": "falabella",
+            "buy_advice": {"advice": "observar"},
+        },
+    ]
+    dash = event_dashboard_from_products(products)
+    assert dash["total"] == 3
+    assert dash["with_price"] == 3
+    assert dash["down"] == 1
+    assert dash["up"] == 1
+    assert dash["unchanged"] == 1
+    assert dash["top_stores"][0]["store"] == "falabella"
+    assert dash["advice_counts"]["comprar"] == 1
+    assert dash["top_drops"][0]["n"] == 1
 
 
 def test_last_change_at_only_on_meaningful_best_change():

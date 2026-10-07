@@ -31,16 +31,27 @@
     return `$${Math.round(n).toLocaleString("es-CL")}`;
   }
 
-  function timeLabel(iso) {
+  function timeLabel(iso, { withDay = false } = {}) {
     if (!iso) return "—";
     const date = new Date(iso);
     if (Number.isNaN(date.getTime())) return "—";
-    return date.toLocaleTimeString("es-CL", {
+    if (!withDay) {
+      return date.toLocaleTimeString("es-CL", {
+        timeZone: SANTIAGO_TZ,
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+    }
+    return date.toLocaleString("es-CL", {
       timeZone: SANTIAGO_TZ,
+      day: "2-digit",
+      month: "short",
       hour: "2-digit",
       minute: "2-digit",
     });
   }
+
+  let currentRangeMode = "day";
 
   function dayLabel(day) {
     if (!day) return "";
@@ -199,7 +210,7 @@
   }
 
   function chartPointLabel(point, meaningfulNormal) {
-    const parts = [timeLabel(point.at)];
+    const parts = [timeLabel(point.at, { withDay: currentRangeMode === "event" })];
     parts.push(`${meaningfulNormal ? "Oferta" : "Precio"}: ${money(point.offer)}`);
     if (meaningfulNormal && point.normal != null) {
       parts.push(`Normal: ${money(point.normal)}`);
@@ -334,7 +345,9 @@
     const note = $("chart-combined-note");
     const legend = $("chart-legend");
     if (!observations.length) {
-      container.innerHTML = "<p class='muted chart-empty'>Aún no hay observaciones de precio para este día.</p>";
+      container.innerHTML = currentRangeMode === "event"
+        ? "<p class='muted chart-empty'>Aún no hay observaciones de precio en la ventana del evento.</p>"
+        : "<p class='muted chart-empty'>Aún no hay observaciones de precio para este día.</p>";
       summary.innerHTML = "";
       legend.innerHTML = "";
       note.textContent = "Cuando el worker registre un mejor precio, aparecerá aquí.";
@@ -382,7 +395,7 @@
     }).join("");
     const dates = limitedTickIndexes(observations.length).map((index) => {
       const anchor = chartAxisAnchor(index, observations.length);
-      return `<text class="axis" x="${toX(index).toFixed(1)}" y="${height - 18}" text-anchor="${anchor}">${attr(timeLabel(observations[index].at))}</text>`;
+      return `<text class="axis" x="${toX(index).toFixed(1)}" y="${height - 18}" text-anchor="${anchor}">${attr(timeLabel(observations[index].at, { withDay: currentRangeMode === "event" }))}</text>`;
     }).join("");
     const bands = observations.map((point, index) => {
       if (!meaningfulNormal || point.offer == null || point.normal == null || point.offer >= point.normal) return "";
@@ -416,11 +429,34 @@
       ${markers}${points}${dates}
     </svg>`;
     const discounts = paired.filter((point) => point.offer < point.normal);
+    const scope = currentRangeMode === "event" ? "en el evento" : "en el día";
     note.textContent = meaningfulNormal
-      ? `${offerStats.count} observaciones en el día · ${discounts.length} con ahorro frente al precio normal.`
-      : `${offerStats.count} observaciones en el día · Oferta y normal fueron iguales cuando ambas se informaron; no hubo descuento publicado.`;
+      ? `${offerStats.count} observaciones ${scope} · ${discounts.length} con ahorro frente al precio normal.`
+      : `${offerStats.count} observaciones ${scope} · Oferta y normal fueron iguales cuando ambas se informaron; no hubo descuento publicado.`;
     renderObservationsList(observations, meaningfulNormal);
     mountChartPointInteractions(container, observations, meaningfulNormal);
+  }
+
+  function syncRangeControls(payload) {
+    const modeSelect = $("cyber-evo-mode");
+    const daySelect = $("cyber-evo-day");
+    const dayWrap = $("cyber-evo-day-wrap");
+    const mode = payload?.range === "event" ? "event" : "day";
+    currentRangeMode = mode;
+    if (modeSelect) modeSelect.value = mode;
+    if (dayWrap) dayWrap.hidden = mode === "event";
+    if (!daySelect) return;
+    const available = Array.isArray(payload?.available_days) ? payload.available_days.slice() : [];
+    const selected = payload?.day || "";
+    if (selected && !available.includes(selected)) available.push(selected);
+    available.sort();
+    const options = ['<option value="">Hoy</option>'].concat(
+      available.map((day) => (
+        `<option value="${attr(day)}"${day === selected ? " selected" : ""}>${attr(dayLabel(day))} (${attr(day)})</option>`
+      )),
+    );
+    daySelect.innerHTML = options.join("");
+    if (selected) daySelect.value = selected;
   }
 
   async function load() {
@@ -428,6 +464,8 @@
     const n = params.get("n");
     const list = params.get("list") || "";
     const day = params.get("day") || "";
+    const range = params.get("range") || "day";
+    currentRangeMode = range === "event" ? "event" : "day";
     const back = $("back-cyber");
     if (back) {
       back.href = list ? `/cyber-day?list=${encodeURIComponent(list)}` : "/cyber-day";
@@ -437,15 +475,18 @@
       $("cyber-evo-meta").textContent = "Indicá ?n=… en la URL.";
       return;
     }
-    const qs = new URLSearchParams({ n: String(n) });
+    const qs = new URLSearchParams();
     if (list) qs.set("list", list);
-    if (day) qs.set("day", day);
-    // n va en path; list/day en query.
-    qs.delete("n");
+    if (currentRangeMode === "event") {
+      qs.set("range", "event");
+    } else if (day) {
+      qs.set("day", day);
+    }
     const query = qs.toString();
     const url = `/api/admin/cyber-day/items/${encodeURIComponent(n)}/evolution${query ? `?${query}` : ""}`;
     try {
       const payload = await apiJson(url);
+      syncRangeControls(payload);
       const title = payload.query
         ? `#${payload.n} · ${payload.query}`
         : `Query #${payload.n}`;
@@ -454,9 +495,12 @@
       if (h1) h1.textContent = title;
       const meta = $("cyber-evo-meta");
       if (meta) {
+        const rangeLabel = payload.range === "event"
+          ? `Evento ${payload.event_days || 3} días`
+          : (payload.day ? dayLabel(payload.day) : null);
         meta.textContent = [
           payload.list_id ? `Lista ${payload.list_id}` : null,
-          payload.day ? dayLabel(payload.day) : null,
+          rangeLabel,
           payload.timezone || SANTIAGO_TZ,
           payload.category || null,
           `${(payload.observations || []).length} observaciones`,
@@ -473,6 +517,26 @@
       }
     }
   }
+
+  $("cyber-evo-range")?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const params = new URLSearchParams(location.search);
+    const mode = $("cyber-evo-mode")?.value || "day";
+    if (mode === "event") {
+      params.set("range", "event");
+      params.delete("day");
+    } else {
+      params.delete("range");
+      const day = $("cyber-evo-day")?.value || "";
+      if (day) params.set("day", day);
+      else params.delete("day");
+    }
+    location.search = params.toString();
+  });
+  $("cyber-evo-mode")?.addEventListener("change", () => {
+    const dayWrap = $("cyber-evo-day-wrap");
+    if (dayWrap) dayWrap.hidden = ($("cyber-evo-mode")?.value === "event");
+  });
 
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", load);

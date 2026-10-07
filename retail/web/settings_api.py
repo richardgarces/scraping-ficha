@@ -771,11 +771,13 @@ def cyber_day_item_evolution(n: int, request: Request) -> dict:
         from retail.cyber_day import CyberDayError, day_evolution_report
 
         day = request.query_params.get("day")
+        range_mode = request.query_params.get("range") or request.query_params.get("mode")
         return day_evolution_report(
             repo,
             n,
             list_id=_cyber_list_param(request),
             day=str(day).strip() if day else None,
+            range_mode=str(range_mode).strip() if range_mode else None,
         )
     except CyberDayError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

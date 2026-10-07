@@ -44,8 +44,8 @@ def test_cyber_day_static_assets_exist():
     assert "Eliminar lista" in html
     assert "Importar / actualizar lista activa" in html
     assert "reemplaza las queries" in html
-    assert "cyber-day.js?v=22" in html
-    assert "styles.css?v=91" in html
+    assert "cyber-day.js?v=23" in html
+    assert "styles.css?v=92" in html
     assert 'href="/cambios-precio"' in html
     assert "application/json; charset=utf-8" in js  # import raw JSON (no FormData/multipart)
     assert "new FormData()" not in js
@@ -66,6 +66,13 @@ def test_cyber_day_static_assets_exist():
     assert "Tiendas" in html
     assert "Mejor oferta" in html
     assert "<th>Evolución</th>" in html
+    assert "<th>Descuento</th>" in html
+    assert "<th>Pronóstico</th>" in html
+    assert "cyber-legend" in html
+    assert "cyber-dashboard" in html
+    assert "renderDashboard" in js
+    assert "discountCellHtml" in js
+    assert "adviceCellHtml" in js
     assert "scroll-x" in html
     assert "/api/admin/cyber-day" in js
     assert "cyber-day/lists" in js
@@ -75,11 +82,13 @@ def test_cyber_day_static_assets_exist():
     evo_html = (root / "cyber-day-evolucion.html").read_text(encoding="utf-8")
     evo_js = (root / "cyber-day-evolucion.js").read_text(encoding="utf-8")
     assert "Evolución del precio" in evo_html
-    assert "cyber-day-evolucion.js?v=3" in evo_html
-    assert "styles.css?v=90" in evo_html
+    assert "cyber-day-evolucion.js?v=4" in evo_html
+    assert "styles.css?v=92" in evo_html
     assert "chart-observations" in evo_html
     assert "Pronóstico experimental" in evo_html
     assert "cyber-evo-forecast" in evo_html
+    assert "cyber-evo-mode" in evo_html
+    assert "Evento completo" in evo_html
     assert "Menor valor" in evo_js
     assert "Mayor descuento" in evo_js
     assert "Tienda:" in evo_js
@@ -88,6 +97,8 @@ def test_cyber_day_static_assets_exist():
     assert "renderForecast" in evo_js
     assert "Conviene comprar" in evo_js
     assert "Mejor esperar" in evo_js
+    assert 'range === "event"' in evo_js or "range === 'event'" in evo_js
+    assert "syncRangeControls" in evo_js
     assert "cyber-delete-list" in js
     assert 'method: "DELETE"' in js
     assert "cyber-query-input" in js
@@ -113,6 +124,9 @@ def test_cyber_day_static_assets_exist():
     assert "down-again" in styles
     assert "up-again" in styles
     assert "price-streak" in styles
+    assert "cyber-legend" in styles
+    assert "cyber-dashboard" in styles
+    assert "cyber-advice-chip" in styles
     assert 'nameEl.textContent = "Cyber"' in js
     assert "status === \"running\"" in js or 'status === "running"' in js
     assert "Pará la lista antes de eliminarla" in js

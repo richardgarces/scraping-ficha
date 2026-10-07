@@ -524,14 +524,25 @@ def append_best_price_observation(
     return doc
 
 
+def _recent_santiago_day_keys(days: int) -> list[str]:
+    from datetime import timedelta
+
+    from retail.pricing import santiago_day
+
+    today = santiago_day(_now())
+    count = max(1, int(days))
+    return [(today - timedelta(days=offset)).isoformat() for offset in range(count - 1, -1, -1)]
+
+
 def day_evolution_report(
     repo: Any,
     n: Any,
     *,
     list_id: str | None = None,
     day: str | None = None,
+    range_mode: str | None = None,
 ) -> dict[str, Any]:
-    """Informe de evolución del día para una query Cyber (admin)."""
+    """Informe de evolución del día (o evento multi-día) para una query Cyber (admin)."""
     try:
         query_n = int(n)
     except (TypeError, ValueError) as exc:
@@ -539,9 +550,13 @@ def day_evolution_report(
     if query_n < 1:
         raise CyberDayError("n inválido.")
     lid = resolve_list_id(repo, list_id)
-    day_key = str(day or "").strip() or _santiago_day_key()
-    if len(day_key) != 10 or day_key[4] != "-" or day_key[7] != "-":
-        raise CyberDayError("day debe ser YYYY-MM-DD.")
+    mode = str(range_mode or "").strip().lower() or "day"
+    if mode in {"event", "evento", "all", "multi"}:
+        mode = "event"
+    else:
+        mode = "day"
+
+    from retail.cyber_forecast import CYBER_EVENT_DAYS
 
     product = products_collection(repo).find_one({"list_id": lid, "n": query_n})
     if product is None:
@@ -551,11 +566,33 @@ def day_evolution_report(
     query = str((product or {}).get("query") or (product or {}).get("name") or "").strip()
     category = str((product or {}).get("category") or "").strip()
 
-    rows = list(
-        history_collection(repo)
-        .find({"list_id": lid, "n": query_n, "day": day_key})
-        .sort([("at", 1)])
+    available_days = sorted(
+        str(value)
+        for value in (history_collection(repo).distinct("day", {"list_id": lid, "n": query_n}) or [])
+        if value
     )
+
+    if mode == "event":
+        day_keys = _recent_santiago_day_keys(CYBER_EVENT_DAYS)
+        # Incluye días del evento que tengan datos aunque caigan fuera del rango corto.
+        if available_days:
+            day_keys = sorted(set(day_keys) | set(available_days[-CYBER_EVENT_DAYS:]))
+        day_key = f"{day_keys[0]}…{day_keys[-1]}" if day_keys else _santiago_day_key()
+        rows = list(
+            history_collection(repo)
+            .find({"list_id": lid, "n": query_n, "day": {"$in": day_keys}})
+            .sort([("at", 1)])
+        )
+    else:
+        day_key = str(day or "").strip() or _santiago_day_key()
+        if len(day_key) != 10 or day_key[4] != "-" or day_key[7] != "-":
+            raise CyberDayError("day debe ser YYYY-MM-DD.")
+        day_keys = [day_key]
+        rows = list(
+            history_collection(repo)
+            .find({"list_id": lid, "n": query_n, "day": day_key})
+            .sort([("at", 1)])
+        )
     from retail.store_display import public_store_label
 
     observations: list[dict[str, Any]] = []
@@ -588,7 +625,7 @@ def day_evolution_report(
             "product_id": str(row.get("product_id") or "").strip() or None,
             "name": str(row.get("name") or query or "").strip() or None,
             "url": str(row.get("url") or "").strip() or None,
-            "day": day_key,
+            "day": str(row.get("day") or day_key),
         })
 
     stats: dict[str, Any] | None = None
@@ -696,7 +733,11 @@ def day_evolution_report(
         "n": query_n,
         "query": query,
         "category": category,
-        "day": day_key,
+        "day": day_key if mode == "day" else None,
+        "days": day_keys,
+        "range": mode,
+        "available_days": available_days,
+        "event_days": CYBER_EVENT_DAYS,
         "timezone": "America/Santiago",
         "observations": observations,
         "stats": stats,
@@ -983,6 +1024,190 @@ def list_products(repo: Any, list_id: str | None = None) -> list[dict[str, Any]]
     return rows
 
 
+def discount_insight(
+    last_price: int | None,
+    last_normal: int | None,
+    *,
+    min_normal: int | None = None,
+) -> dict[str, Any]:
+    """% descuento vs normal y señal de oferta (fuerte / habitual / —)."""
+    price = _as_int(last_price)
+    normal = _as_int(last_normal)
+    if price is None or price <= 0 or normal is None or normal <= price:
+        return {
+            "discount_pct": None,
+            "discount_amount": None,
+            "discount_signal": None,
+            "discount_label": "—",
+        }
+    amount = normal - price
+    pct = int(round((amount * 100) / normal))
+    floor = _as_int(min_normal)
+    strong = pct >= 35 or (floor is not None and floor > 0 and price <= int(floor * 0.9))
+    if strong:
+        signal = "fuerte"
+        label = f"−{pct}% · oferta fuerte"
+    elif pct < 10:
+        signal = "habitual"
+        label = f"−{pct}% · habitual"
+    else:
+        signal = "ok"
+        label = f"−{pct}%"
+    return {
+        "discount_pct": pct,
+        "discount_amount": amount,
+        "discount_signal": signal,
+        "discount_label": label,
+    }
+
+
+def event_dashboard_from_products(products: list[dict[str, Any]]) -> dict[str, Any]:
+    """KPIs de la lista activa a partir de filas ya materializadas (sin Mongo extra)."""
+    from retail.store_display import public_store_label
+
+    total = len(products)
+    with_price = 0
+    down = up = unchanged = 0
+    drops: list[dict[str, Any]] = []
+    rises: list[dict[str, Any]] = []
+    store_wins: dict[str, int] = {}
+    advice_counts = {"comprar": 0, "esperar": 0, "observar": 0}
+
+    for row in products:
+        price = _as_int(row.get("last_price"))
+        if price is not None and price > 0:
+            with_price += 1
+        direction = str(row.get("price_direction") or row.get("last_delta_direction") or "")
+        prev = _as_int(row.get("prev_best_price"))
+        delta = None
+        if price is not None and prev is not None and price != prev:
+            delta = price - prev
+        if direction in {"down", "down_again"} or (delta is not None and delta < 0):
+            down += 1
+            if delta is not None:
+                drops.append({
+                    "n": row.get("n"),
+                    "query": row.get("query") or row.get("name") or "",
+                    "delta": delta,
+                    "delta_pct": round((delta * 100) / prev, 1) if prev else None,
+                    "last_price": price,
+                    "prev_best_price": prev,
+                    "best_store_title": row.get("best_store_title") or row.get("best_store"),
+                })
+        elif direction in {"up", "up_again"} or (delta is not None and delta > 0):
+            up += 1
+            if delta is not None:
+                rises.append({
+                    "n": row.get("n"),
+                    "query": row.get("query") or row.get("name") or "",
+                    "delta": delta,
+                    "delta_pct": round((delta * 100) / prev, 1) if prev else None,
+                    "last_price": price,
+                    "prev_best_price": prev,
+                    "best_store_title": row.get("best_store_title") or row.get("best_store"),
+                })
+        else:
+            unchanged += 1
+        store = str(row.get("best_store") or "").strip()
+        if store and price is not None and price > 0:
+            store_wins[store] = store_wins.get(store, 0) + 1
+        advice = row.get("buy_advice") if isinstance(row.get("buy_advice"), dict) else {}
+        key = str(advice.get("advice") or "").strip()
+        if key in advice_counts:
+            advice_counts[key] += 1
+
+    drops.sort(key=lambda item: item.get("delta") or 0)
+    rises.sort(key=lambda item: -(item.get("delta") or 0))
+    top_stores = [
+        {
+            "store": store,
+            "store_title": public_store_label(store),
+            "wins": wins,
+        }
+        for store, wins in sorted(store_wins.items(), key=lambda kv: (-kv[1], kv[0]))[:8]
+    ]
+    return {
+        "total": total,
+        "with_price": with_price,
+        "without_price": max(0, total - with_price),
+        "coverage_pct": int(round((with_price * 100) / total)) if total else 0,
+        "down": down,
+        "up": up,
+        "unchanged": unchanged,
+        "top_drops": drops[:10],
+        "top_rises": rises[:10],
+        "top_stores": top_stores,
+        "advice_counts": advice_counts,
+    }
+
+
+def attach_buy_advice_to_products(
+    repo: Any,
+    list_id: str,
+    products: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Adjunta consejo comprar/esperar/observar con una sola lectura de historial."""
+    from collections import defaultdict
+
+    from retail.cyber_forecast import (
+        CYBER_EVENT_DAYS,
+        CYBER_FORECAST_MIN_OBSERVATIONS,
+        cyber_buy_advice,
+        project_cyber_event_prices,
+        remaining_cyber_horizon,
+    )
+
+    lid = resolve_list_id(repo, list_id)
+    ns = [int(row["n"]) for row in products if _as_int(row.get("n"))]
+    by_n: dict[int, list[dict[str, Any]]] = defaultdict(list)
+    if ns:
+        try:
+            from retail.pricing import santiago_day
+            from datetime import timedelta
+
+            today = santiago_day(_now())
+            day_keys = [(today - timedelta(days=offset)).isoformat() for offset in range(CYBER_EVENT_DAYS)]
+            cursor = history_collection(repo).find(
+                {"list_id": lid, "n": {"$in": ns}, "day": {"$in": day_keys}},
+                {"n": 1, "price": 1, "at": 1},
+            ).sort([("at", 1)])
+            for row in cursor:
+                n = _as_int(row.get("n"))
+                price = _as_int(row.get("price"))
+                at = row.get("at")
+                if n is None or price is None or price <= 0 or not isinstance(at, datetime):
+                    continue
+                if at.tzinfo is None:
+                    at = at.replace(tzinfo=timezone.utc)
+                by_n[n].append({"price": float(price), "scraped_at": at})
+        except Exception as exc:
+            print(f"cyber-day: batch advice historial falló: {exc}", flush=True)
+
+    for row in products:
+        n = _as_int(row.get("n"))
+        points = by_n.get(n or -1) or []
+        prices = [point["price"] for point in points]
+        if len(prices) < CYBER_FORECAST_MIN_OBSERVATIONS:
+            row["buy_advice"] = {
+                "advice": "observar",
+                "label": "Sin señal",
+                "reason": "Faltan observaciones Cyber para el pronóstico.",
+            }
+            continue
+        current = float(_as_int(row.get("last_price")) or prices[-1])
+        first_at = points[0]["scraped_at"]
+        last_at = points[-1]["scraped_at"]
+        span_seconds = max(0.0, (last_at - first_at).total_seconds())
+        horizon = remaining_cyber_horizon(points)
+        projected = project_cyber_event_prices(prices, horizon=horizon, span_seconds=span_seconds)
+        row["buy_advice"] = cyber_buy_advice(
+            current=current,
+            prices=prices,
+            point_forecast=projected,
+        )
+    return products
+
+
 def product_row_view(row: dict[str, Any]) -> dict[str, Any]:
     """Fila JSON-safe para la tabla admin (sin datetime ni firmas pesadas)."""
     derived = stats_from_signatures(row.get("last_matches") if isinstance(row.get("last_matches"), dict) else {})
@@ -1025,6 +1250,8 @@ def product_row_view(row: dict[str, Any]) -> dict[str, Any]:
     prev_best_store_title = (
         public_store_label(prev_best_store) if prev_best_store else None
     )
+    discount = discount_insight(last_price, last_normal, min_normal=min_normal)
+    advice = row.get("buy_advice") if isinstance(row.get("buy_advice"), dict) else None
     return {
         "id": str(row.get("id") or row.get("_id") or ""),
         "n": row.get("n"),
@@ -1044,6 +1271,11 @@ def product_row_view(row: dict[str, Any]) -> dict[str, Any]:
             delta_streak=delta_streak,
         ),
         "last_price_normal": last_normal,
+        "discount_pct": discount["discount_pct"],
+        "discount_amount": discount["discount_amount"],
+        "discount_signal": discount["discount_signal"],
+        "discount_label": discount["discount_label"],
+        "buy_advice": advice,
         "stores_scraped": int(stores or 0),
         "max_price_normal": max_normal,
         "min_price_normal": min_normal,
@@ -1772,6 +2004,11 @@ def status_payload(
             enrich_budget -= 1
         else:
             products.append(product_row_view(row))
+    try:
+        attach_buy_advice_to_products(repo, lid, products)
+    except Exception as exc:
+        print(f"cyber-day: attach buy advice falló: {exc}", flush=True)
+    dashboard = event_dashboard_from_products(products)
     meta = get_list_meta(repo, lid)
     return {
         "ok": True,
@@ -1782,6 +2019,7 @@ def status_payload(
         "products": products,
         "products_preview": products,
         "products_count": total or len(products),
+        "dashboard": dashboard,
     }
 
 

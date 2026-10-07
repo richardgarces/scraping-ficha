@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#258fdf">
   <title>Evolución Cyber — día</title>
   <script>(function(){var m=localStorage.getItem("retail-theme");if(m==="day"||m==="night"){document.documentElement.dataset.theme=m;return;}var h=new Date().getHours();document.documentElement.dataset.theme=(h>=7&&h<19)?"day":"night";})();</script>
-  <link rel="stylesheet" href="/static/styles.css?v=90">
+  <link rel="stylesheet" href="/static/styles.css?v=92">
 </head>
 <body>
   <header class="top">
@@ -28,6 +28,20 @@
     <p id="flash" class="summary" hidden role="status" aria-live="polite"></p>
     <section class="panel" id="cyber-evolution-panel">
       <p id="cyber-evo-meta" class="muted">Cargando…</p>
+      <form id="cyber-evo-range" class="cyber-evo-range" aria-label="Rango del informe">
+        <label>Vista
+          <select id="cyber-evo-mode">
+            <option value="day">Un día</option>
+            <option value="event">Evento completo (multi-día)</option>
+          </select>
+        </label>
+        <label id="cyber-evo-day-wrap">Día
+          <select id="cyber-evo-day">
+            <option value="">Hoy</option>
+          </select>
+        </label>
+        <button type="submit" class="secondary">Actualizar</button>
+      </form>
       <section class="price-history-card price-history-combined" aria-labelledby="combined-chart-title">
         <div class="price-history-heading">
           <div>
@@ -57,6 +71,6 @@
   </main>
   <script src="/static/prices.js?v=36"></script>
   <script src="/static/price-history.js?v=1"></script>
-  <script src="/static/cyber-day-evolucion.js?v=3"></script>
+  <script src="/static/cyber-day-evolucion.js?v=4"></script>
 </body>
 </html>
