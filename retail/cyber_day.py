@@ -1450,13 +1450,88 @@ def touch_worker(repo: Any, list_id: str | None = None) -> None:
     save_run(repo, run, list_id=lid)
 
 
+def _money_clp(value: Any) -> str:
+    n = _as_int(value)
+    if n is None:
+        return "—"
+    return f"${n:,}".replace(",", ".")
+
+
+def _price_move_label(previous: Any, current: Any) -> str:
+    old = _as_int(previous)
+    new = _as_int(current)
+    if old is None or new is None or old == new:
+        return "cambió"
+    return "bajó" if new < old else "subió"
+
+
+def query_best_price_change(
+    item: dict[str, Any] | None,
+    matches: list[dict[str, Any]],
+    summary: dict[str, Any] | None,
+    *,
+    query: str,
+) -> dict[str, Any] | None:
+    """Si el mejor precio de la query subió o bajó, arma el payload de aviso."""
+    old_best = _as_int((item or {}).get("last_price"))
+    new_best = _as_int((summary or {}).get("last_price"))
+    if old_best is None or new_best is None or old_best == new_best:
+        return None
+    best_offer: dict[str, Any] | None = None
+    for offer in matches or []:
+        price = _offer_price(offer)
+        if price == new_best:
+            best_offer = offer
+            break
+    store = str((best_offer or {}).get("store") or "")
+    product_id = str((best_offer or {}).get("product_id") or "")
+    name = str((best_offer or {}).get("name") or query or "Producto").strip() or "Producto"
+    direction = _price_move_label(old_best, new_best)
+    return {
+        "store": store or "cyber",
+        "product_id": product_id or "best",
+        "name": name,
+        "url": (best_offer or {}).get("url") or (summary or {}).get("best_offer_url")
+        or ficha_path(store, product_id),
+        "image_url": (best_offer or {}).get("image_url") or "",
+        "previous_price": old_best,
+        "price": new_best,
+        "price_normal": _as_int((best_offer or {}).get("price_normal")),
+        "query": query,
+        "kind": "best_price",
+        "message": (
+            f"Cyber Day ({query}): mejor precio {direction} "
+            f"{_money_clp(old_best)} → {_money_clp(new_best)}"
+        ),
+    }
+
+
+def _offer_change_covers_best(changes: list[dict[str, Any]], best_change: dict[str, Any]) -> bool:
+    """True si ya avisamos el mismo match que es el nuevo mejor precio."""
+    store = str(best_change.get("store") or "")
+    product_id = str(best_change.get("product_id") or "")
+    price = _as_int(best_change.get("price"))
+    if not store or not product_id or price is None:
+        return False
+    for change in changes:
+        if (
+            str(change.get("store") or "") == store
+            and str(change.get("product_id") or "") == product_id
+            and _as_int(change.get("price")) == price
+        ):
+            return True
+    return False
+
+
 def notify_cyber_change(repo: Any, change: dict[str, Any]) -> int:
-    """Telegram admin + alertas a quienes siguen el producto (telegram/push)."""
+    """Telegram admin + push admin + alertas a quienes siguen (subidas y bajadas)."""
     sent = 0
     store = str(change.get("store") or "")
     product_id = str(change.get("product_id") or "")
     price = int(change.get("price") or 0)
+    previous = _as_int(change.get("previous_price"))
     entity = f"cyber:{store}:{product_id}"
+    direction = _price_move_label(previous, price)
     from retail.price_alerts import notify_price_changes, price_change_message
 
     try:
@@ -1485,25 +1560,28 @@ def notify_cyber_change(repo: Any, change: dict[str, Any]) -> int:
 
         system_channels = set(load_rules().get("channels") or [])
         if "push" not in system_channels:
-            return sent
-        users = getattr(repo, "users", None)
-        if users is None:
-            return sent
-        for user in users.find({"role": "admin", "status": "approved"}):
-            prefs = user.get("notification_preferences") or {}
-            if "push" not in (prefs.get("channels") or []) or not user.get("push_subscriptions"):
-                continue
-            user_id = str(user.get("_id"))
-            if hasattr(repo, "claim_user_notification_send"):
-                if not repo.claim_user_notification_send(user_id, "push", entity, price):
-                    continue
-            payload = {
-                **change,
-                "message": change.get("message")
-                or f"Cyber Day: {change.get('name')} → ${price:,}".replace(",", "."),
-            }
-            if send_user_push(user, payload, repo=repo, tag=entity):
-                sent += 1
+            print("cyber-day: push omitido (canal push desactivado en reglas)", flush=True)
+        else:
+            users = getattr(repo, "users", None)
+            if users is not None:
+                for user in users.find({"role": "admin", "status": "approved"}):
+                    prefs = user.get("notification_preferences") or {}
+                    if "push" not in (prefs.get("channels") or []) or not user.get("push_subscriptions"):
+                        continue
+                    user_id = str(user.get("_id"))
+                    if hasattr(repo, "claim_user_notification_send"):
+                        if not repo.claim_user_notification_send(user_id, "push", entity, price):
+                            continue
+                    payload = {
+                        **change,
+                        "message": change.get("message")
+                        or (
+                            f"Cyber Day: {change.get('name')} {direction} "
+                            f"{_money_clp(previous)} → {_money_clp(price)}"
+                        ),
+                    }
+                    if send_user_push(user, payload, repo=repo, tag=entity):
+                        sent += 1
     except Exception as exc:
         print(f"cyber-day: push admin falló: {exc}", flush=True)
     return sent
@@ -1756,9 +1834,17 @@ def process_one(repo: Any, *, delay: float = 0.0, list_id: str | None = None) ->
         current_sigs, changes, summary = detect_changes(
             item.get("last_matches"), tracked, query=query,
         )
-        had_history = bool(item.get("last_matches"))
+        had_history = bool(item.get("last_matches")) or item.get("last_price") is not None
+        notify_queue: list[dict[str, Any]] = []
         if had_history:
-            for change in changes:
+            # Avisos por match (subidas y bajadas; price_alerts ya dice bajó/subió).
+            notify_queue.extend(changes)
+            # Mejor precio de la query: también si cambia por un match nuevo
+            # (primera firma de esa oferta) o por cambio de quién es el mínimo.
+            best_change = query_best_price_change(item, tracked, summary, query=query)
+            if best_change and not _offer_change_covers_best(changes, best_change):
+                notify_queue.append(best_change)
+            for change in notify_queue:
                 sent = notify_cyber_change(repo, change)
                 notified += sent
                 changed += 1
@@ -1772,6 +1858,9 @@ def process_one(repo: Any, *, delay: float = 0.0, list_id: str | None = None) ->
                     "price": change["price"],
                     "notified": sent,
                     "list_id": lid,
+                    "direction": _price_move_label(
+                        change.get("previous_price"), change.get("price"),
+                    ),
                 }
         if changed:
             run["notified_count"] = int(run.get("notified_count") or 0) + changed

@@ -11,7 +11,9 @@ from retail.cyber_day import (
     CYBER_GROUP_ID,
     SEED_PATH,
     CyberDayError,
+    _offer_change_covers_best,
     _prev_best_price_patch,
+    _price_move_label,
     as_cron_group,
     continue_run,
     create_list,
@@ -35,6 +37,7 @@ from retail.cyber_day import (
     product_row_view,
     products_count,
     progress_view,
+    query_best_price_change,
     repair_duplicates,
     restart_run,
     start_run,
@@ -188,6 +191,62 @@ def test_detect_changes_skips_first_sighting_then_notifies():
     assert changes2[0]["price"] == 850000
     assert changes2[0]["query"] == "iPhone"
     assert "falabella:p1" in current2
+
+    # Subida también genera cambio (no solo bajadas)
+    matches[0]["price"] = 920000
+    _, changes_up, _ = detect_changes(current2, matches, query="iPhone")
+    assert len(changes_up) == 1
+    assert changes_up[0]["previous_price"] == 850000
+    assert changes_up[0]["price"] == 920000
+
+
+def test_query_best_price_change_up_and_down():
+    item = {"last_price": 100000}
+    matches = [{
+        "store": "paris",
+        "product_id": "tv-1",
+        "name": "TV",
+        "price": 90000,
+        "image_url": "https://example.com/a.jpg",
+    }]
+    summary = summarize_match_stats(matches)
+    drop = query_best_price_change(item, matches, summary, query="TV OLED")
+    assert drop is not None
+    assert drop["previous_price"] == 100000
+    assert drop["price"] == 90000
+    assert drop["kind"] == "best_price"
+    assert "bajó" in drop["message"]
+    assert _price_move_label(100000, 90000) == "bajó"
+
+    rise = query_best_price_change(
+        {"last_price": 90000},
+        [{**matches[0], "price": 110000}],
+        {"last_price": 110000, "best_offer_url": "/producto?store=paris&id=tv-1"},
+        query="TV OLED",
+    )
+    assert rise is not None
+    assert rise["price"] == 110000
+    assert "subió" in rise["message"]
+    assert _price_move_label(90000, 110000) == "subió"
+
+    # Match nuevo más barato: detect_changes no emite, pero sí el mejor precio
+    item2 = {
+        "last_price": 100000,
+        "last_matches": {"falabella:old": offer_signature(100000, 0, 0)},
+    }
+    new_matches = [
+        {"store": "falabella", "product_id": "old", "name": "TV", "price": 100000},
+        {"store": "ripley", "product_id": "new", "name": "TV Ripley", "price": 80000},
+    ]
+    summary2 = summarize_match_stats(new_matches)
+    best = query_best_price_change(item2, new_matches, summary2, query="TV")
+    assert best is not None
+    assert best["price"] == 80000
+    assert best["store"] == "ripley"
+    sigs, offer_changes, _ = detect_changes(item2["last_matches"], new_matches, query="TV")
+    assert offer_changes == []  # ripley es primera observación
+    assert not _offer_change_covers_best(offer_changes, best)
+    assert "ripley:new" in sigs
 
 
 def test_price_direction_streak_and_patch():
@@ -368,6 +427,31 @@ def test_notify_on_change_mocked(repo, monkeypatch):
     assert stored.get("delta_streak") == 1
     view = product_row_view({**stored, "id": str(stored["_id"])})
     assert view["price_direction"] == "down"
+
+    # Tercera observación: subida → también notifica
+    def fake_collect_rise(repo, query, **_kwargs):
+        return [{
+            "store": "falabella",
+            "product_id": "iphone-x",
+            "name": query,
+            "price": 750000,
+            "price_normal": 999000,
+            "catalog_id": "cat-1",
+        }]
+
+    monkeypatch.setattr("retail.cyber_day.collect_query_matches", fake_collect_rise)
+    run = load_run(repo)
+    run["cursor"] = 0
+    run["processed"] = 0
+    save_run(repo, run)
+    sent["n"] = 0
+    third = process_one(repo, delay=0)
+    assert third["ok"] is True
+    assert third["changed"] == 1
+    assert sent["n"] == 1
+    stored2 = products_collection(repo).find_one({"n": first.get("n") or 1})
+    assert stored2.get("last_price") == 750000
+    assert stored2.get("last_delta_direction") == "up"
 
 
 def test_parse_import_json_and_csv():
