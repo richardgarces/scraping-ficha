@@ -2509,11 +2509,17 @@ def _finish_lap(repo: Any, run: dict[str, Any], total: int, *, list_id: str | No
         "list_id": lid,
     })
     save_run(repo, run, list_id=lid)
-    # Tras cada vuelta: alimentar pronóstico experimental (ventana Cyber 3 días).
+    # Tras cada vuelta: muestra de precios (aunque no cambien) + pronóstico ventana Cyber.
     try:
-        from retail.cyber_forecast import ensure_cyber_list_forecasts, matches_forecast_cyber_list
+        from retail.cyber_forecast import (
+            ensure_cyber_list_forecasts,
+            matches_forecast_cyber_list,
+            record_cyber_lap_samples,
+        )
 
         if matches_forecast_cyber_list(lid):
+            finished_lap = next_lap - 1
+            sample_stats = record_cyber_lap_samples(repo, lid, finished_lap, at=now)
             forecast_stats = ensure_cyber_list_forecasts(
                 repo,
                 list_id=lid,
@@ -2522,7 +2528,8 @@ def _finish_lap(repo: Any, run: dict[str, Any], total: int, *, list_id: str | No
             )
             run["last_forecast_pass"] = {
                 "at": _iso(now),
-                "lap": next_lap - 1,
+                "lap": finished_lap,
+                "lap_samples": sample_stats.get("inserted"),
                 "written": forecast_stats.get("written"),
                 "written_cyber_event": forecast_stats.get("written_cyber_event"),
                 "fresh": forecast_stats.get("fresh"),
@@ -2533,7 +2540,8 @@ def _finish_lap(repo: Any, run: dict[str, Any], total: int, *, list_id: str | No
             }
             save_run(repo, run, list_id=lid)
             print(
-                f"cyber-day [{lid}] forecast pass lap {next_lap - 1}: "
+                f"cyber-day [{lid}] forecast pass lap {finished_lap}: "
+                f"samples={sample_stats.get('inserted')} "
                 f"written={forecast_stats.get('written')} "
                 f"cyber_event={forecast_stats.get('written_cyber_event')} "
                 f"fresh={forecast_stats.get('fresh')} "

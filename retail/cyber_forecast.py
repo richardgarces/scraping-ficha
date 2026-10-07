@@ -45,7 +45,7 @@ CYBER_FORECAST_HORIZON = max(1, int(os.environ.get("CYBER_FORECAST_HORIZON") or 
 CYBER_EVENT_DAYS = max(1, int(os.environ.get("CYBER_EVENT_DAYS") or "3"))
 CYBER_EVENT_HORIZON = max(1, int(os.environ.get("CYBER_EVENT_HORIZON") or str(CYBER_EVENT_DAYS)))
 CYBER_FORECAST_MIN_OBSERVATIONS = max(
-    3, int(os.environ.get("CYBER_FORECAST_MIN_OBSERVATIONS") or "8")
+    3, int(os.environ.get("CYBER_FORECAST_MIN_OBSERVATIONS") or "3")
 )
 CYBER_EVENT_REFRESH_HOURS = max(
     1, int(os.environ.get("CYBER_EVENT_REFRESH_HOURS") or "2")
@@ -785,8 +785,10 @@ def ensure_forecast_for_product(
             "has_forecast": existing is not None,
         }
 
-    # 1) Camino Cyber-evento: muchas vueltas / puntos del mismo día bastan.
-    if prefer_cyber_event and changes >= CYBER_FORECAST_MIN_OBSERVATIONS:
+    # 1) Camino Cyber-evento primero: muchas vueltas / puntos del mismo día bastan
+    # (sin depender de timesfm_poc ni de 30 días calendario).
+    event_block_reason = None
+    if prefer_cyber_event:
         event_prepared, event_reason = prepare_cyber_event_product(
             repo,
             store_n,
@@ -795,36 +797,28 @@ def ensure_forecast_for_product(
         )
         if event_prepared is not None:
             return _write_cyber_event_forecast(repo, event_prepared, changes=changes)
-        # Si no alcanzó observaciones pero el conteo decía que sí, seguimos al diario.
         event_block_reason = event_reason
-    else:
-        event_block_reason = None
 
     # 2) Camino diario clásico (TimesFM / baseline con ≥30 días).
-    prepared, reason = prepare_cyber_enriched_product(
-        repo,
-        store_n,
-        product_n,
-        list_ids=lids,
-        min_history_days=min_history_days,
-    )
+    prepared = None
+    reason = event_block_reason or "invalid"
+    try:
+        prepared, reason = prepare_cyber_enriched_product(
+            repo,
+            store_n,
+            product_n,
+            list_ids=lids,
+            min_history_days=min_history_days,
+        )
+    except ModuleNotFoundError as exc:
+        # En web/cyber-worker a veces no está timesfm_poc; el camino evento ya cubrió el gap.
+        reason = event_block_reason or f"daily_prepare_unavailable:{exc.name or 'module'}"
+        prepared = None
     if prepared is None:
-        # Último recurso: si hay densas observaciones Cyber aunque el umbral de
-        # "changes" fuese bajo, reintentar evento con el mínimo de puntos.
-        if prefer_cyber_event:
-            event_prepared, event_reason = prepare_cyber_event_product(
-                repo,
-                store_n,
-                product_n,
-                list_ids=lids,
-            )
-            if event_prepared is not None:
-                return _write_cyber_event_forecast(repo, event_prepared, changes=changes)
-            event_block_reason = event_block_reason or event_reason
         return {
             "ok": False,
             "action": "blocked",
-            "reason": reason or event_block_reason or "invalid",
+            "reason": event_block_reason or reason or "invalid",
             "forecast_key": f"{store_n}:{product_n}",
             "cyber_changes": changes,
             "has_forecast": existing is not None,
@@ -897,15 +891,24 @@ def ensure_cyber_list_forecasts(
         "results": [],
     }
     for store, product_id in keys:
-        result = ensure_forecast_for_product(
-            repo,
-            store,
-            product_id,
-            list_ids=lids,
-            use_timesfm=use_timesfm,
-            force=force,
-            prefer_cyber_event=prefer_cyber_event,
-        )
+        try:
+            result = ensure_forecast_for_product(
+                repo,
+                store,
+                product_id,
+                list_ids=lids,
+                use_timesfm=use_timesfm,
+                force=force,
+                prefer_cyber_event=prefer_cyber_event,
+            )
+        except Exception as exc:
+            result = {
+                "ok": False,
+                "action": "blocked",
+                "reason": f"error:{exc}",
+                "forecast_key": f"{store}:{product_id}",
+                "has_forecast": False,
+            }
         action = result.get("action")
         if action == "written":
             stats["written"] += 1
@@ -919,6 +922,91 @@ def ensure_cyber_list_forecasts(
                 stats["missing_forecast_with_many_changes"] += 1
         stats["results"].append(result)
     return stats
+
+
+def record_cyber_lap_samples(
+    repo: Any,
+    list_id: str,
+    lap: int,
+    *,
+    at: datetime | None = None,
+) -> dict[str, Any]:
+    """Al cerrar una vuelta: una muestra de precio por producto aunque no haya cambiado.
+
+    El historial Cyber solo guarda cambios; sin muestras por vuelta el pronóstico de
+    evento no ve las ~50–70 vueltas si el precio se mantiene. Una fila por
+    (list_id, n, day, lap) alimenta la serie densa del camino cyber_event.
+    """
+    from retail.cyber_day import history_collection, products_collection, resolve_list_id
+
+    lid = resolve_list_id(repo, list_id)
+    if not matches_forecast_cyber_list(lid):
+        return {"ok": True, "skipped": True, "reason": "list_not_in_forecast_scope", "inserted": 0}
+    moment = at or _now()
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=timezone.utc)
+    day = _day_key(moment)
+    lap_n = max(0, int(lap or 0))
+    coll = history_collection(repo)
+    inserted = 0
+    fed = 0
+    for item in products_collection(repo).find({"list_id": lid}):
+        price = _as_int(item.get("last_price"))
+        if price is None:
+            continue
+        try:
+            query_n = int(item.get("n"))
+        except (TypeError, ValueError):
+            continue
+        store = _norm_store(item.get("best_store"))
+        product_id = _norm_product_id(item.get("last_product_id"))
+        if not store or not product_id:
+            for match_store, match_pid in _match_keys_from_last_matches(item.get("last_matches")):
+                store = store or match_store
+                product_id = product_id or match_pid
+                break
+        if not store or not product_id:
+            continue
+        existing = coll.find_one({
+            "list_id": lid,
+            "n": query_n,
+            "day": day,
+            "lap": lap_n,
+            "kind": "lap_sample",
+        })
+        if existing is not None:
+            continue
+        price_normal = _as_int(item.get("last_price_normal"))
+        doc = {
+            "list_id": lid,
+            "n": query_n,
+            "query": str(item.get("query") or "").strip(),
+            "day": day,
+            "at": moment,
+            "price": price,
+            "price_normal": price_normal,
+            "store": store,
+            "product_id": product_id,
+            "name": str(item.get("name") or item.get("query") or "").strip() or None,
+            "kind": "lap_sample",
+            "lap": lap_n,
+        }
+        try:
+            coll.insert_one(doc)
+            inserted += 1
+        except Exception as exc:
+            print(f"cyber-forecast: lap sample falló n={query_n}: {exc}", flush=True)
+            continue
+        if feed_cyber_observation_to_product_history(repo, doc):
+            fed += 1
+    return {
+        "ok": True,
+        "list_id": lid,
+        "lap": lap_n,
+        "day": day,
+        "inserted": inserted,
+        "fed_history": fed,
+    }
 
 
 def maybe_refresh_after_cyber_observation(

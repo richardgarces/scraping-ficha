@@ -30,6 +30,7 @@ from retail.cyber_forecast import (
     prepare_cyber_enriched_product,
     prepare_cyber_event_product,
     project_cyber_event_prices,
+    record_cyber_lap_samples,
 )
 
 
@@ -303,6 +304,37 @@ def test_buy_advice_comprar_near_cyber_low():
     projected = [83_400, 83_300, 83_200]
     advice = cyber_buy_advice(current=83_500, prices=prices, point_forecast=projected)
     assert advice["advice"] == "comprar"
+
+
+def test_record_cyber_lap_samples_feeds_even_if_price_unchanged(repo):
+    ensure_seed(repo)
+    create_list(repo, name="Cyber Oct 2026", slug="cyber_oct2026", use_seed=False)
+    store, product_id = "falabella", "LAP-STABLE"
+    repo.collection.insert_one({
+        "store": store,
+        "product_id": product_id,
+        "name": "Stable",
+        "price": 200_000,
+        "price_history": [],
+    })
+    repo.cyber_day_products.insert_one({
+        "list_id": "cyber_oct2026",
+        "n": 7,
+        "order": 7,
+        "query": "Stable",
+        "last_price": 200_000,
+        "last_price_normal": 250_000,
+        "best_store": store,
+        "last_product_id": product_id,
+        "last_matches": {f"{store}:{product_id}": "200000:0:0"},
+    })
+    first = record_cyber_lap_samples(repo, "cyber_oct2026", lap=56, at=NOW)
+    second = record_cyber_lap_samples(repo, "cyber_oct2026", lap=56, at=NOW)
+    third = record_cyber_lap_samples(repo, "cyber_oct2026", lap=57, at=NOW + timedelta(minutes=30))
+    assert first["inserted"] == 1
+    assert second["inserted"] == 0  # misma vuelta + día
+    assert third["inserted"] == 1
+    assert cyber_change_count(repo, store, product_id, list_ids=["cyber_oct2026"]) >= 2
 
 
 def test_prepare_cyber_event_without_30_calendar_days(repo):
