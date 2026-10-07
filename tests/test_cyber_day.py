@@ -11,6 +11,8 @@ from retail.cyber_day import (
     CYBER_GROUP_ID,
     SEED_PATH,
     CyberDayError,
+    _best_tracker_changed,
+    _last_change_at_patch,
     _offer_change_covers_best,
     _prev_best_price_patch,
     _price_move_label,
@@ -579,6 +581,31 @@ def test_price_direction_streak_and_patch():
     assert view["best_store"] == "paris"
     assert view["prev_best_store"] == "falabella"
     assert view["prev_best_store_title"]
+    assert view["last_change_at"] is None
+
+
+def test_last_change_at_only_on_meaningful_best_change():
+    """last_change_at: precio o tienda ganadora; no en misma muestra ni primer precio."""
+    now = datetime(2026, 10, 7, 14, 6, tzinfo=timezone.utc)
+    assert _best_tracker_changed(None, 100, "falabella") is False
+    assert _best_tracker_changed({"last_price": 100, "best_store": "falabella"}, 100, "falabella") is False
+    assert _best_tracker_changed({"last_price": 100, "best_store": "falabella"}, 90, "falabella") is True
+    assert _best_tracker_changed({"last_price": 100, "best_store": "falabella"}, 100, "paris") is True
+    assert _last_change_at_patch({"last_price": 100, "best_store": "falabella"}, 100, "falabella", at=now) == {}
+    assert _last_change_at_patch(None, 100, "falabella", at=now) == {}
+    patch = _last_change_at_patch(
+        {"last_price": 100, "best_store": "falabella"},
+        90,
+        "paris",
+        at=now,
+    )
+    assert patch == {"last_change_at": now}
+    view = product_row_view({
+        "last_price": 90,
+        "best_store": "paris",
+        "last_change_at": now,
+    })
+    assert view["last_change_at"] == "2026-10-07T14:06:00+00:00"
 
 
 def test_match_stats_todo_medio_and_product_row_view():
@@ -673,6 +700,13 @@ def test_notify_on_change_mocked(repo, monkeypatch):
     assert first.get("history_recorded") is True
     assert history_collection(repo).count_documents({"n": first.get("n") or 1}) == 1
 
+    from retail.cyber_day import load_run, products_collection, save_run
+
+    after_first = products_collection(repo).find_one({"n": first.get("n") or 1})
+    assert after_first is not None
+    assert after_first.get("last_change_at") is None
+    assert after_first.get("last_observed_at") is not None
+
     # Segunda observación con precio distinto
     def fake_collect_drop(repo, query, **_kwargs):
         return [{
@@ -686,8 +720,6 @@ def test_notify_on_change_mocked(repo, monkeypatch):
 
     monkeypatch.setattr("retail.cyber_day.collect_query_matches", fake_collect_drop)
     # Rewind cursor: process_one avanzó; volver a item 0
-    from retail.cyber_day import load_run, save_run
-
     run = load_run(repo)
     run["cursor"] = 0
     run["processed"] = 0
@@ -700,16 +732,29 @@ def test_notify_on_change_mocked(repo, monkeypatch):
     assert second.get("history_recorded") is True
     assert history_collection(repo).count_documents({"n": first.get("n") or 1}) == 2
 
-    from retail.cyber_day import products_collection
-
     stored = products_collection(repo).find_one({"n": first.get("n") or 1})
     assert stored is not None
     assert stored.get("last_price") == 700000
     assert stored.get("prev_best_price") == 800000
     assert stored.get("last_delta_direction") == "down"
     assert stored.get("delta_streak") == 1
+    assert stored.get("last_change_at") is not None
+    change_at = stored.get("last_change_at")
     view = product_row_view({**stored, "id": str(stored["_id"])})
     assert view["price_direction"] == "down"
+    assert view["last_change_at"]
+
+    # Misma muestra otra vez: last_change_at no se pisa; last_observed_at sí
+    run = load_run(repo)
+    run["cursor"] = 0
+    run["processed"] = 0
+    save_run(repo, run)
+    same = process_one(repo, delay=0)
+    assert same["ok"] is True
+    assert same["changed"] == 0
+    stored_same = products_collection(repo).find_one({"n": first.get("n") or 1})
+    assert stored_same.get("last_change_at") == change_at
+    assert stored_same.get("last_observed_at") is not None
 
     # Tercera observación: subida → también notifica
     def fake_collect_rise(repo, query, **_kwargs):
@@ -885,6 +930,7 @@ def test_export_csv_and_json(repo):
     assert "stores_scraped" in header
     assert "max_price_normal" in header
     assert "best_store" in header
+    assert "last_change_at" in header
     assert "best_offer_url" in header
     assert csv_text.count("\n") >= 100
     payload = export_json(repo)
@@ -893,6 +939,7 @@ def test_export_csv_and_json(repo):
     assert payload["items"][0]["query"]
     assert "stores_scraped" in payload["items"][0]
     assert "best_store" in payload["items"][0]
+    assert "last_change_at" in payload["items"][0]
     assert "best_offer_url" in payload["items"][0]
 
 

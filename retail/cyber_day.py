@@ -240,6 +240,40 @@ def _summary_patch(summary: dict[str, Any] | None) -> dict[str, Any]:
     }
 
 
+def _best_tracker_changed(
+    item: dict[str, Any] | None,
+    new_price: Any,
+    new_store: Any = None,
+) -> bool:
+    """True si ya había mejor precio y cambió el precio o la tienda ganadora.
+
+    No cuenta la primera observación ni vueltas con el mismo precio+tienda
+    (last_observed_at sí se actualiza en cada muestra).
+    """
+    old = _as_int((item or {}).get("last_price"))
+    new = _as_int(new_price)
+    if old is None or new is None:
+        return False
+    if old != new:
+        return True
+    old_store = str((item or {}).get("best_store") or "").strip() or None
+    incoming_store = str(new_store or "").strip() or None
+    return bool(old_store and incoming_store and old_store != incoming_store)
+
+
+def _last_change_at_patch(
+    item: dict[str, Any] | None,
+    new_price: Any,
+    new_store: Any = None,
+    *,
+    at: datetime | None = None,
+) -> dict[str, Any]:
+    """Persiste last_change_at solo ante cambio real de mejor precio/tienda."""
+    if not _best_tracker_changed(item, new_price, new_store):
+        return {}
+    return {"last_change_at": at or _now()}
+
+
 def _prev_best_price_patch(
     item: dict[str, Any] | None,
     new_price: Any,
@@ -999,6 +1033,7 @@ def product_row_view(row: dict[str, Any]) -> dict[str, Any]:
         "last_error": row.get("last_error"),
         "resolved": bool(row.get("resolved")),
         "last_observed_at": _iso(row.get("last_observed_at")),
+        "last_change_at": _iso(row.get("last_change_at")),
         "list_id": row.get("list_id") or CYBER_LIST_ID,
     }
 
@@ -1153,6 +1188,7 @@ def update_item(
             "best_store": None,
             "prev_best_store": None,
             "last_observed_at": None,
+            "last_change_at": None,
             "last_error": None,
             "resolved": False,
         })
@@ -1213,6 +1249,7 @@ def normalize_import_row(raw: dict[str, Any], order: int) -> dict[str, Any] | No
         "last_matches": {},
         "last_match_count": 0,
         "last_observed_at": None,
+        "last_change_at": None,
         "last_error": None,
         "resolved": False,
     }
@@ -1390,6 +1427,7 @@ _EXPORT_FIELDS = (
     "best_store_title",
     "prev_best_store",
     "prev_best_store_title",
+    "last_change_at",
     "stores_scraped",
     "max_price_normal",
     "min_price_normal",
@@ -2436,6 +2474,7 @@ def process_one(repo: Any, *, delay: float = 0.0, list_id: str | None = None) ->
                     "last_match_count": len(current_sigs),
                     **_summary_patch(summary),
                     **_prev_best_price_patch(item, new_best, new_store),
+                    **_last_change_at_patch(item, new_best, new_store, at=now),
                     "last_observed_at": now,
                     "last_error": None if tracked else "Sin matches en catálogo/scrape.",
                     "updated_at": now,

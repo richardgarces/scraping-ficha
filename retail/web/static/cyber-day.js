@@ -93,6 +93,38 @@
     return `$${Math.round(n).toLocaleString("es-CL")}`;
   }
 
+  const SANTIAGO_TZ = "America/Santiago";
+
+  /** Hora del último cambio de mejor precio/tienda (no de cada vuelta). */
+  function formatLastChange(value) {
+    if (!value) return "—";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "—";
+    const parts = Object.fromEntries(
+      new Intl.DateTimeFormat("es-CL", {
+        timeZone: SANTIAGO_TZ,
+        day: "2-digit",
+        month: "short",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+      }).formatToParts(date).map((p) => [p.type, p.value]),
+    );
+    const todayParts = Object.fromEntries(
+      new Intl.DateTimeFormat("es-CL", {
+        timeZone: SANTIAGO_TZ,
+        day: "2-digit",
+        month: "short",
+      }).formatToParts(new Date()).map((p) => [p.type, p.value]),
+    );
+    const time = `${parts.hour}:${parts.minute}`;
+    if (parts.day === todayParts.day && parts.month === todayParts.month) {
+      return time;
+    }
+    const month = String(parts.month || "").replace(/\./g, "").trim().toLowerCase();
+    return `${parts.day}-${month} ${time}`;
+  }
+
   /**
    * Celda TIENDA MEJOR PRECIO:
    * Con racha de bajas ≥2 y tienda previa distinta: `Actual (previa)`.
@@ -221,8 +253,9 @@
         <td>—</td>
         <td>—</td>
         <td>—</td>
+        <td>—</td>
         <td class="muted">seed local</td>
-      </tr>`).join("") || `<tr><td colspan="12" class="err">Sin seed local.</td></tr>`;
+      </tr>`).join("") || `<tr><td colspan="13" class="err">Sin seed local.</td></tr>`;
       }
       if (meta) {
         meta.textContent = `Error API: ${message}. Seed local: ${items.length} queries (solo lectura; reintentá Iniciar o recargá).`;
@@ -230,7 +263,7 @@
     } catch (seedError) {
       const body = el("cyber-products-body");
       if (body) {
-        body.innerHTML = `<tr><td colspan="12" class="err">Error al cargar: ${escapeHtml(message)} · seed: ${escapeHtml(seedError.message)}</td></tr>`;
+        body.innerHTML = `<tr><td colspan="13" class="err">Error al cargar: ${escapeHtml(message)} · seed: ${escapeHtml(seedError.message)}</td></tr>`;
       }
     }
     // Seed local: no arrancar worker; botones de control deshabilitados.
@@ -346,7 +379,7 @@
     if (wrap && body && !editingActive) {
       wrap.hidden = false;
       if (!rows.length) {
-        body.innerHTML = `<tr><td colspan="12" class="muted">Sin filas en la lista. Importá CSV/JSON o creá la lista con seed.</td></tr>`;
+        body.innerHTML = `<tr><td colspan="13" class="muted">Sin filas en la lista. Importá CSV/JSON o creá la lista con seed.</td></tr>`;
       } else {
         body.innerHTML = rows.map((row) => {
           const n = row.n ?? (row.order != null ? row.order + 1 : "");
@@ -364,6 +397,7 @@
           const evoCell = evoHref
             ? `<a href="${escapeHtml(evoHref)}">Informe</a>`
             : "—";
+          const changeAt = formatLastChange(row.last_change_at);
           return `
       <tr data-n="${escapeHtml(n)}">
         <td>${escapeHtml(n || "—")}</td>
@@ -381,6 +415,7 @@
         <td>${escapeHtml(row.category || "—")}</td>
         ${priceCellHtml(row)}
         <td>${escapeHtml(bestStoreCellText(row))}</td>
+        <td title="${escapeHtml(row.last_change_at || "")}">${escapeHtml(changeAt)}</td>
         <td>${escapeHtml(row.stores_scraped != null ? row.stores_scraped : 0)}</td>
         <td>${formatPrice(row.max_price_normal)}</td>
         <td>${formatPrice(row.min_price_normal)}</td>

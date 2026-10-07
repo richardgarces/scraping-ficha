@@ -44,7 +44,7 @@ def test_cyber_day_static_assets_exist():
     assert "Eliminar lista" in html
     assert "Importar / actualizar lista activa" in html
     assert "reemplaza las queries" in html
-    assert "cyber-day.js?v=20" in html
+    assert "cyber-day.js?v=21" in html
     assert "styles.css?v=88" in html
     assert "application/json; charset=utf-8" in js  # import raw JSON (no FormData/multipart)
     assert "new FormData()" not in js
@@ -59,6 +59,9 @@ def test_cyber_day_static_assets_exist():
     assert "last_match_count" not in js  # columna UI quitada; sigue en API/export
     assert "Precio más alto normal" in html
     assert "Tienda mejor precio" in html
+    assert "Último cambio" in html
+    assert "formatLastChange" in js
+    assert "last_change_at" in js
     assert "Tiendas" in html
     assert "Mejor oferta" in html
     assert "<th>Evolución</th>" in html
