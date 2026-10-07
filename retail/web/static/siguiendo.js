@@ -120,7 +120,7 @@ function renderTelegramStatus(connected, telegram = "") {
 let pushRegistration = null;
 let pushSubscription = null;
 let pushPublicKey = "";
-const PUSH_SW_URL = "/push-sw-v2.js";
+const PUSH_SW_URL = "/push-sw-v3.js";
 
 function pushKeyBytes(value) {
   const padding = "=".repeat((4 - value.length % 4) % 4);

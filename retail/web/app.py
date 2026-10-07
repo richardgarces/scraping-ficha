@@ -77,8 +77,9 @@ def push_service_worker() -> FileResponse:
 
 @app.get("/push-sw-v1.js", include_in_schema=False)
 @app.get("/push-sw-v2.js", include_in_schema=False)
+@app.get("/push-sw-v3.js", include_in_schema=False)
 def versioned_push_service_worker() -> FileResponse:
-    """v2 evita el JS cacheado. v1 sigue sirviendo el mismo script para no dejar suscripciones viejas sin la foto."""
+    """v3: clic abre ficha/oferta (meincart). v1/v2 siguen el mismo script para suscripciones viejas."""
     return push_service_worker()
 
 

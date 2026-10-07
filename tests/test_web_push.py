@@ -1,4 +1,10 @@
-from retail.web_push import normalize_subscription, push_message, vapid_for_webpush, vapid_keys
+from retail.web_push import (
+    normalize_subscription,
+    push_click_url,
+    push_message,
+    vapid_for_webpush,
+    vapid_keys,
+)
 
 
 class SettingsRepo:
@@ -167,8 +173,9 @@ def test_daily_push_and_service_worker_carry_the_same_image(monkeypatch, tmp_pat
     client = __import__("pathlib").Path("retail/web/static/siguiendo.js").read_text(encoding="utf-8")
     assert "options.image = image" in script
     assert "notificationImage" in script
-    assert "/push-sw-v2.js" in client
-    assert "push-sw-v1.js" not in client
+    assert "/push-sw-v3.js" in client
+    assert "push-sw-v2.js" not in client
+    assert "trustedPushTarget" in script
 
 
 def test_offer_shot_route_serves_one_file_and_hides_the_directory(tmp_path, monkeypatch):
@@ -194,10 +201,12 @@ def test_offer_shot_route_serves_one_file_and_hides_the_directory(tmp_path, monk
     assert inspect_request(
         "/offer-shots/lider_p1_20261003.png", "GET", {"user-agent": ""}, {}, None,
     ) is None
-    worker = client.get("/push-sw-v2.js")
+    worker = client.get("/push-sw-v3.js")
     assert worker.status_code == 200
     assert "options.image" in worker.text
+    assert "trustedPushTarget" in worker.text
     assert client.get("/push-sw-v1.js").text == worker.text
+    assert client.get("/push-sw-v2.js").text == worker.text
 
 
 def test_push_message_links_to_internal_product_card():
@@ -213,6 +222,22 @@ def test_push_message_links_to_internal_product_card():
     assert "Tienda Chile · $12.990" in message["body"]
     assert message["url"] == "https://lnk.meincart.cl/o/123456789"
     assert message["tag"] == "precio-audifonos"
+
+
+def test_push_click_url_prefers_ficha_over_siguiendo(monkeypatch):
+    monkeypatch.setenv("PUBLIC_SITE_URL", "https://precios.meincart.cl")
+    assert push_click_url({
+        "store": "falabella",
+        "product_id": "iphone-x",
+        "url": "https://www.falabella.com/product/iphone-x",
+    }).endswith("/producto?store=falabella&id=iphone-x")
+    assert push_click_url({"url": "/producto?store=paris&id=tv-1"}) == "/producto?store=paris&id=tv-1"
+    assert push_click_url({
+        "short_url": "https://lnk.meincart.cl/o/abc",
+        "store": "falabella",
+        "product_id": "x",
+    }) == "https://lnk.meincart.cl/o/abc"
+    assert push_click_url({"name": "sin oferta"}) == "/siguiendo"
 
 
 def test_save_rules_accepts_push_channel(tmp_path, monkeypatch):

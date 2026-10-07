@@ -1619,6 +1619,8 @@ def notify_cyber_change(repo: Any, change: dict[str, Any]) -> int:
             print("cyber-day: push omitido (canal push desactivado en reglas)", flush=True)
             return sent
 
+        from retail.short_links import attach_short_url
+
         payload = {
             **change,
             "message": change.get("message")
@@ -1627,6 +1629,11 @@ def notify_cyber_change(repo: Any, change: dict[str, Any]) -> int:
                 f"{_money_clp(previous)} → {_money_clp(price)}"
             ),
         }
+        # short_url / ficha in-app: el SW solo abre mismo origen o lnk.*; sin esto el clic va a /siguiendo.
+        if store and product_id and store != "cyber" and product_id != "best":
+            attach_short_url(payload, repo)
+        elif str(change.get("url") or "").startswith("/"):
+            payload["short_url"] = str(change["url"]).strip()
         # Push: toda cuenta aprobada con suscripción activa (no solo admin).
         for user in users:
             prefs = user.get("notification_preferences") or {}

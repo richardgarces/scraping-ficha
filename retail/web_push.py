@@ -154,7 +154,7 @@ def _local_web_serves_push() -> bool:
 
     try:
         request = Request(
-            "http://127.0.0.1:8080/push-sw-v2.js",
+            "http://127.0.0.1:8080/push-sw-v3.js",
             headers={"User-Agent": "precios-push"},
         )
         with urlopen(request, timeout=0.8) as response:
@@ -212,6 +212,35 @@ def push_image_url(payload: dict[str, Any]) -> str | None:
     return _https_image(text) or product
 
 
+def push_click_url(payload: dict[str, Any]) -> str:
+    """URL que abre el clic del push: ficha in-app o short link, nunca solo /siguiendo si hay oferta.
+
+    El service worker solo navega mismo origen o lnk.meincart.cl; por eso preferimos
+    short_url / ruta /producto, no la URL cruda de la tienda.
+    """
+    short = str(payload.get("short_url") or "").strip()
+    if short:
+        return short
+    raw = str(payload.get("url") or "").strip()
+    if raw.startswith("/"):
+        return raw
+    extra = payload.get("extra") if isinstance(payload.get("extra"), dict) else {}
+    store = str(extra.get("store") or payload.get("store") or "").strip()
+    product_id = str(extra.get("product_id") or payload.get("product_id") or "").strip()
+    if store and product_id and store != "cyber" and product_id != "best":
+        from retail.short_links import public_product_url
+
+        ficha = public_product_url(store, product_id)
+        if ficha:
+            return ficha
+    if raw:
+        parsed = urlparse(raw)
+        host = (parsed.hostname or "").lower()
+        if parsed.scheme == "https" and host in {"lnk.meincart.cl", "precios.meincart.cl"}:
+            return raw
+    return "/siguiendo"
+
+
 def push_message(payload: dict[str, Any], *, tag: str = "") -> dict[str, Any]:
     extra = payload.get("extra") if isinstance(payload.get("extra"), dict) else {}
     name = str(payload.get("name") or payload.get("query") or "Producto")
@@ -224,7 +253,7 @@ def push_message(payload: dict[str, Any], *, tag: str = "") -> dict[str, Any]:
     detail = " · ".join(part for part in (store, money) if part)
     notice = str(payload.get("message") or "Cambio de precio detectado").strip()
     body = f"{detail} — {notice}" if detail else notice
-    url = str(payload.get("short_url") or "").strip() or "/siguiendo"
+    url = push_click_url(payload)
     message = {
         "title": name[:90],
         "body": body[:220],

@@ -41,17 +41,31 @@ self.addEventListener("push", (event) => {
   event.waitUntil(self.registration.showNotification(data.title || "Precios", options));
 });
 
+function trustedPushTarget(value) {
+  try {
+    const candidate = new URL(value || "/siguiendo", self.location.origin);
+    const host = candidate.hostname.toLowerCase();
+    const trustedHost =
+      host === "lnk.meincart.cl" ||
+      host === "precios.meincart.cl" ||
+      host.endsWith(".meincart.cl");
+    if (candidate.origin === self.location.origin) return candidate;
+    if (candidate.protocol === "https:" && trustedHost) return candidate;
+  } catch (_) {}
+  return new URL("/siguiendo", self.location.origin);
+}
+
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
-  let target = new URL("/siguiendo", self.location.origin);
-  try {
-    const candidate = new URL(event.notification.data?.url || "/siguiendo", self.location.origin);
-    const trustedShortLink = candidate.protocol === "https:" && candidate.hostname === "lnk.meincart.cl";
-    if (candidate.origin === self.location.origin || trustedShortLink) target = candidate;
-  } catch (_) {}
+  const target = trustedPushTarget(event.notification.data?.url);
   event.waitUntil(clients.matchAll({ type: "window", includeUncontrolled: true }).then((windows) => {
     const open = windows.find((client) => new URL(client.url).origin === self.location.origin);
-    if (open) return open.focus().then(() => open.navigate(target.href));
+    if (open) {
+      return open.focus().then(() => {
+        if (typeof open.navigate === "function") return open.navigate(target.href);
+        return clients.openWindow(target.href);
+      });
+    }
     return clients.openWindow(target.href);
   }));
 });

@@ -300,10 +300,14 @@ def test_notify_cyber_change_reaches_all_subscribed_users(repo, monkeypatch):
         "retail.batch.alerts.send_to_user",
         lambda user, *_a, **_k: sent_tg.append(str(user.get("_id"))) or True,
     )
-    monkeypatch.setattr(
-        "retail.web_push.send_user_push",
-        lambda user, *_a, **_k: sent_push.append(str(user.get("_id"))) or True,
-    )
+    push_payloads: list[dict] = []
+
+    def capture_push(user, payload, **_k):
+        sent_push.append(str(user.get("_id")))
+        push_payloads.append(dict(payload))
+        return True
+
+    monkeypatch.setattr("retail.web_push.send_user_push", capture_push)
     monkeypatch.setattr(
         "retail.batch.rules.load_rules",
         lambda: {"channels": ["telegram", "push", "email"]},
@@ -321,6 +325,7 @@ def test_notify_cyber_change_reaches_all_subscribed_users(repo, monkeypatch):
         "previous_price": 800000,
         "price": 700000,
         "query": "iPhone",
+        "url": "https://www.falabella.com/product/iphone-x",
         "image_url": "",
     }
     total = notify_cyber_change(repo, change)
@@ -328,6 +333,9 @@ def test_notify_cyber_change_reaches_all_subscribed_users(repo, monkeypatch):
     assert set(sent_tg) == {"admin-1", "user-2", "user-3"}
     assert set(sent_push) == {"admin-1", "user-2"}
     assert total >= 1 + len(sent_tg) + len(sent_push)
+    assert push_payloads
+    assert push_payloads[0].get("short_url")
+    assert "producto" in push_payloads[0]["short_url"] or "/o/" in push_payloads[0]["short_url"]
 
 
 def test_price_direction_streak_and_patch():
