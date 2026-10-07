@@ -41,8 +41,8 @@ def test_cyber_day_static_assets_exist():
     assert "Eliminar lista" in html
     assert "Importar / actualizar lista activa" in html
     assert "reemplaza las queries" in html
-    assert "cyber-day.js?v=16" in html
-    assert "styles.css?v=86" in html
+    assert "cyber-day.js?v=17" in html
+    assert "styles.css?v=87" in html
     assert "application/json; charset=utf-8" in js  # import raw JSON (no FormData/multipart)
     assert "new FormData()" not in js
     assert "<h1>Cyber</h1>" in html
@@ -79,9 +79,12 @@ def test_cyber_day_static_assets_exist():
     assert "down_again" in js
     assert "up_again" in js
     assert "price-arrow" in js
+    assert "price-streak" in js
+    assert "streak >= 2" in js
     styles = (root / "styles.css").read_text(encoding="utf-8")
     assert "down-again" in styles
     assert "up-again" in styles
+    assert "price-streak" in styles
     assert 'nameEl.textContent = "Cyber"' in js
     assert "status === \"running\"" in js or 'status === "running"' in js
     assert "Pará la lista antes de eliminarla" in js

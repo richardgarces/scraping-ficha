@@ -851,6 +851,15 @@ td.down, td.down-again, td.up, td.up-again { font-weight: 700; }
   font-size: 0.95em;
   letter-spacing: 0;
 }
+/* Contador de racha (misma dirección ≥2); hereda color de td.down / .up / etc. */
+.price-streak {
+  margin-left: 0.12em;
+  font-size: 0.68em;
+  font-weight: 800;
+  vertical-align: super;
+  line-height: 0;
+  letter-spacing: 0;
+}
 .spark { display: block; color: var(--accent); }
 .nav { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
 .nav a, .nav summary {

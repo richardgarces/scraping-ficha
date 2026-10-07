@@ -97,16 +97,17 @@
    * Celda MEJOR PRECIO:
    * verde=bajó, azul=volvió a bajar, rojo=subió, naranjo=volvió a subir,
    * blanco=sin cambio/primer precio. Flecha ↑/↓ = última acción.
+   * Racha consecutiva misma dirección: número pequeño (≥2) junto a flecha.
    */
   function priceCellHtml(row) {
     const text = formatPrice(row?.last_price);
+    const streak = Number(row?.delta_streak) || 0;
     let dir = row?.price_direction || "";
     if (!dir && row?.prev_best_price != null && row?.last_price != null) {
       const last = Number(row.last_price);
       const prev = Number(row.prev_best_price);
       if (Number.isFinite(last) && Number.isFinite(prev) && last !== prev) {
         const base = last < prev ? "down" : "up";
-        const streak = Number(row.delta_streak) || 1;
         dir = streak >= 2 ? `${base}_again` : base;
       }
     }
@@ -118,15 +119,20 @@
     const arrowHtml = arrow
       ? `<span class="price-arrow" aria-hidden="true">${arrow}</span>`
       : "";
+    // Primera en esa dirección (streak 1): sin número. Consecutivas: 2, 3, …
+    const streakHtml = (arrow && streak >= 2)
+      ? `<sup class="price-streak" aria-label="racha ${streak}">${streak}</sup>`
+      : "";
     const vs = formatPrice(row?.prev_best_price);
+    const streakHint = streak >= 2 ? ` · racha ${streak}` : "";
     const meta = {
       down: { cls: "down", title: `Bajó vs ${vs}` },
-      down_again: { cls: "down-again", title: `Volvió a bajar vs ${vs}` },
+      down_again: { cls: "down-again", title: `Volvió a bajar vs ${vs}${streakHint}` },
       up: { cls: "up", title: `Subió vs ${vs}` },
-      up_again: { cls: "up-again", title: `Volvió a subir vs ${vs}` },
+      up_again: { cls: "up-again", title: `Volvió a subir vs ${vs}${streakHint}` },
     }[dir];
     if (!meta) return `<td>${text}</td>`;
-    return `<td class="${meta.cls}" title="${meta.title}">${text}${arrowHtml}</td>`;
+    return `<td class="${meta.cls}" title="${meta.title}">${text}${arrowHtml}${streakHtml}</td>`;
   }
 
   function listQuery(path) {
