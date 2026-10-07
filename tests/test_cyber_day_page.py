@@ -71,7 +71,12 @@ def test_cyber_day_static_assets_exist():
     evo_html = (root / "cyber-day-evolucion.html").read_text(encoding="utf-8")
     evo_js = (root / "cyber-day-evolucion.js").read_text(encoding="utf-8")
     assert "Evolución del precio" in evo_html
-    assert "cyber-day-evolucion.js?v=1" in evo_html
+    assert "cyber-day-evolucion.js?v=2" in evo_html
+    assert "styles.css?v=89" in evo_html
+    assert "chart-observations" in evo_html
+    assert "Menor valor" in evo_js
+    assert "Mayor descuento" in evo_js
+    assert "Tienda:" in evo_js
     assert "/api/admin/cyber-day/items/" in evo_js
     assert "evolution" in evo_js
     assert "cyber-delete-list" in js

@@ -1362,10 +1362,23 @@ button.secondary:hover { border-color: color-mix(in srgb, var(--accent) 40%, var
 .price-history-heading h3, .price-history-heading p { margin: 0; }
 .price-history-heading p { margin-top: 5px; font-size: 13px; }
 .price-summary { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; margin: 14px 0 8px; }
+.price-summary.price-summary-evolution { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .price-summary > div { min-width: 0; padding: 10px 11px; border: 1px solid var(--line); border-radius: 11px; background: var(--panel); }
-.price-summary span, .price-summary strong { display: block; }
+.price-summary span, .price-summary strong, .price-summary small { display: block; }
 .price-summary span { color: var(--muted); font-size: 11px; font-weight: 750; }
 .price-summary strong { margin-top: 3px; font-size: 15px; overflow-wrap: anywhere; }
+.price-summary small { margin-top: 4px; color: var(--muted); font-size: 11px; font-weight: 600; line-height: 1.35; overflow-wrap: anywhere; }
+.chart-observations { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 6px; }
+.chart-observations li {
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  font-size: 12px;
+  line-height: 1.4;
+}
+.chart-observations .obs-line { color: var(--text); }
 #chart-combined { width: 100%; min-width: 0; touch-action: pan-y; overflow: hidden; }
 #chart-combined .chart { width: 100%; max-width: 100%; min-width: 0; }
 .chart-tooltip { min-height: 22px; margin: 5px 0 0; padding: 7px 10px; border-radius: 8px; background: var(--panel); font-size: 12px; }
@@ -1425,6 +1438,7 @@ button.secondary:hover { border-color: color-mix(in srgb, var(--accent) 40%, var
   .chart-mode { width: 100%; }
   .chart-mode .secondary { flex: 1 1 50%; }
   .price-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .price-summary.price-summary-evolution { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .price-summary > div:first-child { grid-column: 1 / -1; }
   .price-history-card { padding: 11px; }
   #chart-combined { margin-inline: -5px; width: calc(100% + 10px); }

@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#258fdf">
   <title>Evolución Cyber — día</title>
   <script>(function(){var m=localStorage.getItem("retail-theme");if(m==="day"||m==="night"){document.documentElement.dataset.theme=m;return;}var h=new Date().getHours();document.documentElement.dataset.theme=(h>=7&&h<19)?"day":"night";})();</script>
-  <link rel="stylesheet" href="/static/styles.css?v=88">
+  <link rel="stylesheet" href="/static/styles.css?v=89">
 </head>
 <body>
   <header class="top">
@@ -36,15 +36,16 @@
           </div>
           <div class="price-chart-legend" id="chart-legend" aria-label="Leyenda"></div>
         </div>
-        <div id="chart-summary" class="price-summary" aria-label="Resumen del período"></div>
+        <div id="chart-summary" class="price-summary price-summary-evolution" aria-label="Resumen del período"></div>
         <div id="chart-combined" class="price-chart-scroll" tabindex="0" aria-label="Gráfico de precios observados hoy"></div>
         <p id="chart-tooltip" class="chart-tooltip" role="status" aria-live="polite">Toca o enfoca un punto para ver su detalle.</p>
         <p id="chart-combined-note" class="muted chart-note"></p>
+        <ul id="chart-observations" class="chart-observations" aria-label="Observaciones del día" hidden></ul>
       </section>
     </section>
   </main>
   <script src="/static/prices.js?v=35"></script>
   <script src="/static/price-history.js?v=1"></script>
-  <script src="/static/cyber-day-evolucion.js?v=1"></script>
+  <script src="/static/cyber-day-evolucion.js?v=2"></script>
 </body>
 </html>

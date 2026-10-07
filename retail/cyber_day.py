@@ -526,6 +526,12 @@ def day_evolution_report(
         if normal is not None and normal <= 0:
             normal = None
         store = str(row.get("store") or "").strip() or None
+        store_title = public_store_label(store) if store else None
+        saving = None
+        saving_pct = None
+        if normal is not None and price < normal:
+            saving = normal - price
+            saving_pct = int(round((saving * 100) / normal))
         offer_prices.append(price)
         observations.append({
             "at": _iso(row.get("at")),
@@ -533,8 +539,10 @@ def day_evolution_report(
             "offer": price,
             "price_normal": normal,
             "normal": normal,
+            "saving": saving,
+            "saving_pct": saving_pct,
             "store": store,
-            "store_title": public_store_label(store) if store else None,
+            "store_title": store_title,
             "product_id": str(row.get("product_id") or "").strip() or None,
             "name": str(row.get("name") or query or "").strip() or None,
             "url": str(row.get("url") or "").strip() or None,
@@ -542,6 +550,7 @@ def day_evolution_report(
         })
 
     stats: dict[str, Any] | None = None
+    extremes: dict[str, Any] | None = None
     if offer_prices:
         first = offer_prices[0]
         current = offer_prices[-1]
@@ -552,15 +561,69 @@ def day_evolution_report(
             change_label = f"+{_money_clp(abs(change))}"
         else:
             change_label = f"−{_money_clp(abs(change))}"
+        min_price = min(offer_prices)
+        max_price = max(offer_prices)
+        min_obs = next(obs for obs in observations if obs["offer"] == min_price)
+        max_obs = next(obs for obs in observations if obs["offer"] == max_price)
+        current_obs = observations[-1]
+        discounted = [obs for obs in observations if obs.get("saving") is not None]
+        max_disc = max(discounted, key=lambda obs: (obs["saving"], obs["saving_pct"] or 0)) if discounted else None
+        min_disc = min(discounted, key=lambda obs: (obs["saving"], obs["saving_pct"] or 0)) if discounted else None
+
+        def _extreme_point(obs: dict[str, Any], *, value: int, label: str | None = None) -> dict[str, Any]:
+            return {
+                "value": value,
+                "value_label": label,
+                "at": obs.get("at"),
+                "store": obs.get("store"),
+                "store_title": obs.get("store_title"),
+                "offer": obs.get("offer"),
+                "price_normal": obs.get("price_normal"),
+                "saving": obs.get("saving"),
+                "saving_pct": obs.get("saving_pct"),
+            }
+
+        extremes = {
+            "menor_valor": _extreme_point(min_obs, value=min_price),
+            "mayor_valor": _extreme_point(max_obs, value=max_price),
+            "mayor_descuento": (
+                _extreme_point(
+                    max_disc,
+                    value=int(max_disc["saving"]),
+                    label=f"{_money_clp(max_disc['saving'])} ({max_disc['saving_pct']}%)",
+                )
+                if max_disc
+                else None
+            ),
+            "menor_descuento": (
+                _extreme_point(
+                    min_disc,
+                    value=int(min_disc["saving"]),
+                    label=f"{_money_clp(min_disc['saving'])} ({min_disc['saving_pct']}%)",
+                )
+                if min_disc
+                else None
+            ),
+            "actual": _extreme_point(current_obs, value=current),
+        }
         stats = {
             "current": current,
-            "min": min(offer_prices),
-            "max": max(offer_prices),
+            "min": min_price,
+            "max": max_price,
             "average": int(round(sum(offer_prices) / len(offer_prices))),
             "first": first,
             "count": len(offer_prices),
             "change": change,
             "change_label": change_label,
+            "min_at": min_obs.get("at"),
+            "min_store": min_obs.get("store"),
+            "min_store_title": min_obs.get("store_title"),
+            "max_at": max_obs.get("at"),
+            "max_store": max_obs.get("store"),
+            "max_store_title": max_obs.get("store_title"),
+            "current_at": current_obs.get("at"),
+            "current_store": current_obs.get("store"),
+            "current_store_title": current_obs.get("store_title"),
         }
 
     return {
@@ -573,6 +636,7 @@ def day_evolution_report(
         "timezone": "America/Santiago",
         "observations": observations,
         "stats": stats,
+        "extremes": extremes,
         "product": product_row_view({**product, "id": str(product["_id"])}) if product else None,
     }
 

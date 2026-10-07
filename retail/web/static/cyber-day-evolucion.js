@@ -56,11 +56,23 @@
   }
 
   function storeLabel(point) {
+    if (!point) return "";
     if (typeof publicStoreLabel === "function") {
       return String(publicStoreLabel(point.store, point.store_title || point.store) || "").trim();
     }
     const raw = String(point.store_title || point.store || "").trim();
     return raw.replace(/\s+Chile\s*$/i, "").trim() || raw;
+  }
+
+  function storeMeta(point) {
+    return storeLabel(point) || "Sin tienda";
+  }
+
+  function cardMeta(point) {
+    if (!point) return "";
+    const time = timeLabel(point.at);
+    const store = storeMeta(point);
+    return `<small>${attr(time)} · ${attr(store)}</small>`;
   }
 
   async function apiJson(url) {
@@ -89,19 +101,90 @@
     }
   }
 
-  function summaryCards(stats) {
+  function extremeFromStats(stats, key) {
+    if (!stats) return null;
+    if (key === "menor_valor") {
+      return {
+        value: stats.min,
+        at: stats.min_at,
+        store: stats.min_store,
+        store_title: stats.min_store_title,
+      };
+    }
+    if (key === "mayor_valor") {
+      return {
+        value: stats.max,
+        at: stats.max_at,
+        store: stats.max_store,
+        store_title: stats.max_store_title,
+      };
+    }
+    if (key === "actual") {
+      return {
+        value: stats.current,
+        at: stats.current_at,
+        store: stats.current_store,
+        store_title: stats.current_store_title,
+      };
+    }
+    return null;
+  }
+
+  function summaryCards(stats, extremes) {
     if (!stats) return "";
     const changeLabel = stats.change_label
       || (stats.change === 0
         ? "Sin cambio"
         : `${stats.change > 0 ? "+" : "−"}${money(Math.abs(stats.change))}`);
-    return [
-      ["Actual", money(stats.current)],
-      ["Mínimo", money(stats.min)],
-      ["Máximo", money(stats.max)],
-      ["Promedio", money(stats.average)],
-      ["Cambio", changeLabel],
-    ].map(([label, value]) => `<div><span>${label}</span><strong>${value}</strong></div>`).join("");
+    const menor = extremes?.menor_valor || extremeFromStats(stats, "menor_valor");
+    const mayor = extremes?.mayor_valor || extremeFromStats(stats, "mayor_valor");
+    const actual = extremes?.actual || extremeFromStats(stats, "actual");
+    const mayorDesc = extremes?.mayor_descuento || null;
+    const menorDesc = extremes?.menor_descuento || null;
+    const cards = [
+      {
+        label: "Actual",
+        value: money(stats.current),
+        meta: cardMeta(actual),
+      },
+      {
+        label: "Menor valor",
+        value: money(menor?.value ?? stats.min),
+        meta: cardMeta(menor),
+      },
+      {
+        label: "Mayor valor",
+        value: money(mayor?.value ?? stats.max),
+        meta: cardMeta(mayor),
+      },
+      {
+        label: "Mayor descuento",
+        value: mayorDesc
+          ? (mayorDesc.value_label || `${money(mayorDesc.value)} (${mayorDesc.saving_pct ?? "—"}%)`)
+          : "—",
+        meta: mayorDesc ? cardMeta(mayorDesc) : "<small>Sin ahorro vs normal</small>",
+      },
+      {
+        label: "Menor descuento",
+        value: menorDesc
+          ? (menorDesc.value_label || `${money(menorDesc.value)} (${menorDesc.saving_pct ?? "—"}%)`)
+          : "—",
+        meta: menorDesc ? cardMeta(menorDesc) : "<small>Sin ahorro vs normal</small>",
+      },
+      {
+        label: "Promedio",
+        value: money(stats.average),
+        meta: "",
+      },
+      {
+        label: "Cambio",
+        value: changeLabel,
+        meta: "",
+      },
+    ];
+    return cards.map(({ label, value, meta }) => (
+      `<div><span>${label}</span><strong>${value}</strong>${meta || ""}</div>`
+    )).join("");
   }
 
   function hasMeaningfulNormal(observations) {
@@ -121,15 +204,30 @@
     if (meaningfulNormal && point.normal != null) {
       parts.push(`Normal: ${money(point.normal)}`);
       if (point.offer < point.normal) {
-        const saving = point.normal - point.offer;
-        parts.push(`Ahorro: ${money(saving)} (${Math.round((saving * 100) / point.normal)}%)`);
+        const saving = point.saving ?? (point.normal - point.offer);
+        const pct = point.saving_pct ?? Math.round((saving * 100) / point.normal);
+        parts.push(`Ahorro: ${money(saving)} (${pct}%)`);
       } else {
         parts.push("Sin descuento");
       }
     }
-    const store = storeLabel(point);
-    if (store) parts.push(`Tienda: ${store}`);
+    parts.push(`Tienda: ${storeMeta(point)}`);
     return parts.join(" · ");
+  }
+
+  function renderObservationsList(observations, meaningfulNormal) {
+    const list = $("chart-observations");
+    if (!list) return;
+    if (!observations.length) {
+      list.innerHTML = "";
+      list.hidden = true;
+      return;
+    }
+    list.hidden = false;
+    list.innerHTML = observations.map((point) => {
+      const label = chartPointLabel(point, meaningfulNormal);
+      return `<li><span class="obs-line">${attr(label)}</span></li>`;
+    }).join("");
   }
 
   function mountChartPointInteractions(container, observations, meaningfulNormal) {
@@ -173,6 +271,7 @@
       summary.innerHTML = "";
       legend.innerHTML = "";
       note.textContent = "Cuando el worker registre un mejor precio, aparecerá aquí.";
+      renderObservationsList([], false);
       return;
     }
 
@@ -182,7 +281,7 @@
     const offerStats = payload.stats || (window.PriceHistory?.stats
       ? PriceHistory.stats(offerRows.map((point) => point.offer))
       : null);
-    summary.innerHTML = summaryCards(offerStats);
+    summary.innerHTML = summaryCards(offerStats, payload.extremes || null);
     legend.innerHTML = meaningfulNormal
       ? '<span><i class="offer"></i>Oferta</span><span><i class="normal"></i>Normal (línea discontinua)</span><span><i class="discount"></i>Ahorro observado</span>'
       : '<span><i class="offer"></i>Precio observado</span>';
@@ -239,11 +338,11 @@
     const sameMarker = currentIndex === minimumIndex;
     const markers = `
     <circle class="chart-marker minimum" cx="${toX(minimumIndex).toFixed(1)}" cy="${toY(observations[minimumIndex].offer).toFixed(1)}" r="8">
-      <title>Mínimo del día: ${money(offerStats.min)}</title>
+      <title>Menor valor del día: ${money(offerStats.min)} · ${attr(storeMeta(observations[minimumIndex]))}</title>
     </circle>
-    ${sameMarker ? "" : `<circle class="chart-marker current" cx="${toX(currentIndex).toFixed(1)}" cy="${toY(observations[currentIndex].offer).toFixed(1)}" r="8"><title>Precio actual: ${money(offerStats.current)}</title></circle>`}`;
+    ${sameMarker ? "" : `<circle class="chart-marker current" cx="${toX(currentIndex).toFixed(1)}" cy="${toY(observations[currentIndex].offer).toFixed(1)}" r="8"><title>Precio actual: ${money(offerStats.current)} · ${attr(storeMeta(observations[currentIndex]))}</title></circle>`}`;
     container.innerHTML = `
-    <svg class="chart combined-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="Historial Cyber del día con ${offerStats.count} observaciones. Actual ${money(offerStats.current)}; mínimo ${money(offerStats.min)}; máximo ${money(offerStats.max)}.">
+    <svg class="chart combined-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="Historial Cyber del día con ${offerStats.count} observaciones. Actual ${money(offerStats.current)}; menor ${money(offerStats.min)}; mayor ${money(offerStats.max)}.">
       ${guides}${bands}
       ${normalRows.length > 1 ? `<polyline class="chart-series normal" fill="none" points="${normalPath}"/>` : ""}
       ${offerRows.length > 1 ? `<polyline class="chart-series offer" fill="none" stroke-width="3" points="${offerPath}"/>` : ""}
@@ -253,6 +352,7 @@
     note.textContent = meaningfulNormal
       ? `${offerStats.count} observaciones en el día · ${discounts.length} con ahorro frente al precio normal.`
       : `${offerStats.count} observaciones en el día · Oferta y normal fueron iguales cuando ambas se informaron; no hubo descuento publicado.`;
+    renderObservationsList(observations, meaningfulNormal);
     mountChartPointInteractions(container, observations, meaningfulNormal);
   }
 

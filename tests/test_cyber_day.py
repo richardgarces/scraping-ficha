@@ -749,6 +749,14 @@ def test_append_best_price_observation_dedupes_same_day(repo):
     assert report["stats"]["min"] == 90000
     assert report["stats"]["current"] == 90000
     assert report["stats"]["change"] == -10000
+    assert report["stats"]["min_store"] == "ripley"
+    assert report["stats"]["max_store"] == "falabella"
+    assert report["extremes"]["menor_valor"]["value"] == 90000
+    assert report["extremes"]["menor_valor"]["store"] == "ripley"
+    assert report["extremes"]["mayor_valor"]["value"] == 100000
+    assert report["extremes"]["mayor_descuento"]["value"] == 30000
+    assert report["extremes"]["menor_descuento"]["value"] == 20000
+    assert all(obs.get("store_title") for obs in report["observations"])
 
 
 def test_parse_import_json_and_csv():
