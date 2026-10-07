@@ -3886,6 +3886,39 @@ class ProductRepository:
             return False
         return bool(result.upserted_id is not None or result.modified_count)
 
+    def release_user_notification_send(
+        self,
+        user_id: str,
+        channel: str,
+        entity_key: str,
+        price: int | None,
+    ) -> bool:
+        """Deshace un claim si el envío real falló (p. ej. bot sin token)."""
+        if not user_id or not channel or not entity_key:
+            return False
+        price = int(price) if price is not None else None
+        key = {
+            "user_id": str(user_id),
+            "channel": str(channel),
+            "entity_key": str(entity_key),
+        }
+        found = self.user_notification_sends.find_one(key) or {}
+        recent = [
+            item for item in (found.get("recent_sends") or [])
+            if isinstance(item, dict) and item.get("price") != price
+        ]
+        update: dict[str, Any] = {"recent_sends": recent}
+        if found.get("last_price") == price:
+            if recent:
+                newest = max(recent, key=lambda item: item.get("sent_at") or datetime.min.replace(tzinfo=timezone.utc))
+                update["last_price"] = newest.get("price")
+                update["last_sent_at"] = newest.get("sent_at")
+            else:
+                update["last_price"] = None
+                update["last_sent_at"] = None
+        result = self.user_notification_sends.update_one(key, {"$set": update})
+        return bool(result.modified_count)
+
     @staticmethod
     def _public_price_alert(item: dict[str, Any]) -> dict[str, Any]:
         created = item.get("created_at")

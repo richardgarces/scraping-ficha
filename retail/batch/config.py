@@ -8,9 +8,21 @@ from typing import Any
 from retail.batch.catalog import PACKAGE_DIR, default_catalog_path, default_rules_path, load_json
 
 CHANNELS_PATH = Path("output/canales.local.json")
+CHANNELS_SETTING_KEY = "notification_channels"
 SCHEDULE_PATH = PACKAGE_DIR / "programacion.json"
 SCHEDULE_SETTING_KEY = "batch_schedule"
 MASK = "••••"
+
+_CHANNEL_KEYS = (
+    "telegram_bot_token",
+    "telegram_chat_id",
+    "smtp_host",
+    "smtp_port",
+    "smtp_user",
+    "smtp_password",
+    "smtp_from",
+    "alert_email_to",
+)
 
 
 def write_json(path: Path, data: dict[str, Any]) -> None:
@@ -18,9 +30,7 @@ def write_json(path: Path, data: dict[str, Any]) -> None:
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
-def load_channels() -> dict[str, Any]:
-    if CHANNELS_PATH.exists():
-        return load_json(CHANNELS_PATH)
+def _default_channels() -> dict[str, Any]:
     return {
         "telegram_bot_token": "",
         "telegram_chat_id": "",
@@ -31,6 +41,86 @@ def load_channels() -> dict[str, Any]:
         "smtp_from": "",
         "alert_email_to": "",
     }
+
+
+def _channels_payload(data: dict[str, Any]) -> dict[str, Any]:
+    payload = _default_channels()
+    for key in _CHANNEL_KEYS:
+        if key not in data:
+            continue
+        if key == "smtp_port":
+            payload[key] = int(data.get(key) or 587)
+        else:
+            payload[key] = "" if data.get(key) is None else str(data.get(key))
+    return payload
+
+
+def _channels_from_mongo(repo: Any | None = None) -> dict[str, Any] | None:
+    owns = repo is None
+    store = repo
+    if store is None:
+        try:
+            from retail.search import connect_repo
+
+            store = connect_repo()
+        except Exception:
+            return None
+    if store is None or not hasattr(store, "get_app_setting"):
+        return None
+    try:
+        found = store.get_app_setting(CHANNELS_SETTING_KEY)
+        if isinstance(found, dict) and found:
+            return _channels_payload(found)
+        return None
+    finally:
+        if owns and store is not None:
+            store.close()
+
+
+def load_channels(repo: Any | None = None) -> dict[str, Any]:
+    """Lee canales desde archivo; si falta el token, recupera desde Mongo y repara el archivo."""
+    data = _default_channels()
+    if CHANNELS_PATH.exists():
+        try:
+            data = _channels_payload({**data, **load_json(CHANNELS_PATH)})
+        except Exception:
+            data = _default_channels()
+    if str(data.get("telegram_bot_token") or "").strip():
+        return data
+    stored = _channels_from_mongo(repo)
+    if not stored:
+        return data
+    data = _channels_payload({**data, **stored})
+    if str(data.get("telegram_bot_token") or "").strip():
+        try:
+            write_json(CHANNELS_PATH, data)
+        except Exception:
+            pass
+    return data
+
+
+def save_channels(data: dict[str, Any], repo: Any | None = None) -> dict[str, Any]:
+    """Guarda en archivo y en Mongo para no perder el bot si se borra output/."""
+    payload = _channels_payload(data)
+    write_json(CHANNELS_PATH, payload)
+    owns = repo is None
+    store = repo
+    if store is None:
+        try:
+            from retail.search import connect_repo
+
+            store = connect_repo()
+        except Exception:
+            store = None
+    if store is not None and hasattr(store, "save_app_setting"):
+        try:
+            store.save_app_setting(CHANNELS_SETTING_KEY, payload)
+        finally:
+            if owns:
+                store.close()
+    elif owns and store is not None:
+        store.close()
+    return payload
 
 
 def mask_channels(data: dict[str, Any]) -> dict[str, Any]:

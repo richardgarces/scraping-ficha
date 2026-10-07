@@ -384,6 +384,10 @@ def test_notify_cyber_change_reaches_all_subscribed_users(repo, monkeypatch):
         lambda *_a, **_k: None,
     )
     monkeypatch.setattr(
+        "retail.batch.alerts._secret",
+        lambda *_a, **_k: "123:token",
+    )
+    monkeypatch.setattr(
         "retail.batch.alerts._telegram_text",
         lambda *_a, **_k: admin_tg.__setitem__("n", admin_tg["n"] + 1) or True,
     )
@@ -427,6 +431,49 @@ def test_notify_cyber_change_reaches_all_subscribed_users(repo, monkeypatch):
     assert push_payloads
     assert push_payloads[0].get("short_url")
     assert "producto" in push_payloads[0]["short_url"] or "/o/" in push_payloads[0]["short_url"]
+
+
+def test_notify_cyber_change_skips_telegram_without_bot_token(repo, monkeypatch):
+    """Sin token del bot no se reserva dedupe ni se intenta Telegram."""
+    claims: list[tuple] = []
+    monkeypatch.setattr(
+        "retail.price_alerts.notify_price_changes",
+        lambda *_a, **_k: 0,
+    )
+    monkeypatch.setattr(
+        repo,
+        "list_notification_users",
+        lambda: [{
+            "_id": "user-1",
+            "status": "approved",
+            "telegram_chat_id": "111",
+            "notification_preferences": {"channels": ["telegram"]},
+        }],
+    )
+    monkeypatch.setattr("retail.batch.alerts._secret", lambda *_a, **_k: "")
+    monkeypatch.setattr(
+        "retail.batch.alerts.bind_user_chats",
+        lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("no bind")),
+    )
+    monkeypatch.setattr(
+        repo,
+        "claim_user_notification_send",
+        lambda *a, **k: claims.append(a) or True,
+    )
+    monkeypatch.setattr(
+        "retail.batch.rules.load_rules",
+        lambda: {"channels": ["telegram"]},
+    )
+    change = {
+        "store": "lider",
+        "product_id": "1",
+        "name": "X",
+        "previous_price": 100,
+        "price": 80,
+        "query": "X",
+    }
+    notify_cyber_change(repo, change)
+    assert claims == []
 
 
 def test_price_direction_streak_and_patch():

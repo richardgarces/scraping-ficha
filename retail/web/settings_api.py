@@ -11,10 +11,9 @@ from retail.batch.config import (
     mask_channels,
     merge_secrets,
     save_catalog,
+    save_channels,
     save_rules,
-    write_json,
 )
-from retail.batch.config import CHANNELS_PATH
 from retail.batch.rules import load_rules
 from retail.batch.schedule import apply_schedule, schedule_status
 from retail.qdrant_index import connect_qdrant
@@ -46,7 +45,7 @@ def get_settings(request: Request) -> dict:
         current_user(request, repo, admin=True)
         return {
             "rules": load_rules(),
-            "channels": mask_channels(load_channels()),
+            "channels": mask_channels(load_channels(repo)),
             "schedule": schedule_status(repo),
             "catalog": load_catalog(),
             "offer_screenshots": offer_screenshot_status(repo),
@@ -63,10 +62,15 @@ async def put_rules(request: Request) -> dict:
 
 @router.put("/api/settings/channels")
 async def put_channels(request: Request) -> dict:
-    current_user(request, admin=True)
-    merged = merge_secrets(await request.json())
-    write_json(CHANNELS_PATH, merged)
-    return mask_channels(merged)
+    repo = connect_repo()
+    if repo is None:
+        raise HTTPException(status_code=503, detail="MongoDB no está disponible.")
+    try:
+        current_user(request, repo, admin=True)
+        merged = merge_secrets(await request.json())
+        return mask_channels(save_channels(merged, repo))
+    finally:
+        repo.close()
 
 
 @router.put("/api/settings/schedule")

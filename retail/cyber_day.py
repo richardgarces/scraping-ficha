@@ -1928,37 +1928,61 @@ def notify_cyber_change(repo: Any, change: dict[str, Any]) -> int:
 
     users = _cyber_notification_users(repo)
     try:
-        from retail.batch.alerts import bind_user_chats, _telegram_text, send_to_user
+        from retail.batch.alerts import bind_user_chats, _secret, _telegram_text, send_to_user
 
-        # Excluye chats personales del broadcast admin (evita doble Telegram).
-        bind_user_chats(repo, users)
+        bot_token = _secret("TELEGRAM_BOT_TOKEN", "telegram_bot_token").strip()
+        if not bot_token:
+            print(
+                "cyber-day: TELEGRAM_BOT_TOKEN ausente "
+                "(output/canales.local.json / Ofertas); no se envía ni se reserva dedupe",
+                flush=True,
+            )
+        else:
+            # Excluye chats personales del broadcast admin (evita doble Telegram).
+            bind_user_chats(repo, users)
 
-        claimed = True
-        if hasattr(repo, "claim_user_notification_send"):
-            claimed = repo.claim_user_notification_send("cyber_day", "telegram", admin_entity, price)
-        _, body = price_change_message(change)
-        query = str(change.get("query") or "")
-        prefix = f"Cyber Day · {query}\n\n" if query else "Cyber Day · cambio de precio\n\n"
-        text = prefix + body
-        image_url = change.get("image_url")
-        if claimed and _telegram_text(text, image_url=image_url):
-            sent += 1
+            _, body = price_change_message(change)
+            query = str(change.get("query") or "")
+            prefix = f"Cyber Day · {query}\n\n" if query else "Cyber Day · cambio de precio\n\n"
+            text = prefix + body
+            image_url = change.get("image_url")
 
-        # Telegram personal: toda cuenta aprobada con Telegram vinculado.
-        for user in users:
-            user_id = str(user.get("_id") or user.get("id") or "")
-            if not user_id:
-                continue
-            prefs = user.get("notification_preferences") or {}
-            channels = prefs.get("channels") or []
-            # Sin preferencias explícitas: si tiene chat, avisar (igual que “vinculó Telegram”).
-            if channels and "telegram" not in channels:
-                continue
+            claimed = True
             if hasattr(repo, "claim_user_notification_send"):
-                if not repo.claim_user_notification_send(user_id, "telegram", entity_key, price):
+                claimed = repo.claim_user_notification_send(
+                    "cyber_day", "telegram", admin_entity, price,
+                )
+            if claimed:
+                if _telegram_text(text, image_url=image_url):
+                    sent += 1
+                elif hasattr(repo, "release_user_notification_send"):
+                    repo.release_user_notification_send(
+                        "cyber_day", "telegram", admin_entity, price,
+                    )
+
+            # Telegram personal: toda cuenta aprobada con Telegram vinculado.
+            for user in users:
+                user_id = str(user.get("_id") or user.get("id") or "")
+                if not user_id:
                     continue
-            if send_to_user(user, text, image_url=image_url):
-                sent += 1
+                prefs = user.get("notification_preferences") or {}
+                channels = prefs.get("channels") or []
+                # Sin preferencias: si tiene chat, avisar (igual que “vinculó Telegram”).
+                if channels and "telegram" not in channels:
+                    continue
+                claimed = True
+                if hasattr(repo, "claim_user_notification_send"):
+                    claimed = repo.claim_user_notification_send(
+                        user_id, "telegram", entity_key, price,
+                    )
+                if not claimed:
+                    continue
+                if send_to_user(user, text, image_url=image_url):
+                    sent += 1
+                elif hasattr(repo, "release_user_notification_send"):
+                    repo.release_user_notification_send(
+                        user_id, "telegram", entity_key, price,
+                    )
     except Exception as exc:
         print(f"cyber-day: telegram falló: {exc}", flush=True)
 
