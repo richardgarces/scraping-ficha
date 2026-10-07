@@ -981,6 +981,12 @@ const FORECAST_TRENDS = {
 
 const FORECAST_CONFIDENCE = { low: "Baja", medium: "Media", high: "Alta" };
 
+const FORECAST_BUY = {
+  comprar: { className: "forecast-buy-yes", fallback: "Conviene comprar" },
+  esperar: { className: "forecast-buy-wait", fallback: "Mejor esperar" },
+  observar: { className: "forecast-buy-watch", fallback: "Sin señal clara" },
+};
+
 function forecastDate(value) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "Fecha no disponible";
@@ -998,26 +1004,45 @@ function patternMarkup(patterns) {
   return `<div class="forecast-patterns"><h3>Temporadas y patrones observados</h3><ul>${rows}</ul></div>`;
 }
 
+function buyAdviceMarkup(summary) {
+  const advice = summary && summary.buy_advice;
+  if (!advice || !advice.advice) return "";
+  const meta = FORECAST_BUY[advice.advice] || FORECAST_BUY.observar;
+  const label = advice.label || meta.fallback;
+  const reason = advice.reason || "";
+  return `
+    <div class="forecast-buy ${attr(meta.className)}" role="status">
+      <span>¿Conviene comprar en Cyber?</span>
+      <strong>${attr(label)}</strong>
+      <small>${attr(reason)}</small>
+    </div>`;
+}
+
 function renderForecast(summary, patterns = []) {
   const panel = $("forecast-panel");
   if (!panel) return;
   panel.open = false;
   if (!summary) {
     $("forecast-content").innerHTML = `
-      <p class="muted">Todavía no hay un pronóstico para este producto. Se necesitan al menos 30 días de precios válidos.</p>
+      <p class="muted">Todavía no hay un pronóstico para este producto. Hacen falta al menos 30 días de precios válidos, o varias vueltas Cyber con cambios de precio en la ventana del evento (~3 días).</p>
       ${patternMarkup(patterns)}`;
     return;
   }
   const trend = FORECAST_TRENDS[summary.trend] || FORECAST_TRENDS.stable;
+  const isCyber = summary.mode === "cyber_event" || summary.model === "cyber_event_trend";
   const rangeNote = summary.range_has_uncertainty
     ? "Rango de incertidumbre calculado por el modelo."
     : "Rango observado entre los valores centrales estimados; el modelo no entregó límites de incertidumbre.";
+  const horizonNote = isCyber
+    ? `${summary.horizon_days} día${summary.horizon_days === 1 ? "" : "s"} de ventana Cyber · ${summary.observation_count || 0} observaciones de vueltas`
+    : `${summary.horizon_days} días estimados · ${summary.observation_count || 0} días analizados`;
   $("forecast-content").innerHTML = `
+    ${buyAdviceMarkup(summary)}
     <div class="forecast-grid">
       <div class="forecast-stat"><span>Tendencia probable</span><strong class="forecast-${attr(summary.trend)}">${attr(trend[0])}</strong><small>${attr(trend[1])}</small></div>
       <div class="forecast-stat"><span>Rango esperado</span><strong>${money(summary.range_low)} – ${money(summary.range_high)}</strong><small>${attr(rangeNote)}</small></div>
       <div class="forecast-stat"><span>Nivel de confianza</span><strong>${attr(FORECAST_CONFIDENCE[summary.confidence] || "Baja")}</strong><small title="${attr(summary.confidence_reason)}">${attr(summary.confidence_reason)}</small></div>
-      <div class="forecast-stat"><span>Generado</span><strong>${attr(forecastDate(summary.generated_at))}</strong><small>${summary.horizon_days} días estimados · ${summary.observation_count || 0} días analizados</small></div>
+      <div class="forecast-stat"><span>Generado</span><strong>${attr(forecastDate(summary.generated_at))}</strong><small>${attr(horizonNote)}</small></div>
     </div>
     ${patternMarkup(patterns)}`;
 }

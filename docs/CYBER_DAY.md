@@ -36,11 +36,12 @@ Informe UI: [`/cyber-day/evolucion?list=slug&n=12`](/cyber-day/evolucion) (colum
 
 Los cambios de mejor precio de las listas **Cyber octubre 2026** y **Cyber junio 2026** (`cyber_oct2026` / `cyber_junio2026` y alias cercanos) se vuelcan al `price_history` del producto de catálogo y alimentan el **Pronóstico experimental** de la ficha (`/api/forecasts/...`).
 
-- Tras cada observación nueva: se alimenta el historial; con ≥5 cambios Cyber (o forecast viejo) se intenta generar/actualizar.
-- Al cerrar cada vuelta del worker: pasada de gaps sobre esa lista.
-- Cron BMAX (`run_on_bmax.sh`): prioriza todos los productos Cyber elegibles (historial enriquecido) y vuelve a asegurar forecasts con TimesFM cuando hay ≥30 días distintos.
+- Tras cada observación nueva: se alimenta el historial; con ≥5 cambios Cyber (o ≥8 observaciones densas) se intenta generar/actualizar.
+- **Al cerrar cada vuelta** del worker: pasada sobre esa lista que escribe/actualiza el pronóstico de **ventana Cyber** (~3 días) con modelo `cyber_event_trend`, sin exigir 30 días calendario.
+- El panel muestra **¿Conviene comprar en Cyber?** (`comprar` / `esperar` / `observar`) según la trayectoria de las vueltas frente al mínimo del evento.
+- Cron BMAX (`run_on_bmax.sh`): prioriza productos Cyber; si hay ≥30 días distintos usa TimesFM; si no, el camino de evento Cyber ya cubre el gap con las vueltas.
 
-Si hay muchos cambios pero aún no hay 30 días de precios válidos, el panel sigue indicando que faltan datos; el contador `missing_forecast_with_many_changes` en el run marca el gap.
+Variables útiles: `CYBER_EVENT_DAYS` (default 3), `CYBER_FORECAST_MIN_OBSERVATIONS` (default 8), `CYBER_EVENT_REFRESH_HOURS` (default 2).
 
 ## Comportamiento
 

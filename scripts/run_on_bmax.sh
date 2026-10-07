@@ -98,12 +98,13 @@ import os
 
 repo = ProductRepository(os.environ["MONGODB_URI"], database=os.environ.get("MONGODB_DB", "scraping"))
 try:
-    stats = ensure_cyber_list_forecasts(repo, use_timesfm=True)
+    stats = ensure_cyber_list_forecasts(repo, use_timesfm=True, prefer_cyber_event=True)
     print(
         "cyber forecasts:",
         f"lists={stats.get('list_ids')}",
         f"candidates={stats.get('candidates')}",
         f"written={stats.get('written')}",
+        f"written_cyber_event={stats.get('written_cyber_event')}",
         f"fresh={stats.get('fresh')}",
         f"blocked={stats.get('blocked')}",
         f"missing_with_many_changes={stats.get('missing_forecast_with_many_changes')}",

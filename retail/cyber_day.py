@@ -2509,21 +2509,37 @@ def _finish_lap(repo: Any, run: dict[str, Any], total: int, *, list_id: str | No
         "list_id": lid,
     })
     save_run(repo, run, list_id=lid)
-    # Tras cada vuelta: si hay muchos cambios Cyber sin pronóstico, completar gaps.
+    # Tras cada vuelta: alimentar pronóstico experimental (ventana Cyber 3 días).
     try:
         from retail.cyber_forecast import ensure_cyber_list_forecasts, matches_forecast_cyber_list
 
         if matches_forecast_cyber_list(lid):
-            forecast_stats = ensure_cyber_list_forecasts(repo, list_id=lid, use_timesfm=False)
+            forecast_stats = ensure_cyber_list_forecasts(
+                repo,
+                list_id=lid,
+                use_timesfm=False,
+                prefer_cyber_event=True,
+            )
             run["last_forecast_pass"] = {
                 "at": _iso(now),
+                "lap": next_lap - 1,
                 "written": forecast_stats.get("written"),
+                "written_cyber_event": forecast_stats.get("written_cyber_event"),
+                "fresh": forecast_stats.get("fresh"),
                 "blocked": forecast_stats.get("blocked"),
                 "missing_forecast_with_many_changes": forecast_stats.get(
                     "missing_forecast_with_many_changes"
                 ),
             }
             save_run(repo, run, list_id=lid)
+            print(
+                f"cyber-day [{lid}] forecast pass lap {next_lap - 1}: "
+                f"written={forecast_stats.get('written')} "
+                f"cyber_event={forecast_stats.get('written_cyber_event')} "
+                f"fresh={forecast_stats.get('fresh')} "
+                f"blocked={forecast_stats.get('blocked')}",
+                flush=True,
+            )
     except Exception as exc:
         print(f"cyber-day: ensure forecasts al cerrar vuelta falló: {exc}", flush=True)
     print(

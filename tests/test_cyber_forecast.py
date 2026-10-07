@@ -14,7 +14,10 @@ from retail.cyber_day import (
     ensure_seed,
 )
 from retail.cyber_forecast import (
+    CYBER_EVENT_MODEL,
+    CYBER_FORECAST_MIN_OBSERVATIONS,
     MANY_CYBER_CHANGES,
+    cyber_buy_advice,
     cyber_change_count,
     cyber_product_keys,
     ensure_forecast_for_product,
@@ -25,6 +28,8 @@ from retail.cyber_forecast import (
     matches_forecast_cyber_list,
     merge_price_history_with_cyber,
     prepare_cyber_enriched_product,
+    prepare_cyber_event_product,
+    project_cyber_event_prices,
 )
 
 
@@ -159,7 +164,7 @@ def test_prepare_merges_cyber_history_not_yet_in_product(repo):
     assert prepared["cyber_observation_count"] == 2
 
 
-def test_ensure_list_forecasts_reports_gap_when_many_changes_but_short_history(repo):
+def test_ensure_list_forecasts_writes_cyber_event_with_dense_same_day_laps(repo):
     ensure_seed(repo)
     create_list(repo, name="Cyber Oct 2026", slug="cyber_oct2026", use_seed=False)
     store, product_id = "paris", "SHORT-HIST"
@@ -174,14 +179,14 @@ def test_ensure_list_forecasts_reports_gap_when_many_changes_but_short_history(r
             "scraped_at": NOW,
         }],
     })
-    for index in range(MANY_CYBER_CHANGES):
+    for index in range(CYBER_FORECAST_MIN_OBSERVATIONS):
         repo.cyber_day_price_history.insert_one({
             "list_id": "cyber_oct2026",
             "n": 1,
             "query": "Short",
             "day": "2026-10-06",
-            "at": NOW + timedelta(minutes=index),
-            "price": 10_000 - index,
+            "at": NOW + timedelta(minutes=index * 10),
+            "price": 10_000 - index * 50,
             "store": store,
             "product_id": product_id,
         })
@@ -194,10 +199,15 @@ def test_ensure_list_forecasts_reports_gap_when_many_changes_but_short_history(r
         "last_matches": {f"{store}:{product_id}": "10000:0:0"},
     })
 
-    stats = ensure_cyber_list_forecasts(repo, list_id="cyber_oct2026", use_timesfm=False)
+    stats = ensure_cyber_list_forecasts(repo, list_id="cyber_oct2026", use_timesfm=False, force=True)
     assert stats["candidates"] >= 1
-    assert stats["missing_forecast_with_many_changes"] >= 1
-    assert latest_forecast(repo, store, product_id) is None
+    assert stats["written"] >= 1
+    assert stats["written_cyber_event"] >= 1
+    forecast = latest_forecast(repo, store, product_id)
+    assert forecast is not None
+    assert forecast["model"] == CYBER_EVENT_MODEL
+    assert forecast["horizon"] <= 3
+    assert forecast.get("buy_advice", {}).get("advice") in {"comprar", "esperar", "observar"}
 
 
 def test_merge_price_history_with_cyber_keeps_both_sources():
@@ -265,8 +275,71 @@ def test_ensure_forecast_writes_baseline(repo):
         ],
     })
     result = ensure_forecast_for_product(
-        repo, store, product_id, list_ids=[], use_timesfm=False, force=True,
+        repo,
+        store,
+        product_id,
+        list_ids=[],
+        use_timesfm=False,
+        force=True,
+        prefer_cyber_event=False,
     )
     assert result["ok"] is True
     assert result["action"] == "written"
     assert latest_forecast(repo, store, product_id)["model"] == "last_value_baseline"
+
+
+def test_project_and_buy_advice_for_falling_cyber_prices():
+    prices = [100_000 - i * 1000 for i in range(10)]
+    projected = project_cyber_event_prices(prices, horizon=3, span_seconds=12 * 3600)
+    assert len(projected) == 3
+    assert projected[-1] < prices[-1]
+    advice = cyber_buy_advice(current=prices[-1], prices=prices, point_forecast=projected)
+    assert advice["advice"] == "esperar"
+    assert "esperar" in advice["label"].lower() or "mejor" in advice["label"].lower()
+
+
+def test_buy_advice_comprar_near_cyber_low():
+    prices = [90_000, 88_000, 85_000, 84_000, 83_500]
+    projected = [83_400, 83_300, 83_200]
+    advice = cyber_buy_advice(current=83_500, prices=prices, point_forecast=projected)
+    assert advice["advice"] == "comprar"
+
+
+def test_prepare_cyber_event_without_30_calendar_days(repo):
+    ensure_seed(repo)
+    create_list(repo, name="Cyber Oct 2026", slug="cyber_oct2026", use_seed=False)
+    store, product_id = "falabella", "EVENT-ONLY"
+    repo.collection.insert_one({
+        "store": store,
+        "product_id": product_id,
+        "name": "Event TV",
+        "price": 500_000,
+        "price_history": [{
+            "price": 500_000,
+            "price_basis": "all_payment",
+            "scraped_at": NOW,
+        }],
+    })
+    for index in range(CYBER_FORECAST_MIN_OBSERVATIONS + 2):
+        repo.cyber_day_price_history.insert_one({
+            "list_id": "cyber_oct2026",
+            "n": 3,
+            "query": "Event TV",
+            "day": "2026-10-06",
+            "at": NOW + timedelta(minutes=index * 15),
+            "price": 500_000 - index * 2000,
+            "store": store,
+            "product_id": product_id,
+        })
+    prepared, reason = prepare_cyber_event_product(repo, store, product_id, list_ids=["cyber_oct2026"])
+    assert reason is None
+    assert prepared is not None
+    assert prepared["mode"] == "cyber_event"
+    assert prepared["horizon"] <= 3
+    assert prepared["buy_advice"]["advice"] in {"comprar", "esperar", "observar"}
+    result = ensure_forecast_for_product(
+        repo, store, product_id, list_ids=["cyber_oct2026"], force=True,
+    )
+    assert result["ok"] is True
+    assert result["model"] == CYBER_EVENT_MODEL
+    assert result["buy_advice"] in {"comprar", "esperar", "observar"}

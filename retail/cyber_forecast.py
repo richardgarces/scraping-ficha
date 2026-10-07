@@ -40,6 +40,20 @@ CYBER_FORECAST_REFRESH_HOURS = max(
 )
 CYBER_FORECAST_HORIZON = max(1, int(os.environ.get("CYBER_FORECAST_HORIZON") or "7"))
 
+# Ventana Cyber (~3 días): basta con muchas observaciones/vueltas del mismo día
+# para un horizonte corto + consejo comprar/esperar, sin exigir 30 días calendario.
+CYBER_EVENT_DAYS = max(1, int(os.environ.get("CYBER_EVENT_DAYS") or "3"))
+CYBER_EVENT_HORIZON = max(1, int(os.environ.get("CYBER_EVENT_HORIZON") or str(CYBER_EVENT_DAYS)))
+CYBER_FORECAST_MIN_OBSERVATIONS = max(
+    3, int(os.environ.get("CYBER_FORECAST_MIN_OBSERVATIONS") or "8")
+)
+CYBER_EVENT_REFRESH_HOURS = max(
+    1, int(os.environ.get("CYBER_EVENT_REFRESH_HOURS") or "2")
+)
+CYBER_EVENT_MODEL = "cyber_event_trend"
+CYBER_BUY_DROP_THRESHOLD_PCT = float(os.environ.get("CYBER_BUY_DROP_THRESHOLD_PCT") or "2")
+CYBER_BUY_NEAR_LOW_PCT = float(os.environ.get("CYBER_BUY_NEAR_LOW_PCT") or "2")
+
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
@@ -365,6 +379,211 @@ def _forecast_is_fresh(doc: dict[str, Any] | None, *, hours: int = CYBER_FORECAS
     return generated >= _now() - timedelta(hours=hours)
 
 
+def _is_cyber_event_forecast(doc: dict[str, Any] | None) -> bool:
+    if not doc:
+        return False
+    if str(doc.get("model") or "") == CYBER_EVENT_MODEL:
+        return True
+    metadata = doc.get("metadata") if isinstance(doc.get("metadata"), dict) else {}
+    return str(metadata.get("mode") or "") == "cyber_event"
+
+
+def _linear_slope(values: list[float]) -> float:
+    n = len(values)
+    if n < 2:
+        return 0.0
+    xs = list(range(n))
+    x_mean = sum(xs) / n
+    y_mean = sum(values) / n
+    numerator = sum((x - x_mean) * (y - y_mean) for x, y in zip(xs, values))
+    denominator = sum((x - x_mean) ** 2 for x in xs)
+    return numerator / denominator if denominator else 0.0
+
+
+def cyber_distinct_days(cyber_points: list[dict[str, Any]]) -> list[str]:
+    days: list[str] = []
+    seen: set[str] = set()
+    for point in cyber_points:
+        day = str(point.get("cyber_day") or "").strip()
+        if not day:
+            at = point.get("scraped_at")
+            if isinstance(at, datetime):
+                day = _day_key(at)
+        if day and day not in seen:
+            seen.add(day)
+            days.append(day)
+    return days
+
+
+def remaining_cyber_horizon(cyber_points: list[dict[str, Any]], *, event_days: int = CYBER_EVENT_DAYS) -> int:
+    """Días restantes de la ventana Cyber (1..event_days) según días distintos observados."""
+    distinct = len(cyber_distinct_days(cyber_points))
+    if distinct <= 0:
+        return max(1, event_days)
+    # Día actual cuenta como en curso: proyectamos el resto de la ventana.
+    remaining = event_days - distinct + 1
+    return max(1, min(event_days, remaining))
+
+
+def project_cyber_event_prices(
+    prices: list[float],
+    *,
+    horizon: int,
+    span_seconds: float,
+) -> list[float]:
+    """Proyecta precios día a día en la ventana Cyber a partir de la pendiente por observación."""
+    if not prices:
+        return [0.0] * horizon
+    last = float(prices[-1])
+    if len(prices) < 2:
+        return [last] * horizon
+    slope_per_obs = _linear_slope(prices)
+    # Escala: cuántas observaciones equivalen a ~1 día calendario Cyber.
+    span_days = max(span_seconds / 86400.0, 1.0 / 24.0)  # mínimo ~1 hora
+    obs_per_day = max(len(prices) / span_days, 1.0)
+    daily_delta = slope_per_obs * obs_per_day
+    projected: list[float] = []
+    for step in range(1, horizon + 1):
+        value = last + daily_delta * step
+        projected.append(max(1.0, round(value, 2)))
+    return projected
+
+
+def cyber_buy_advice(
+    *,
+    current: float,
+    prices: list[float],
+    point_forecast: list[float],
+) -> dict[str, Any]:
+    """Consejo comprar / esperar / observar según trayectoria Cyber del evento."""
+    if current <= 0 or not prices:
+        return {
+            "advice": "observar",
+            "label": "Sin señal clara",
+            "reason": "Aún no hay precios Cyber suficientes para opinar.",
+        }
+    cyber_low = min(prices)
+    cyber_high = max(prices)
+    expected = sum(point_forecast) / len(point_forecast) if point_forecast else current
+    change_pct = ((expected - current) * 100 / current) if current else 0.0
+    near_low = cyber_low > 0 and (current - cyber_low) * 100 / cyber_low <= CYBER_BUY_NEAR_LOW_PCT
+    at_low = current <= cyber_low
+
+    if change_pct <= -CYBER_BUY_DROP_THRESHOLD_PCT:
+        return {
+            "advice": "esperar",
+            "label": "Mejor esperar",
+            "reason": (
+                f"En la ventana Cyber (~{CYBER_EVENT_DAYS} días) la trayectoria apunta a una baja "
+                f"de cerca de {abs(round(change_pct, 1))}%. Conviene esperar al día Cyber que viene."
+            ),
+            "expected_change_percent": round(change_pct, 1),
+            "cyber_low": round(cyber_low),
+            "cyber_high": round(cyber_high),
+        }
+    if at_low or near_low:
+        return {
+            "advice": "comprar",
+            "label": "Conviene comprar",
+            "reason": (
+                "Está en el mínimo visto en este Cyber."
+                if at_low
+                else (
+                    f"Está a un {round((current - cyber_low) * 100 / cyber_low, 1)}% "
+                    "del mínimo visto en este Cyber."
+                )
+            ),
+            "expected_change_percent": round(change_pct, 1),
+            "cyber_low": round(cyber_low),
+            "cyber_high": round(cyber_high),
+        }
+    if change_pct >= CYBER_BUY_DROP_THRESHOLD_PCT:
+        return {
+            "advice": "comprar",
+            "label": "Conviene comprar",
+            "reason": (
+                f"La trayectoria Cyber apunta a un alza de cerca de {round(change_pct, 1)}% "
+                "en los días que quedan del evento."
+            ),
+            "expected_change_percent": round(change_pct, 1),
+            "cyber_low": round(cyber_low),
+            "cyber_high": round(cyber_high),
+        }
+    return {
+        "advice": "observar",
+        "label": "Sin señal clara",
+        "reason": (
+            "En este Cyber el precio se ve estable frente a lo proyectado para los días restantes. "
+            "Revisa otra vuelta o el mínimo del evento."
+        ),
+        "expected_change_percent": round(change_pct, 1),
+        "cyber_low": round(cyber_low),
+        "cyber_high": round(cyber_high),
+    }
+
+
+def prepare_cyber_event_product(
+    repo: Any,
+    store: str,
+    product_id: str,
+    *,
+    list_ids: list[str] | None = None,
+    min_observations: int = CYBER_FORECAST_MIN_OBSERVATIONS,
+) -> tuple[dict[str, Any] | None, str | None]:
+    """Serie densa de vueltas Cyber (sin exigir 30 días calendario) para horizonte corto."""
+    store_n = _norm_store(store)
+    product_n = _norm_product_id(product_id)
+    coll = getattr(repo, "collection", None)
+    if coll is None or not store_n or not product_n:
+        return None, "missing_identity"
+
+    document = coll.find_one({"store": store_n, "product_id": product_n})
+    if document is None:
+        document = coll.find_one({
+            "store": {"$regex": f"^{re.escape(store_n)}$", "$options": "i"},
+            "product_id": product_n,
+        })
+    if document is None:
+        return None, "product_not_found"
+
+    lids = list(list_ids or forecast_cyber_list_ids(repo))
+    cyber_points = cyber_history_points_for_product(repo, store_n, product_n, list_ids=lids)
+    if len(cyber_points) < min_observations:
+        return None, "not_enough_cyber_observations"
+
+    prices = [float(point["price"]) for point in cyber_points]
+    times = [point["scraped_at"] for point in cyber_points if isinstance(point.get("scraped_at"), datetime)]
+    first_at = times[0] if times else _now()
+    last_at = times[-1] if times else _now()
+    span_seconds = max(0.0, (last_at - first_at).total_seconds())
+    horizon = remaining_cyber_horizon(cyber_points)
+    point_forecast = project_cyber_event_prices(prices, horizon=horizon, span_seconds=span_seconds)
+    current = prices[-1]
+    advice = cyber_buy_advice(current=current, prices=prices, point_forecast=point_forecast)
+    distinct_days = cyber_distinct_days(cyber_points)
+
+    return {
+        "forecast_key": f"{store_n}:{product_n}",
+        "store": store_n,
+        "product_id": product_n,
+        "source_document_id": str(document.get("_id") or ""),
+        "name": str(document.get("name") or ""),
+        "dates": [at.isoformat() if hasattr(at, "isoformat") else str(at) for at in times],
+        "series": prices,
+        "history_start": first_at.date().isoformat() if hasattr(first_at, "date") else str(first_at)[:10],
+        "history_end": last_at.date().isoformat() if hasattr(last_at, "date") else str(last_at)[:10],
+        "observation_count": len(prices),
+        "cyber_observation_count": len(cyber_points),
+        "cyber_list_ids": lids,
+        "cyber_distinct_days": distinct_days,
+        "cyber_span_seconds": span_seconds,
+        "point_forecast": point_forecast,
+        "horizon": horizon,
+        "buy_advice": advice,
+        "mode": "cyber_event",
+    }, None
+
+
 def prepare_cyber_enriched_product(
     repo: Any,
     store: str,
@@ -442,6 +661,25 @@ def build_forecast_document(
     series = [float(value) for value in prepared.get("series") or []]
     last = series[-1] if series else 0.0
     points = point_forecast if point_forecast is not None else [last] * horizon
+    mode = str(prepared.get("mode") or "daily")
+    is_event = mode == "cyber_event"
+    metadata: dict[str, Any] = {
+        "source": "cyber_day",
+        "mode": mode,
+        "frequency": "intra_event" if is_event else "daily",
+        "timezone": "America/Santiago",
+        "observation_count": prepared.get("observation_count"),
+        "history_start": prepared.get("history_start"),
+        "history_end": prepared.get("history_end"),
+        "minimum_history_days": 0 if is_event else min_history_days,
+        "one_observation_per_day": not is_event,
+        "cyber_observation_count": prepared.get("cyber_observation_count") or 0,
+        "cyber_list_ids": prepared.get("cyber_list_ids") or [],
+        "cyber_event_days": CYBER_EVENT_DAYS if is_event else None,
+        "cyber_distinct_days": prepared.get("cyber_distinct_days") or [],
+        "cyber_span_seconds": prepared.get("cyber_span_seconds"),
+        "buy_advice": prepared.get("buy_advice"),
+    }
     return {
         "forecast_key": prepared["forecast_key"],
         "store": prepared["store"],
@@ -453,18 +691,46 @@ def build_forecast_document(
         "model": model,
         "point_forecast": points,
         "quantiles": quantiles or {},
-        "metadata": {
-            "source": "cyber_day",
-            "frequency": "daily",
-            "timezone": "America/Santiago",
-            "observation_count": prepared.get("observation_count"),
-            "history_start": prepared.get("history_start"),
-            "history_end": prepared.get("history_end"),
-            "minimum_history_days": min_history_days,
-            "one_observation_per_day": True,
-            "cyber_observation_count": prepared.get("cyber_observation_count") or 0,
-            "cyber_list_ids": prepared.get("cyber_list_ids") or [],
-        },
+        "metadata": metadata,
+        "buy_advice": prepared.get("buy_advice"),
+    }
+
+
+def _write_cyber_event_forecast(
+    repo: Any,
+    prepared: dict[str, Any],
+    *,
+    changes: int,
+) -> dict[str, Any]:
+    horizon = int(prepared.get("horizon") or CYBER_EVENT_HORIZON)
+    points = list(prepared.get("point_forecast") or [])
+    if len(points) != horizon:
+        prices = [float(value) for value in prepared.get("series") or []]
+        points = project_cyber_event_prices(
+            prices,
+            horizon=horizon,
+            span_seconds=float(prepared.get("cyber_span_seconds") or 0.0),
+        )
+    doc = build_forecast_document(
+        prepared,
+        horizon=horizon,
+        model=CYBER_EVENT_MODEL,
+        point_forecast=points,
+        min_history_days=0,
+    )
+    write_forecast_docs(repo, [doc])
+    advice = prepared.get("buy_advice") or {}
+    return {
+        "ok": True,
+        "action": "written",
+        "forecast_key": doc["forecast_key"],
+        "model": CYBER_EVENT_MODEL,
+        "mode": "cyber_event",
+        "observation_count": prepared.get("observation_count"),
+        "cyber_changes": changes,
+        "cyber_observation_count": prepared.get("cyber_observation_count") or 0,
+        "horizon": horizon,
+        "buy_advice": advice.get("advice"),
     }
 
 
@@ -479,29 +745,36 @@ def ensure_forecast_for_product(
     use_timesfm: bool = False,
     force: bool = False,
     many_changes_threshold: int = MANY_CYBER_CHANGES,
+    prefer_cyber_event: bool = True,
 ) -> dict[str, Any]:
-    """Genera/actualiza pronóstico si hay historial suficiente o muchos cambios Cyber."""
+    """Genera/actualiza pronóstico: diario (≥30 días) o Cyber-evento (vueltas densas)."""
     lids = list(list_ids or forecast_cyber_list_ids(repo))
     store_n = _norm_store(store)
     product_n = _norm_product_id(product_id)
     changes = cyber_change_count(repo, store_n, product_n, list_ids=lids)
     existing = latest_forecast(repo, store_n, product_n)
-    if existing and _forecast_is_fresh(existing) and not force:
+    refresh_hours = (
+        CYBER_EVENT_REFRESH_HOURS
+        if _is_cyber_event_forecast(existing) or prefer_cyber_event
+        else CYBER_FORECAST_REFRESH_HOURS
+    )
+    if existing and _forecast_is_fresh(existing, hours=refresh_hours) and not force:
         return {
             "ok": True,
             "action": "fresh",
             "forecast_key": f"{store_n}:{product_n}",
             "cyber_changes": changes,
             "model": existing.get("model"),
+            "mode": "cyber_event" if _is_cyber_event_forecast(existing) else "daily",
         }
 
     # Intentar si: force, muchos cambios Cyber, no hay forecast, o el vigente está viejo.
-    # Sin historial suficiente el prepare bloquea; el cron nocturno reintenta.
     needs_check = (
         force
         or changes >= many_changes_threshold
+        or changes >= CYBER_FORECAST_MIN_OBSERVATIONS
         or existing is None
-        or not _forecast_is_fresh(existing)
+        or not _forecast_is_fresh(existing, hours=refresh_hours)
     )
     if not needs_check:
         return {
@@ -512,6 +785,22 @@ def ensure_forecast_for_product(
             "has_forecast": existing is not None,
         }
 
+    # 1) Camino Cyber-evento: muchas vueltas / puntos del mismo día bastan.
+    if prefer_cyber_event and changes >= CYBER_FORECAST_MIN_OBSERVATIONS:
+        event_prepared, event_reason = prepare_cyber_event_product(
+            repo,
+            store_n,
+            product_n,
+            list_ids=lids,
+        )
+        if event_prepared is not None:
+            return _write_cyber_event_forecast(repo, event_prepared, changes=changes)
+        # Si no alcanzó observaciones pero el conteo decía que sí, seguimos al diario.
+        event_block_reason = event_reason
+    else:
+        event_block_reason = None
+
+    # 2) Camino diario clásico (TimesFM / baseline con ≥30 días).
     prepared, reason = prepare_cyber_enriched_product(
         repo,
         store_n,
@@ -520,10 +809,22 @@ def ensure_forecast_for_product(
         min_history_days=min_history_days,
     )
     if prepared is None:
+        # Último recurso: si hay densas observaciones Cyber aunque el umbral de
+        # "changes" fuese bajo, reintentar evento con el mínimo de puntos.
+        if prefer_cyber_event:
+            event_prepared, event_reason = prepare_cyber_event_product(
+                repo,
+                store_n,
+                product_n,
+                list_ids=lids,
+            )
+            if event_prepared is not None:
+                return _write_cyber_event_forecast(repo, event_prepared, changes=changes)
+            event_block_reason = event_block_reason or event_reason
         return {
             "ok": False,
             "action": "blocked",
-            "reason": reason,
+            "reason": reason or event_block_reason or "invalid",
             "forecast_key": f"{store_n}:{product_n}",
             "cyber_changes": changes,
             "has_forecast": existing is not None,
@@ -557,6 +858,7 @@ def ensure_forecast_for_product(
         "action": "written",
         "forecast_key": doc["forecast_key"],
         "model": model,
+        "mode": "daily",
         "observation_count": prepared.get("observation_count"),
         "cyber_changes": changes,
         "cyber_observation_count": prepared.get("cyber_observation_count") or 0,
@@ -570,6 +872,7 @@ def ensure_cyber_list_forecasts(
     use_timesfm: bool = False,
     force: bool = False,
     limit: int | None = None,
+    prefer_cyber_event: bool = True,
 ) -> dict[str, Any]:
     """Recorre productos de las listas Cyber objetivo y asegura pronóstico experimental."""
     if list_id:
@@ -587,6 +890,7 @@ def ensure_cyber_list_forecasts(
         "list_ids": lids,
         "candidates": len(keys),
         "written": 0,
+        "written_cyber_event": 0,
         "fresh": 0,
         "blocked": 0,
         "missing_forecast_with_many_changes": 0,
@@ -600,10 +904,13 @@ def ensure_cyber_list_forecasts(
             list_ids=lids,
             use_timesfm=use_timesfm,
             force=force,
+            prefer_cyber_event=prefer_cyber_event,
         )
         action = result.get("action")
         if action == "written":
             stats["written"] += 1
+            if result.get("mode") == "cyber_event" or result.get("model") == CYBER_EVENT_MODEL:
+                stats["written_cyber_event"] += 1
         elif action == "fresh":
             stats["fresh"] += 1
         elif action == "blocked":
@@ -634,8 +941,15 @@ def maybe_refresh_after_cyber_observation(
         lids = [*lids, observation_list]
     changes = cyber_change_count(repo, store, product_id, list_ids=lids)
     existing = latest_forecast(repo, store, product_id)
-    should_ensure = changes >= MANY_CYBER_CHANGES or (
-        existing is not None and not _forecast_is_fresh(existing)
+    refresh_hours = (
+        CYBER_EVENT_REFRESH_HOURS
+        if _is_cyber_event_forecast(existing) or changes >= CYBER_FORECAST_MIN_OBSERVATIONS
+        else CYBER_FORECAST_REFRESH_HOURS
+    )
+    should_ensure = (
+        changes >= MANY_CYBER_CHANGES
+        or changes >= CYBER_FORECAST_MIN_OBSERVATIONS
+        or (existing is not None and not _forecast_is_fresh(existing, hours=refresh_hours))
     )
     forecast_result = None
     if should_ensure:
@@ -645,6 +959,9 @@ def maybe_refresh_after_cyber_observation(
             product_id,
             list_ids=lids or None,
             use_timesfm=use_timesfm,
-            force=changes >= MANY_CYBER_CHANGES and existing is None,
+            force=changes >= CYBER_FORECAST_MIN_OBSERVATIONS and (
+                existing is None or not _is_cyber_event_forecast(existing)
+            ),
+            prefer_cyber_event=True,
         )
     return {"fed_history": fed, "cyber_changes": changes, "forecast": forecast_result}

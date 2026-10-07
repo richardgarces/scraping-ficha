@@ -1520,6 +1520,29 @@ button.secondary:hover { border-color: color-mix(in srgb, var(--accent) 40%, var
 .forecast-down { color: var(--accent); }
 .forecast-up { color: var(--warn); }
 .forecast-stable { color: var(--text); }
+.forecast-buy {
+  display: grid;
+  gap: 6px;
+  margin: 0 0 14px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--panel-2);
+}
+.forecast-buy span {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .03em;
+  color: var(--muted);
+}
+.forecast-buy strong { font-size: 20px; }
+.forecast-buy small { color: var(--muted); line-height: 1.4; }
+.forecast-buy-yes { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
+.forecast-buy-yes strong { color: var(--accent); }
+.forecast-buy-wait { border-color: color-mix(in srgb, var(--warn) 45%, var(--line)); }
+.forecast-buy-wait strong { color: var(--warn); }
+.forecast-buy-watch strong { color: var(--text); }
 .forecast-disclaimer { margin: 14px 0 0; padding-top: 12px; border-top: 1px solid var(--line); color: var(--muted); font-size: 13px; line-height: 1.45; }
 .forecast-patterns { margin-top: 16px; }
 .forecast-patterns h3 { margin: 0 0 10px; }

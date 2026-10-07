@@ -50,3 +50,30 @@ def test_invalid_current_price_and_horizon_do_not_break_summary():
     )
     assert summary["horizon_days"] == 2
     assert summary["change_percent"] == -5.0
+
+
+def test_cyber_event_summary_exposes_buy_advice():
+    summary = forecast_summary(
+        {
+            "model": "cyber_event_trend",
+            "horizon": 3,
+            "generated_at": datetime(2026, 10, 6, tzinfo=timezone.utc),
+            "point_forecast": [90_000, 88_000, 86_000],
+            "metadata": {
+                "mode": "cyber_event",
+                "observation_count": 24,
+                "cyber_observation_count": 24,
+                "buy_advice": {
+                    "advice": "esperar",
+                    "label": "Mejor esperar",
+                    "reason": "Trayectoria a la baja en la ventana Cyber.",
+                },
+            },
+        },
+        current_price=95_000,
+    )
+    assert summary["mode"] == "cyber_event"
+    assert summary["trend"] == "down"
+    assert summary["confidence"] == "medium"
+    assert summary["buy_advice"]["advice"] == "esperar"
+    assert summary["buy_advice"]["label"] == "Mejor esperar"
