@@ -20,6 +20,7 @@ from retail.ficha_extra import (
 from retail.ficha_sweep import iter_ficha_sweep
 from retail.models import normalize_product_url
 from retail.pricing import (
+    apply_cheaper_elsewhere_gate,
     buy_or_wait,
     chart_history,
     classified_drop_events,
@@ -186,18 +187,31 @@ def product(store: str = Query(...), id: str = Query(...)) -> dict:
             priced,
             key=lambda item: landed_price(item["price"], item.get("shipping_cost")) if use_total else item["price"],
         ) if priced else None
+        cheapest_payload = {
+            "store": cheapest["store"],
+            "display_store": cheapest.get("display_store"),
+            "store_title": cheapest.get("store_title"),
+            "price": cheapest["price"],
+            "total_price": landed_price(cheapest["price"], cheapest.get("shipping_cost")),
+            "url": cheapest.get("url"),
+            "product_id": cheapest.get("product_id"),
+        } if cheapest else None
+        # La ficha muestra «Más barato en X» si otra tienda gana. El veredicto
+        # CONVIENE COMPRAR / mínimo histórico debe usar el mismo criterio global.
+        if (
+            cheapest_payload
+            and cheapest_payload.get("store")
+            and cheapest_payload["store"] != card.get("store")
+        ):
+            apply_cheaper_elsewhere_gate(
+                stats=card.get("stats"),
+                timing=card.get("timing"),
+                cheaper=cheapest_payload,
+            )
         return {
             "product": card,
             "others": others,
-            "cheapest": {
-                "store": cheapest["store"],
-                "display_store": cheapest.get("display_store"),
-                "store_title": cheapest.get("store_title"),
-                "price": cheapest["price"],
-                "total_price": landed_price(cheapest["price"], cheapest.get("shipping_cost")),
-                "url": cheapest.get("url"),
-                "product_id": cheapest.get("product_id"),
-            } if cheapest else None,
+            "cheapest": cheapest_payload,
         }
     finally:
         repo.close()

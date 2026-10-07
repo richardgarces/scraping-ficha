@@ -56,6 +56,14 @@ def test_product_page_has_contextual_back_link() -> None:
     assert "history.back()" in script
 
 
+def test_product_page_demotes_buy_when_cheaper_elsewhere_appears() -> None:
+    script = Path("retail/web/static/producto.js").read_text(encoding="utf-8")
+    assert "function demoteBuyAdviceForCheaper" in script
+    assert "demoteBuyAdviceForCheaper(item)" in script
+    assert "timing.comprar" in script
+    assert "Hay un precio más bajo en" in script
+
+
 def test_product_other_store_panel_cannot_overlap_the_main_card():
     styles = Path("retail/web/static/styles.css").read_text(encoding="utf-8")
     assert "grid-template-columns: minmax(0, 1fr) minmax(320px, 420px);" in styles
@@ -95,7 +103,7 @@ def test_product_price_charts_show_every_calendar_day():
     assert ".price-chart-scroll .chart" in styles
     assert "max-width: none" in styles
     assert "overflow-x: auto" in styles
-    assert 'producto.js?v=37' in page
+    assert 'producto.js?v=38' in page
     assert 'styles.css?v=80' in page
 
 
@@ -170,7 +178,7 @@ def test_product_forecast_panel_is_admin_only_and_collapsed_by_default() -> None
     assert "panel.hidden = false" not in script.split("async function loadForecast")[1].split("$(\"windows\")")[0]
     assert "panel.open = false" in script
     assert "panel.open = true" not in script
-    assert "producto.js?v=37" in page
+    assert "producto.js?v=38" in page
 
 
 def test_timesfm_offer_summary_is_admin_only() -> None:

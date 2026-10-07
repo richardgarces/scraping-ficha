@@ -499,10 +499,80 @@ def drops(rows: list[tuple[datetime | None, int]]) -> list[tuple[datetime | None
     return [(item["at"], item["percent"]) for item in drop_events(rows)]
 
 
+def _cheaper_label(cheaper: dict[str, Any]) -> tuple[str, str]:
+    """Nombre de tienda y precio formateado para copys de «más barato en»."""
+    label = str(cheaper.get("store_title") or cheaper.get("store") or "otra tienda")
+    try:
+        price = int(cheaper.get("price") or 0)
+    except (TypeError, ValueError):
+        price = 0
+    money = f"${price:,}".replace(",", ".") if price > 0 else ""
+    return label, money
+
+
+def apply_cheaper_elsewhere_gate(
+    *,
+    stats: dict[str, Any] | None = None,
+    timing: dict[str, Any] | None = None,
+    cheaper: dict[str, Any] | None = None,
+) -> None:
+    """Si otra tienda comparable es más barata, no recomendar comprar ni afirmar mínimo global.
+
+    El historial propio puede seguir siendo el mínimo de *esa* tienda; la UI no debe
+    decir CONVIENE COMPRAR / «precio más bajo que le hemos visto» mientras exista
+    un «Más barato en X».
+    """
+    if not cheaper:
+        return
+    try:
+        rival = int(cheaper.get("price") or 0)
+    except (TypeError, ValueError):
+        rival = 0
+    if rival <= 0:
+        return
+
+    label, money = _cheaper_label(cheaper)
+    elsewhere = f"{label}" + (f" · {money}" if money else "")
+
+    if timing is not None and timing.get("advice") == "comprar":
+        timing["advice"] = "esperar"
+        timing["reason"] = f"Hay un precio más bajo en {elsewhere}."
+        timing["blocked_by_cheaper_elsewhere"] = True
+
+    if stats is None:
+        return
+
+    store_lowest = bool(stats.get("is_lowest_ever"))
+    if store_lowest:
+        stats["is_lowest_at_store"] = True
+        stats["is_lowest_ever"] = False
+
+    verdict = str(stats.get("verdict") or "")
+    if store_lowest or "más bajo que le hemos visto" in verdict:
+        percent = stats.get("percent_vs_median")
+        if percent is not None and percent <= -10:
+            stats["level"] = "good"
+            stats["verdict"] = (
+                f"Bajo lo habitual en esta tienda, pero hay menos en {elsewhere}."
+            )
+        elif percent is not None and percent <= -2:
+            stats["level"] = "good"
+            stats["verdict"] = (
+                f"Un poco bajo lo habitual aquí; hay menos en {elsewhere}."
+            )
+        else:
+            stats["level"] = "normal"
+            stats["verdict"] = (
+                f"Mínimo en el historial de esta tienda, pero hay menos en {elsewhere}."
+            )
+
+
 def buy_or_wait(
     points: list[dict[str, Any]] | None,
     current: int | None = None,
     now: datetime | None = None,
+    *,
+    cheaper_elsewhere: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """¿Conviene comprar hoy o suele bajar más?
 
@@ -510,6 +580,9 @@ def buy_or_wait(
     dónde queda el precio de hoy dentro de todo lo que le hemos visto. Mientras
     no haya historial suficiente lo dice en vez de inventar un veredicto, y
     avisa cuántos días faltan para poder responder.
+
+    Si ``cheaper_elsewhere`` trae una oferta comparable más barata en otra tienda,
+    no recomienda comprar aunque el historial propio esté en su mínimo.
     """
     now = now or datetime.now(timezone.utc)
     rows = series(points)
@@ -563,11 +636,9 @@ def buy_or_wait(
             if current <= low
             else f"Está a un {round((current - low) * 100 / low)}% de su mínimo histórico."
         )
-        return answer
     else:
         # Regla adicional: si el precio es el mínimo en los últimos 6 meses, comprar.
         six_months_ago = now - timedelta(days=30 * 6)
-        rows = series(points)
         recent_low = None
         for moment, price in rows:
             if moment is None:
@@ -575,26 +646,23 @@ def buy_or_wait(
             if moment >= six_months_ago:
                 if recent_low is None or price < recent_low:
                     recent_low = price
-        try:
-            if current is not None and recent_low is not None and current <= recent_low:
-                answer["advice"] = "comprar"
-                answer["reason"] = "Precio en o por debajo del mínimo observado en los últimos 6 meses."
-                return answer
-        except Exception:
-            pass
-    # Continuar evaluaciones después de la regla de 6 meses
-    if cadencia and desde_la_ultima is not None and desde_la_ultima < cadencia:
-        answer["advice"] = "esperar"
-        answer["reason"] = (
-            f"Suele bajar cada {cadencia} días y la última fue hace {desde_la_ultima}: "
-            f"cuando baja lo hace un {answer['typical_drop_percent']}%."
-        )
-    elif answer["position_percent"] is not None and answer["position_percent"] >= 60:
-        answer["advice"] = "esperar"
-        answer["reason"] = f"Hoy está caro para lo que suele costar: llegó a ${low:,}.".replace(",", ".")
-    else:
-        answer["advice"] = "indeciso"
-        answer["reason"] = "Está en un precio corriente, ni de los buenos ni de los malos."
+        if current is not None and recent_low is not None and current <= recent_low:
+            answer["advice"] = "comprar"
+            answer["reason"] = "Precio en o por debajo del mínimo observado en los últimos 6 meses."
+        elif cadencia and desde_la_ultima is not None and desde_la_ultima < cadencia:
+            answer["advice"] = "esperar"
+            answer["reason"] = (
+                f"Suele bajar cada {cadencia} días y la última fue hace {desde_la_ultima}: "
+                f"cuando baja lo hace un {answer['typical_drop_percent']}%."
+            )
+        elif answer["position_percent"] is not None and answer["position_percent"] >= 60:
+            answer["advice"] = "esperar"
+            answer["reason"] = f"Hoy está caro para lo que suele costar: llegó a ${low:,}.".replace(",", ".")
+        else:
+            answer["advice"] = "indeciso"
+            answer["reason"] = "Está en un precio corriente, ni de los buenos ni de los malos."
+
+    apply_cheaper_elsewhere_gate(timing=answer, cheaper=cheaper_elsewhere)
     return answer
 
 
@@ -602,6 +670,8 @@ def price_stats(
     points: list[dict[str, Any]] | None,
     current: int | None = None,
     now: datetime | None = None,
+    *,
+    cheaper_elsewhere: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     now = now or datetime.now(timezone.utc)
     rows = series(points)
@@ -629,12 +699,14 @@ def price_stats(
     stats["max"] = reference["max"]
     stats["fake_discount"] = fake_discount(rows, current, previous, now)
     stats["is_lowest_ever"] = bool(prices) and current is not None and current <= min(prices) and len(prices) >= 3
+    stats["is_lowest_at_store"] = bool(stats["is_lowest_ever"])
 
     median_value = reference["median"]
     if current is None or not median_value:
         stats["percent_vs_median"] = None
         stats["level"] = "unknown"
         stats["verdict"] = "Sin historial suficiente para comparar."
+        apply_cheaper_elsewhere_gate(stats=stats, cheaper=cheaper_elsewhere)
         return stats
 
     percent = round((current - median_value) * 100 / median_value, 1)
@@ -664,4 +736,5 @@ def price_stats(
 
     stats["level"] = level
     stats["verdict"] = verdict
+    apply_cheaper_elsewhere_gate(stats=stats, cheaper=cheaper_elsewhere)
     return stats

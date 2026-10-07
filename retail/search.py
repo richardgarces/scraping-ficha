@@ -20,7 +20,13 @@ from retail.index.products import (
     stores_for,
 )
 from retail.models import Product
-from retail.pricing import cheaper_before, cheaper_elsewhere, mark_false_list_discounts, price_stats
+from retail.pricing import (
+    apply_cheaper_elsewhere_gate,
+    cheaper_before,
+    cheaper_elsewhere,
+    mark_false_list_discounts,
+    price_stats,
+)
 from retail.qdrant_index import connect_qdrant
 from retail.registry import GROUP_TITLES, get_client, group_of, list_stores
 from retail.relevance import filter_relevant, fold
@@ -464,6 +470,11 @@ def attach_cheaper_hints(groups: list[dict[str, Any]]) -> None:
         for offer in offers:
             offer["cheaper_before"] = cheaper_before(offer.get("price_history"), offer.get("price"))
             offer["cheaper_elsewhere"] = cheaper_elsewhere(offer, offers)
+            if offer.get("cheaper_elsewhere") and offer.get("price_stats"):
+                apply_cheaper_elsewhere_gate(
+                    stats=offer["price_stats"],
+                    cheaper=offer["cheaper_elsewhere"],
+                )
     mark_false_list_discounts(groups)
 
 

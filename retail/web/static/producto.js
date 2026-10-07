@@ -1141,6 +1141,30 @@ function showLowerNotice(message) {
   box.textContent = message;
 }
 
+function demoteBuyAdviceForCheaper(item) {
+  /** Si el sweep encuentra un precio menor, alinea CONVIENE COMPRAR / mínimo con la oferta global. */
+  const head = $("card")?.querySelector(".product-head div");
+  if (!head || item?.price == null) return;
+  const who = typeof publicStoreLabel === "function"
+    ? publicStoreLabel(item.display_store || item.store, item.store_title || item.store)
+    : (item.store_title || item.store || "otra tienda");
+  const elsewhere = `${who} · ${money(item.price)}`;
+  const box = head.querySelector(".timing.comprar");
+  if (box) {
+    box.classList.remove("comprar");
+    box.classList.add("esperar");
+    const strong = box.querySelector("strong");
+    const span = box.querySelector(":scope > span");
+    if (strong) strong.textContent = TIMING_LABELS.esperar;
+    if (span) span.textContent = `Hay un precio más bajo en ${elsewhere}.`;
+  }
+  const verdict = head.querySelector(".verdict");
+  if (verdict && /más bajo que le hemos visto/i.test(verdict.textContent || "")) {
+    verdict.className = "verdict normal";
+    verdict.textContent = `Mínimo en el historial de esta tienda, pero hay menos en ${elsewhere}.`;
+  }
+}
+
 function markCheaper(item) {
   const head = $("card")?.querySelector(".product-head div");
   if (!head || item?.price == null) return;
@@ -1156,6 +1180,7 @@ function markCheaper(item) {
     else head.appendChild(line);
   }
   line.innerHTML = html;
+  demoteBuyAdviceForCheaper(item);
 }
 
 function startCrossStoreSweep(store, id, known) {

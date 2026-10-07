@@ -2,7 +2,16 @@ from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from retail.batch.rules import detect_offers, watch_alerts
-from retail.pricing import chart_drawable, chart_history, cheaper_before, cheaper_elsewhere, mark_false_list_discounts, price_stats
+from retail.pricing import (
+    apply_cheaper_elsewhere_gate,
+    buy_or_wait,
+    chart_drawable,
+    chart_history,
+    cheaper_before,
+    cheaper_elsewhere,
+    mark_false_list_discounts,
+    price_stats,
+)
 from retail.thumbs import decode, shrink
 
 NOW = datetime(2026, 9, 13, tzinfo=timezone.utc)
@@ -257,6 +266,26 @@ def test_stats_track_age_and_lowest_ever():
     assert stats["changed_days_ago"] == 20
     assert stats["is_lowest_ever"] is True
     assert "7" in stats["windows"] and "30" in stats["windows"] and "90" in stats["windows"]
+
+
+def test_global_cheapest_blocks_buy_and_lowest_ever_copy():
+    """Misma contradicción de la ficha: mínimo de la tienda + más barato en otra."""
+    history = points((60, 12000), (40, 8000), (20, 9000), (0, 7000))
+    cheaper = {"store": "petrizzio", "store_title": "Petrizzio", "price": 5590}
+
+    timing = buy_or_wait(history, 7000, now=NOW)
+    assert timing["advice"] == "comprar"
+    apply_cheaper_elsewhere_gate(timing=timing, cheaper=cheaper)
+    assert timing["advice"] == "esperar"
+    assert "Petrizzio" in timing["reason"]
+
+    stats = price_stats(history, current=7000, now=NOW)
+    assert stats["is_lowest_ever"] is True
+    assert "más bajo que le hemos visto" in stats["verdict"]
+    apply_cheaper_elsewhere_gate(stats=stats, cheaper=cheaper)
+    assert stats["is_lowest_ever"] is False
+    assert stats["is_lowest_at_store"] is True
+    assert "Petrizzio" in stats["verdict"]
 
 
 def test_new_pages_and_apis_are_wired():

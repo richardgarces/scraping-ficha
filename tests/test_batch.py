@@ -159,6 +159,24 @@ def test_buy_or_wait_recommends_buying_at_the_historical_low():
     assert "más bajo" in answer["reason"]
 
 
+def test_buy_or_wait_does_not_recommend_buy_when_cheaper_elsewhere():
+    from retail.pricing import buy_or_wait, price_stats
+
+    points, now = _history([(60, 120000), (40, 110000), (20, 115000), (0, 99990)])
+    cheaper = {"store": "petrizzio", "store_title": "Petrizzio", "price": 5590}
+    answer = buy_or_wait(points, 99990, now=now, cheaper_elsewhere=cheaper)
+    assert answer["advice"] == "esperar"
+    assert answer["blocked_by_cheaper_elsewhere"] is True
+    assert "Petrizzio" in answer["reason"]
+    assert "5.590" in answer["reason"] or "5590" in answer["reason"].replace(".", "")
+
+    stats = price_stats(points, current=99990, now=now, cheaper_elsewhere=cheaper)
+    assert stats["is_lowest_ever"] is False
+    assert stats["is_lowest_at_store"] is True
+    assert "Petrizzio" in stats["verdict"]
+    assert "más bajo que le hemos visto" not in stats["verdict"]
+
+
 def test_buy_or_wait_recommends_waiting_when_a_drop_is_due():
     from retail.pricing import buy_or_wait
 
