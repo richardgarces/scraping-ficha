@@ -56,7 +56,7 @@ Este documento reúne trabajo pendiente o que todavía requiere validación. Una
 
 - [ ] Revisar las protecciones contra extracción automatizada: rate limiting, cuotas, caché, reglas por IP/usuario y monitoreo de abuso.
 - [ ] Confirmar que los controles anti-scraping no bloqueen buscadores permitidos, enlaces compartidos ni usuarios legítimos.
-- [ ] Ocultar el menú de tiendas a usuarios normales tanto en la interfaz como en las rutas y API del servidor.
+- [x] Ocultar el menú de tiendas a usuarios normales tanto en la interfaz como en las rutas y API del servidor.
 - [ ] Revisar copias de seguridad y restauración de Redis después de la reparación del AOF local.
 - [ ] Definir una política periódica de limpieza local de caché Docker, archivos temporales y respaldos antiguos.
 

@@ -1,0 +1,1460 @@
+[
+  {
+    "name": "Aurus Joyeria",
+    "cat": "Accesorios Moda",
+    "status": "no",
+    "reason": "unreachable_or_custom status=200",
+    "host": "www.aurus.cl"
+  },
+  {
+    "name": "Djoyas",
+    "cat": "Accesorios Moda",
+    "status": "no",
+    "reason": "unreachable_or_custom status=200",
+    "host": "www.djoyas.cl"
+  },
+  {
+    "name": "Humana",
+    "cat": "Accesorios Moda",
+    "status": "no",
+    "reason": "unreachable_or_custom status=200",
+    "host": "www.humana.cl"
+  },
+  {
+    "name": "Nerfis",
+    "cat": "Accesorios Moda",
+    "status": "no",
+    "reason": "unreachable_or_custom status=200",
+    "host": "www.nerfis.cl"
+  },
+  {
+    "name": "Orocash",
+    "cat": "Accesorios Moda",
+    "status": "no",
+    "reason": "unreachable_or_custom status=200",
+    "host": "www.orocash.cl"
+  },
+  {
+    "name": "Pandora",
+    "cat": "Accesorios Moda",
+    "status": "no",
+    "reason": "unreachable_or_custom status=200",
+    "host": "cl.pandora.net"
+  },
+  {
+    "name": "Booz",
+    "cat": "Alimentos y Bebidas",
+    "status": "no",
+    "reason": "unreachable_or_custom status=200",
+    "host": "www.booz.cl"
+  },
+  {
+    "name": "Deep Productivity & Performance",
+    "cat": "Alimentos y Bebidas",
+    "status": "no",
+    "reason": "unreachable_or_custom status=0",
+    "host": "www.deepproductivityandperformanc.cl"
+  },
+  {
+    "name": "La Barra CCU",
+    "cat": "Alimentos y Bebidas",
+    "status": "no",
+    "reason": "unreachable_or_custom status=200",
+    "host": "www.labarra.cl"
+  },
+  {
+    "name": "miCoca-Cola.cl",
+    "cat": "Alimentos y Bebidas",
+    "status": "no",
+    "reason": "unreachable_or_custom status=200",
+    "host": "www.micoca-cola.cl"
+  },
+  {
+    "name": "Nutriscomarket.cl",
+    "cat": "Alimentos y Bebidas",
+    "status": "si",
+    "store_id": "nutriscomarket_cl",
+    "platform": "shopify",
+    "host": "www.nutriscomarket.cl",
+    "group": "gastronomia"
+  },
+  {
+    "name": "Papa Johns",
+    "cat": "Alimentos y Bebidas",
+    "status": "no es posible",
+    "reason": "servicio_o_sin_catalogo"
+  },
+  {
+    "name": "Tremus",
+    "cat": "Alimentos y Bebidas",
+    "status": "no",
+    "reason": "unreachable_or_custom status=200",
+    "host": "www.tremus.cl"
+  },
+  {
+    "name": "Volka Chokolade",
+    "cat": "Alimentos y Bebidas",
+    "status": "no",
+    "reason": "unreachable_or_custom status=200",
+    "host": "www.volkachokolade.cl"
+  },
+  {
+    "name": "Chery",
+    "cat": "Automotriz",
+    "status": "no es posible",
+    "reason": "servicio_o_sin_catalogo"
+  },
+  {
+    "name": "Dercocenter",
+    "cat": "Automotriz",
+    "status": "no es posible",
+    "reason": "servicio_o_sin_catalogo"
+  },
+  {
+    "name": "Exeed",
+    "cat": "Automotriz",
+    "status": "no es posible",
+    "reason": "servicio_o_sin_catalogo"
+  },
+  {
+    "name": "Hyundai",
+    "cat": "Automotriz",
+    "status": "no es posible",
+    "reason": "servicio_o_sin_catalogo"
+  },
+  {
+    "name": "JAC",
+    "cat": "Automotriz",
+    "status": "no es posible",
+    "reason": "servicio_o_sin_catalogo"
+  },
+  {
+    "name": "Orion Lubricantes",
+    "cat": "Automotriz",
+    "status": "no",
+    "reason": "unreachable_or_custom status=200",
+    "host": "www.orionlubricantes.cl"
+  },
+  {
+    "name": "Subaru",
+    "cat": "Automotriz",
+    "status": "no es posible",
+    "reason": "servicio_o_sin_catalogo"
+  },
+  {
+    "name": "Andesland",
+    "cat": "Deportes y Outdoor",
+    "status": "no",
+    "reason": "unreachable_or_custom status=0",
+    "host": "www.andesland.cl"
+  },
+  {
+    "name": "Atletis",
+    "cat": "Deportes y Outdoor",
+    "status": "si",
+    "store_id": "atletis",
+    "platform": "shopify",
+    "host": "www.atletis.cl",
+    "group": "deporte"
+  },
+  {
+    "name": "AWL",
+    "cat": "Deportes y Outdoor",
+    "status": "no",
+    "reason": "unreachable_or_custom status=200",
+    "host": "www.awl.cl"
+  },
+  {
+    "name": "Bamo",
+    "cat": "Deportes y Outdoor",
+    "status": "no",
+    "reason": "unreachable_or_custom status=200",
+    "host": "www.bamo.cl"
+  },
+  {
+    "name": "Columbia",
+    "cat": "Deportes y Outdoor",
+    "status": "no",
+    "reason": "unreachable_or_custom status=0",
+    "host": "www.columbia.cl"
+  },
+  {
+    "name": "Discovery",
+    "cat": "Deportes y Outdoor",
+    "status": "no",
+    "reason": "unreachable_or_custom status=0",
+    "host": "www.discovery.cl"
+  },
+  {
+    "name": "Getway",
+    "cat": "Deportes y Outdoor",
+    "status": "si",
+    "store_id": "getway",
+    "platform": "shopify",
+    "host": "www.getway.cl",
+    "group": "deporte"
+  },
+  {
+    "name": "Giant Bicycles",
+    "cat": "Deportes y Outdoor",
+    "status": "no",
+    "reason": "unreachable_or_custom status=200",
+    "host": "www.giant-bicycles.com"
+  },
+  {
+    "name": "Hoka",
+    "cat": "Deportes y Outdoor",
+    "status": "no",
+    "reason": "unreachable_or_custom status=406",
+    "host": "www.hoka.com"
+  },
+  {
+    "name": "Kano",
+    "cat": "Deportes y Outdoor",
+    "status": "no",
+    "reason": "unreachable_or_custom status=0",
+    "host": "www.kano.cl"
+  },
+  {
+    "name": "La Pica del Ski",
+    "cat": "Deportes y Outdoor",
+    "status": "no",
+    "reason": "unreachable_or_custom status=0",
+    "host": "www.lapicadelski.cl"
+  },
+  {
+    "name": "Trail Store",
+    "cat": "Deportes y Outdoor",
+    "status": "si",
+    "store_id": "trail_store",
+    "platform": "shopify",
+    "host": "www.trailstore.cl",
+    "group": "deporte"
+  },
+  {
+    "name": "Volcano Trailer",
+    "cat": "Deportes y Outdoor",
+    "status": "no",
+    "reason": "unreachable_or_custom status=403",
+    "host": "www.volcanotrailer.cl"
+  },
+  {
+    "name": "Vulcano",
+    "cat": "Deportes y Outdoor",
+    "status": "no",
+    "reason": "unreachable_or_custom status=0",
+    "host": "www.vulcano.cl"
+  },
+  {
+    "name": "Weinbrenner",
+    "cat": "Deportes y Outdoor",
+    "status": "no",
+    "reason": "unreachable_or_custom status=0",
+    "host": "www.weinbrenner.cl"
+  },
+  {
+    "name": "Baepink",
+    "cat": "Entretención",
+    "status": "si",
+    "store_id": "baepink",
+    "platform": "shopify",
+    "host": "www.baepink.cl",
+    "group": "juguetes"
+  },
+  {
+    "name": "Fumetas Store",
+    "cat": "Entretención",
+    "status": "no",
+    "reason": "unreachable_or_custom status=200",
+    "host": "www.fumetas.cl"
+  },
+  {
+    "name": "Ozeta",
+    "cat": "Entretención",
+    "status": "no",
+    "reason": "unreachable_or_custom status=200",
+    "host": "www.ozeta.cl"
+  },
+  {
+    "name": "Punto Ticket",
+    "cat": "Entretención",
+    "status": "no es posible",
+    "reason": "servicio_o_sin_catalogo"
+  },
+  {
+    "name": "SOYPREMIUM",
+    "cat": "Entretención",
+    "status": "no es posible",
+    "reason": "servicio_o_sin_catalogo"
+  },
+  {
+    "name": "Ticketmaster",
+    "cat": "Entretención",
+    "status": "no es posible",
+    "reason": "servicio_o_sin_catalogo"
+  },
+  {
+    "name": "Zigzaboo",
+    "cat": "Entretención",
+    "status": "no",
+    "reason": "unreachable_or_custom status=200",
+    "host": "www.zigzaboo.cl"
+  },
+  {
+    "name": "Ferrelan",
+    "cat": "Ferretería y Construcción",
+    "status": "no",
+    "reason": "unreachable_or_custom status=200",
+    "host": "www.ferrelan.cl"
+  },
+  {
+    "name": "FERRETERIA.CL",
+    "cat": "Ferretería y Construcción",
+    "status": "no",
+    "reason": "unreachable_or_custom status=200",
+    "host": "www.ferreteria.cl"
+  },
+  {
+    "name": "Imperial",
+    "cat": "Ferretería y Construcción",
+    "status": "no",
+    "reason": "unreachable_or_custom status=200",
+    "host": "www.imperial.cl"
+  },
+  {
+    "name": "Junheinrich",
+    "cat": "Ferretería y Construcción",
+    "status": "no",
+    "reason": "unreachable_or_custom status=200",
+    "host": "www.jungheinrich.cl"
+  },
+  {
+    "name": "Maktotal",
+    "cat": "Ferretería y Construcción",
+    "status": "si",
+    "store_id": "maktotal",
+    "platform": "magento",
+    "host": "www.maktotal.cl",
+    "group": "ferreteria"
+  },
+  {
+    "name": "Maquep Chile",
+    "cat": "Ferretería y Construcción",
+    "status": "no",
+    "reason": "unreachable_or_custom status=0",
+    "host": "www.maquep.cl"
+  },
+  {
+    "name": "Marienberg",
+    "cat": "Ferretería y Construcción",
+    "status": "no",
+    "reason": "unreachable_or_custom status=200",
+    "host": "www.marienberg.cl"
+  },
+  {
+    "name": "MiService",
+    "cat": "Ferretería y Construcción",
+    "status": "no",
+    "reason": "unreachable_or_custom status=403",
+    "host": "www.miservice.cl"
+  },
+  {
+    "name": "Oviedo Ferreteria",
+    "cat": "Ferretería y Construcción",
+    "status": "no",
+    "reason": "unreachable_or_custom status=200",
+    "host": "www.oviedo.cl"
+  },
+  {
+    "name": "RCR Ferreteria",
+    "cat": "Ferretería y Construcción",
+    "status": "no",
+    "reason": "unreachable_or_custom status=200",
+    "host": "www.rcr.cl"
+  },
+  {
+    "name": "RSG INDUSTRIAL",
+    "cat": "Ferretería y Construcción",
+    "status": "no",
+    "reason": "unreachable_or_custom status=0",
+    "host": "www.rsgindustrial.cl"
+  },
+  {
+    "name": "Tehtools",
+    "cat": "Ferretería y Construcción",
+    "status": "si",
+    "store_id": "tehtools",
+    "platform": "shopify",
+    "host": "www.tehtools.cl",
+    "group": "ferreteria"
+  },
+  {
+    "name": "Bestway",
+    "cat": "Hogar",
+    "status": "no",
+    "reason": "unreachable_or_custom status=200",
+    "host": "www.bestway.cl"
+  },
+  {
+    "name": "Blanik",
+    "cat": "Hogar",
+    "status": "si",
+    "store_id": "blanik",
+    "platform": "vtex",
+    "host": "www.blanik.cl",
+    "group": "hogar"
+  },
+  {
+    "name": "CHC",
+    "cat": "Hogar",
+    "status": "no",
+    "reason": "unreachable_or_custom status=200",
+    "host": "www.chc.cl"
+  },
+  {
+    "name": "Cic",
+    "cat": "Hogar",
+    "status": "no",
+    "reason": "unreachable_or_custom status=200",
+    "host": "www.cic.cl"
+  },
+  {
+    "name": "Cortinas Izurieta",
+    "cat": "Hogar",
+    "status": "si",
+    "store_id": "cortinas_izurieta",
+    "platform": "magento",
+    "host": "www.cortinasizurieta.cl",
+    "group": "hogar"
+  },
+  {
+    "name": "Covepa",
+    "cat": "Hogar",
+    "status": "no",
+    "reason": "unreachable_or_custom status=200",
+    "host": "www.covepa.cl"
+  },
+  {
+    "name": "DONDE NACEN LAS VELAS",
+    "cat": "Hogar",
+    "status": "si",
+    "store_id": "donde_nacen_las_velas",
+    "platform": "shopify",
+    "host": "www.dondenacenlasvelas.cl",
+    "group": "hogar"
+  },
+  {
+    "name": "Drimkip",
+    "cat": "Hogar",
+    "status": "si",
+    "store_id": "drimkip",
+    "platform": "magento",
+    "host": "www.drimkip.cl",
+    "group": "hogar"
+  },
+  {
+    "name": "EITA Comercializadora",
+    "cat": "Hogar",
+    "status": "no",
+    "reason": "unreachable_or_custom status=200",
+    "host": "www.eita.cl"
+  },
+  {
+    "name": "El Castillo",
+    "cat": "Hogar",
+    "status": "no",
+    "reason": "unreachable_or_custom status=200",
+    "host": "www.elcastillo.cl"
+  },
+  {
+    "name": "Emma Sleep",
+    "cat": "Hogar",
+    "status": "no",
+    "reason": "unreachable_or_custom status=200",
+    "host": "www.emma-colchon.cl"
+  },
+  {
+    "name": "ENEL STORE",
+    "cat": "Hogar",
+    "status": "no es posible",
+    "reason": "servicio_o_sin_catalogo"
+  },
+  {
+    "name": "Igpro",
+    "cat": "Hogar",
+    "status": "no",
+    "reason": "unreachable_or_custom status=200",
+    "host": "www.igpro.cl"
+  },
+  {
+    "name": "Importaciones Reus",
+    "cat": "Hogar",
+    "status": "no",
+    "reason": "unreachable_or_custom status=200",
+    "host": "www.importacionesreus.cl"
+  },
+  {
+    "name": "iRobot",
+    "cat": "Hogar",
+    "status": "no",
+    "reason": "unreachable_or_custom status=0",
+    "host": "www.irobot.cl"
+  },
+  {
+    "name": "Kendal",
+    "cat": "Hogar",
+    "status": "no",
+    "reason": "unreachable_or_custom status=200",
+    "host": "www.kendal.cl"
+  },
+  {
+    "name": "Kärcher",
+    "cat": "Hogar",
+    "status": "no",
+    "reason": "unreachable_or_custom status=200",
+    "host": "www.kaercher.com"
+  },
+  {
+    "name": "LANCO PAINTS",
+    "cat": "Hogar",
+    "status": "no",
+    "reason": "unreachable_or_custom status=200",
+    "host": "www.lanco.cl"
+  },
+  {
+    "name": "Mabe",
+    "cat": "Hogar",
+    "status": "no",
+    "reason": "unreachable_or_custom status=200",
+    "host": "www.mabe.cl"
+  },
+  {
+    "name": "Mi foto",
+    "cat": "Hogar",
+    "status": "no",
+    "reason": "unreachable_or_custom status=200",
+    "host": "www.mifoto.cl"
+  },
+  {
+    "name": "Steward",
+    "cat": "Hogar",
+    "status": "no",
+    "reason": "unreachable_or_custom status=200",
+    "host": "www.steward.cl"
+  },
+  {
+    "name": "Tu Tienda Metrogas",
+    "cat": "Hogar",
+    "status": "no es posible",
+    "reason": "servicio_o_sin_catalogo"
+  },
+  {
+    "name": "Bubblegummers",
+    "cat": "Infantil",
+    "status": "no",
+    "reason": "unreachable_or_custom status=0",
+    "host": "www.bubblegummers.cl"
+  },
+  {
+    "name": "Carestino",
+    "cat": "Infantil",
+    "status": "no",
+    "reason": "unreachable_or_custom status=200",
+    "host": "www.carestino.cl"
+  },
+  {
+    "name": "Crescente",
+    "cat": "Infantil",
+    "status": "no",
+    "reason": "unreachable_or_custom status=200",
+    "host": "www.crescente.cl"
+  },
+  {
+    "name": "Hasbro",
+    "cat": "Infantil",
+    "status": "si",
+    "store_id": "hasbro",
+    "platform": "shopify",
+    "host": "www.hasbro.com",
+    "group": "infantil"
+  },
+  {
+    "name": "Lego",
+    "cat": "Infantil",
+    "status": "no",
+    "reason": "unreachable_or_custom status=200",
+    "host": "www.lego.com"
+  },
+  {
+    "name": "Mi primera Foto",
+    "cat": "Infantil",
+    "status": "si",
+    "store_id": "mi_primera_foto",
+    "platform": "shopify",
+    "host": "www.miprimerafoto.cl",
+    "group": "infantil"
+  },
+  {
+    "name": "Pichintun",
+    "cat": "Infantil",
+    "status": "si",
+    "store_id": "pichintun",
+    "platform": "shopify",
+    "host": "www.pichintun.cl",
+    "group": "infantil"
+  },
+  {
+    "name": "SlimeHuum",
+    "cat": "Infantil",
+    "status": "no",
+    "reason": "unreachable_or_custom status=200",
+    "host": "www.slimehuum.cl"
+  },
+  {
+    "name": "Balustore.cl",
+    "cat": "Mascotas",
+    "status": "no",
+    "reason": "unreachable_or_custom status=403",
+    "host": "www.balustore.cl"
+  },
+  {
+    "name": "Club de perros y gatos",
+    "cat": "Mascotas",
+    "status": "no",
+    "reason": "unreachable_or_custom status=200",
+    "host": "www.clubdeperrosygatos.cl"
+  },
+  {
+    "name": "DR. PET",
+    "cat": "Mascotas",
+    "status": "no",
+    "reason": "unreachable_or_custom status=403",
+    "host": "www.drpet.cl"
+  },
+  {
+    "name": "Felinus",
+    "cat": "Mascotas",
+    "status": "no",
+    "reason": "unreachable_or_custom status=200",
+    "host": "www.felinus.cl"
+  },
+  {
+    "name": "Laika Mascotas",
+    "cat": "Mascotas",
+    "status": "no",
+    "reason": "unreachable_or_custom status=200",
+    "host": "www.laika.com.co"
+  },
+  {
+    "name": "Pawal",
+    "cat": "Mascotas",
+    "status": "no",
+    "reason": "unreachable_or_custom status=200",
+    "host": "www.pawal.cl"
+  },
+  {
+    "name": "Petco",
+    "cat": "Mascotas",
+    "status": "no",
+    "reason": "unreachable_or_custom status=200",
+    "host": "www.petco.cl"
+  },
+  {
+    "name": "SuperZoo",
+    "cat": "Mascotas",
+    "status": "no",
+    "reason": "unreachable_or_custom status=200",
+    "host": "www.superzoo.cl"
+  },
+  {
+    "name": "LIVING STORE",
+    "cat": "Muebles",
+    "status": "no",
+    "reason": "unreachable_or_custom status=200",
+    "host": "www.livingstore.cl"
+  },
+  {
+    "name": "Muebles Santa Ana",
+    "cat": "Muebles",
+    "status": "no",
+    "reason": "unreachable_or_custom status=0",
+    "host": "www.mueblessantaana.cl"
+  },
+  {
+    "name": "Novahus",
+    "cat": "Muebles",
+    "status": "si",
+    "store_id": "novahus",
+    "platform": "shopify",
+    "host": "www.novahus.cl",
+    "group": "hogar"
+  },
+  {
+    "name": "Vekka Home",
+    "cat": "Muebles",
+    "status": "no",
+    "reason": "unreachable_or_custom status=0",
+    "host": "www.vekkahome.cl"
+  },
+  {
+    "name": "De todo y mas",
+    "cat": "Multitiendas y Supermercados",
+    "status": "no",
+    "reason": "unreachable_or_custom status=0",
+    "host": "www.detodoyymas.cl"
+  },
+  {
+    "name": "Elite Professional",
+    "cat": "Multitiendas y Supermercados",
+    "status": "si",
+    "store_id": "elite_professional",
+    "platform": "vtex",
+    "host": "www.eliteprofessional.cl",
+    "group": "retail"
+  },
+  {
+    "name": "Jumbo",
+    "cat": "Multitiendas y Supermercados",
+    "status": "si",
+    "store_id": "jumbo",
+    "platform": "vtex",
+    "host": "www.jumbo.cl",
+    "group": "supermercados"
+  },
+  {
+    "name": "Santa Isabel",
+    "cat": "Multitiendas y Supermercados",
+    "status": "si",
+    "store_id": "santa_isabel",
+    "platform": "vtex",
+    "host": "www.santaisabel.cl",
+    "group": "supermercados"
+  },
+  {
+    "name": "SuperStore",
+    "cat": "Multitiendas y Supermercados",
+    "status": "si",
+    "store_id": "superstore",
+    "platform": "shopify",
+    "host": "www.superstore.cl",
+    "group": "retail"
+  },
+  {
+    "name": "Blupoint Music",
+    "cat": "Música y Audio",
+    "status": "no",
+    "reason": "unreachable_or_custom status=0",
+    "host": "www.blupoint.cl"
+  },
+  {
+    "name": "Casa Amarilla",
+    "cat": "Música y Audio",
+    "status": "no",
+    "reason": "unreachable_or_custom status=200",
+    "host": "www.casaamarilla.cl"
+  },
+  {
+    "name": "Music World",
+    "cat": "Música y Audio",
+    "status": "no",
+    "reason": "unreachable_or_custom status=200",
+    "host": "www.musicworld.cl"
+  },
+  {
+    "name": "AmortiguadoresK",
+    "cat": "Neumáticos y Accesorios",
+    "status": "no",
+    "reason": "unreachable_or_custom status=200",
+    "host": "www.amortiguadoresk.cl"
+  },
+  {
+    "name": "Authievre Motors",
+    "cat": "Neumáticos y Accesorios",
+    "status": "no",
+    "reason": "unreachable_or_custom status=200",
+    "host": "www.authievre.cl"
+  },
+  {
+    "name": "Autoplanet",
+    "cat": "Neumáticos y Accesorios",
+    "status": "no",
+    "reason": "unreachable_or_custom status=200",
+    "host": "www.autoplanet.cl"
+  },
+  {
+    "name": "Bemarket",
+    "cat": "Neumáticos y Accesorios",
+    "status": "no",
+    "reason": "unreachable_or_custom status=0",
+    "host": "www.bemarket.cl"
+  },
+  {
+    "name": "Bigmoto",
+    "cat": "Neumáticos y Accesorios",
+    "status": "no",
+    "reason": "unreachable_or_custom status=200",
+    "host": "www.bigmoto.cl"
+  },
+  {
+    "name": "Caren",
+    "cat": "Neumáticos y Accesorios",
+    "status": "no",
+    "reason": "unreachable_or_custom status=200",
+    "host": "www.caren.cl"
+  },
+  {
+    "name": "Chile Neumaticos",
+    "cat": "Neumáticos y Accesorios",
+    "status": "no",
+    "reason": "unreachable_or_custom status=200",
+    "host": "www.chileneumaticos.cl"
+  },
+  {
+    "name": "Descuento Neumatico",
+    "cat": "Neumáticos y Accesorios",
+    "status": "no",
+    "reason": "unreachable_or_custom status=200",
+    "host": "www.descuentoneumatico.cl"
+  },
+  {
+    "name": "Mall del Neumatico",
+    "cat": "Neumáticos y Accesorios",
+    "status": "no",
+    "reason": "unreachable_or_custom status=200",
+    "host": "www.malldelneumatico.cl"
+  },
+  {
+    "name": "Maxxis Chile",
+    "cat": "Neumáticos y Accesorios",
+    "status": "no",
+    "reason": "unreachable_or_custom status=0",
+    "host": "www.maxxis.cl"
+  },
+  {
+    "name": "Mitas",
+    "cat": "Neumáticos y Accesorios",
+    "status": "no",
+    "reason": "unreachable_or_custom status=0",
+    "host": "www.mitas.cl"
+  },
+  {
+    "name": "Mundo Repuestos",
+    "cat": "Neumáticos y Accesorios",
+    "status": "no",
+    "reason": "unreachable_or_custom status=0",
+    "host": "www.mundorepuestos.cl"
+  },
+  {
+    "name": "Neumaspot",
+    "cat": "Neumáticos y Accesorios",
+    "status": "no",
+    "reason": "unreachable_or_custom status=200",
+    "host": "www.neumaspot.cl"
+  },
+  {
+    "name": "NEUMATICOSK",
+    "cat": "Neumáticos y Accesorios",
+    "status": "no",
+    "reason": "unreachable_or_custom status=200",
+    "host": "www.neumaticosk.cl"
+  },
+  {
+    "name": "Red Barrera",
+    "cat": "Neumáticos y Accesorios",
+    "status": "no",
+    "reason": "unreachable_or_custom status=200",
+    "host": "www.redbarrera.cl"
+  },
+  {
+    "name": "Supermercado del Neumatico",
+    "cat": "Neumáticos y Accesorios",
+    "status": "si",
+    "store_id": "supermercado_del_neumatico",
+    "platform": "magento",
+    "host": "www.supermercadodelneumatico.cl",
+    "group": "otros"
+  },
+  {
+    "name": "Flores",
+    "cat": "Ropa Interior y Pijamas",
+    "status": "no",
+    "reason": "unreachable_or_custom status=0",
+    "host": "www.flores.cl"
+  },
+  {
+    "name": "Victoria’s Secret",
+    "cat": "Ropa Interior y Pijamas",
+    "status": "si",
+    "store_id": "victorias_secret",
+    "platform": "magento",
+    "host": "www.victoriassecret.cl",
+    "group": "moda"
+  },
+  {
+    "name": "Bath & Body Works",
+    "cat": "Salud y Belleza",
+    "status": "si",
+    "store_id": "bath_and_body_works",
+    "platform": "magento",
+    "host": "www.bathandbodyworks.cl",
+    "group": "belleza"
+  },
+  {
+    "name": "Cherimoya",
+    "cat": "Salud y Belleza",
+    "status": "no",
+    "reason": "unreachable_or_custom status=200",
+    "host": "www.cherimoya.cl"
+  },
+  {
+    "name": "Coreana",
+    "cat": "Salud y Belleza",
+    "status": "no",
+    "reason": "unreachable_or_custom status=200",
+    "host": "www.coreana.cl"
+  },
+  {
+    "name": "DRA. SIERRALTA",
+    "cat": "Salud y Belleza",
+    "status": "no es posible",
+    "reason": "servicio_o_sin_catalogo"
+  },
+  {
+    "name": "Farmacias Knop",
+    "cat": "Salud y Belleza",
+    "status": "no",
+    "reason": "unreachable_or_custom status=200",
+    "host": "www.farmaciasknop.cl"
+  },
+  {
+    "name": "JPT",
+    "cat": "Salud y Belleza",
+    "status": "no",
+    "reason": "unreachable_or_custom status=403",
+    "host": "www.jpt.cl"
+  },
+  {
+    "name": "JPT Luxury",
+    "cat": "Salud y Belleza",
+    "status": "no",
+    "reason": "unreachable_or_custom status=403",
+    "host": "www.jptluxury.cl"
+  },
+  {
+    "name": "Kliki",
+    "cat": "Salud y Belleza",
+    "status": "si",
+    "store_id": "kliki",
+    "platform": "shopify",
+    "host": "www.kliki.cl",
+    "group": "belleza"
+  },
+  {
+    "name": "Lasertam",
+    "cat": "Salud y Belleza",
+    "status": "no es posible",
+    "reason": "servicio_o_sin_catalogo"
+  },
+  {
+    "name": "LATTAFA PERFUMES",
+    "cat": "Salud y Belleza",
+    "status": "no",
+    "reason": "unreachable_or_custom status=0",
+    "host": "www.lattafa.cl"
+  },
+  {
+    "name": "Long Love",
+    "cat": "Salud y Belleza",
+    "status": "no",
+    "reason": "unreachable_or_custom status=200",
+    "host": "www.longlove.cl"
+  },
+  {
+    "name": "L’bel",
+    "cat": "Salud y Belleza",
+    "status": "no",
+    "reason": "unreachable_or_custom status=0",
+    "host": "www.lbel.cl"
+  },
+  {
+    "name": "Mi tienda Cotidian",
+    "cat": "Salud y Belleza",
+    "status": "no",
+    "reason": "unreachable_or_custom status=200",
+    "host": "www.cotidian.cl"
+  },
+  {
+    "name": "Natura",
+    "cat": "Salud y Belleza",
+    "status": "no",
+    "reason": "unreachable_or_custom status=403",
+    "host": "www.natura.cl"
+  },
+  {
+    "name": "Sairam Perfumes",
+    "cat": "Salud y Belleza",
+    "status": "no",
+    "reason": "unreachable_or_custom status=200",
+    "host": "www.sairam.cl"
+  },
+  {
+    "name": "Secretos de amor",
+    "cat": "Salud y Belleza",
+    "status": "no",
+    "reason": "unreachable_or_custom status=200",
+    "host": "www.secretosdeamor.cl"
+  },
+  {
+    "name": "Simmedical",
+    "cat": "Salud y Belleza",
+    "status": "no es posible",
+    "reason": "servicio_o_sin_catalogo"
+  },
+  {
+    "name": "Skar Cosmetics",
+    "cat": "Salud y Belleza",
+    "status": "no",
+    "reason": "unreachable_or_custom status=200",
+    "host": "www.skar.cl"
+  },
+  {
+    "name": "UltraEstetica",
+    "cat": "Salud y Belleza",
+    "status": "no es posible",
+    "reason": "servicio_o_sin_catalogo"
+  },
+  {
+    "name": "V&P Perfumeria",
+    "cat": "Salud y Belleza",
+    "status": "no",
+    "reason": "unreachable_or_custom status=0",
+    "host": "www.vyperfumeria.cl"
+  },
+  {
+    "name": "ÉSIKA",
+    "cat": "Salud y Belleza",
+    "status": "no",
+    "reason": "unreachable_or_custom status=0",
+    "host": "www.esika.cl"
+  },
+  {
+    "name": "Amazing",
+    "cat": "Tecnología",
+    "status": "no",
+    "reason": "unreachable_or_custom status=200",
+    "host": "www.amazing.cl"
+  },
+  {
+    "name": "Back Online",
+    "cat": "Tecnología",
+    "status": "si",
+    "store_id": "back_online",
+    "platform": "shopify",
+    "host": "www.backonline.cl",
+    "group": "tecnologia"
+  },
+  {
+    "name": "Dimacofi",
+    "cat": "Tecnología",
+    "status": "no",
+    "reason": "unreachable_or_custom status=200",
+    "host": "www.dimacofi.cl"
+  },
+  {
+    "name": "Emotions",
+    "cat": "Tecnología",
+    "status": "no",
+    "reason": "unreachable_or_custom status=200",
+    "host": "www.emotions.cl"
+  },
+  {
+    "name": "EPSON",
+    "cat": "Tecnología",
+    "status": "no",
+    "reason": "unreachable_or_custom status=200",
+    "host": "epson.cl"
+  },
+  {
+    "name": "Globaltecno",
+    "cat": "Tecnología",
+    "status": "no",
+    "reason": "unreachable_or_custom status=200",
+    "host": "www.globaltecno.cl"
+  },
+  {
+    "name": "JBL",
+    "cat": "Tecnología",
+    "status": "no",
+    "reason": "unreachable_or_custom status=403",
+    "host": "www.jbl.cl"
+  },
+  {
+    "name": "Lenovo",
+    "cat": "Tecnología",
+    "status": "no",
+    "reason": "unreachable_or_custom status=200",
+    "host": "www.lenovo.com"
+  },
+  {
+    "name": "LG",
+    "cat": "Tecnología",
+    "status": "no",
+    "reason": "unreachable_or_custom status=0",
+    "host": "www.lg.cl"
+  },
+  {
+    "name": "Mac Online",
+    "cat": "Tecnología",
+    "status": "no",
+    "reason": "unreachable_or_custom status=200",
+    "host": "www.maconline.com"
+  },
+  {
+    "name": "Reuse",
+    "cat": "Tecnología",
+    "status": "si",
+    "store_id": "reuse",
+    "platform": "shopify",
+    "host": "www.reuse.cl",
+    "group": "tecnologia"
+  },
+  {
+    "name": "SC Global",
+    "cat": "Tecnología",
+    "status": "no",
+    "reason": "unreachable_or_custom status=200",
+    "host": "www.scglobal.cl"
+  },
+  {
+    "name": "Sony",
+    "cat": "Tecnología",
+    "status": "si",
+    "store_id": "sony",
+    "platform": "vtex",
+    "host": "store.sony.cl",
+    "group": "tecnologia"
+  },
+  {
+    "name": "Tecno Lace",
+    "cat": "Tecnología",
+    "status": "no",
+    "reason": "unreachable_or_custom status=200",
+    "host": "www.tecnolace.cl"
+  },
+  {
+    "name": "TodoToner.cl",
+    "cat": "Tecnología",
+    "status": "no",
+    "reason": "unreachable_or_custom status=200",
+    "host": "www.todotoner.cl"
+  },
+  {
+    "name": "Tu Gadget",
+    "cat": "Tecnología",
+    "status": "no",
+    "reason": "unreachable_or_custom status=200",
+    "host": "www.tugadget.cl"
+  },
+  {
+    "name": "Calzado de Seguridad",
+    "cat": "Vestuario Industrial",
+    "status": "si",
+    "store_id": "calzado_de_seguridad",
+    "platform": "shopify",
+    "host": "www.calzadodeseguridad.cl",
+    "group": "calzado"
+  },
+  {
+    "name": "Tworld Store",
+    "cat": "Vestuario Industrial",
+    "status": "no",
+    "reason": "unreachable_or_custom status=200",
+    "host": "www.tworld.cl"
+  },
+  {
+    "name": "16 hrs",
+    "cat": "Vestuario y Calzado",
+    "status": "no",
+    "reason": "unreachable_or_custom status=200",
+    "host": "www.16hrs.cl"
+  },
+  {
+    "name": "Adidas",
+    "cat": "Vestuario y Calzado",
+    "status": "no",
+    "reason": "unreachable_or_custom status=403",
+    "host": "www.adidas.cl"
+  },
+  {
+    "name": "Antihuman",
+    "cat": "Vestuario y Calzado",
+    "status": "no",
+    "reason": "unreachable_or_custom status=200",
+    "host": "www.antihuman.cl"
+  },
+  {
+    "name": "Ash",
+    "cat": "Vestuario y Calzado",
+    "status": "no",
+    "reason": "unreachable_or_custom status=200",
+    "host": "www.ash.cl"
+  },
+  {
+    "name": "Bamers",
+    "cat": "Vestuario y Calzado",
+    "status": "si",
+    "store_id": "bamers",
+    "platform": "shopify",
+    "host": "www.bamers.cl",
+    "group": "moda"
+  },
+  {
+    "name": "Bata",
+    "cat": "Vestuario y Calzado",
+    "status": "no",
+    "reason": "unreachable_or_custom status=0",
+    "host": "www.bata.cl"
+  },
+  {
+    "name": "Belsport",
+    "cat": "Vestuario y Calzado",
+    "status": "no",
+    "reason": "unreachable_or_custom status=200",
+    "host": "www.belsport.cl"
+  },
+  {
+    "name": "Bold",
+    "cat": "Vestuario y Calzado",
+    "status": "no",
+    "reason": "unreachable_or_custom status=200",
+    "host": "www.bold.cl"
+  },
+  {
+    "name": "Bruno Rossi",
+    "cat": "Vestuario y Calzado",
+    "status": "no",
+    "reason": "unreachable_or_custom status=200",
+    "host": "www.brunorossi.cl"
+  },
+  {
+    "name": "Calper",
+    "cat": "Vestuario y Calzado",
+    "status": "no",
+    "reason": "unreachable_or_custom status=200",
+    "host": "www.calper.cl"
+  },
+  {
+    "name": "Cat",
+    "cat": "Vestuario y Calzado",
+    "status": "no",
+    "reason": "unreachable_or_custom status=0",
+    "host": "www.cat.cl"
+  },
+  {
+    "name": "Doxie Chile",
+    "cat": "Vestuario y Calzado",
+    "status": "no",
+    "reason": "unreachable_or_custom status=0",
+    "host": "www.doxie.cl"
+  },
+  {
+    "name": "Family Shop",
+    "cat": "Vestuario y Calzado",
+    "status": "no",
+    "reason": "unreachable_or_custom status=200",
+    "host": "www.familyshop.cl"
+  },
+  {
+    "name": "Globe",
+    "cat": "Vestuario y Calzado",
+    "status": "no",
+    "reason": "unreachable_or_custom status=200",
+    "host": "www.globe.cl"
+  },
+  {
+    "name": "H&M",
+    "cat": "Vestuario y Calzado",
+    "status": "no",
+    "reason": "unreachable_or_custom status=403",
+    "host": "www2.hm.com"
+  },
+  {
+    "name": "Kliper",
+    "cat": "Vestuario y Calzado",
+    "status": "si",
+    "store_id": "kliper",
+    "platform": "magento",
+    "host": "www.kliper.cl",
+    "group": "moda"
+  },
+  {
+    "name": "Lacoste",
+    "cat": "Vestuario y Calzado",
+    "status": "si",
+    "store_id": "lacoste",
+    "platform": "magento",
+    "host": "www.lacoste.cl",
+    "group": "moda"
+  },
+  {
+    "name": "Ludovica",
+    "cat": "Vestuario y Calzado",
+    "status": "si",
+    "store_id": "ludovica",
+    "platform": "shopify",
+    "host": "www.ludovica.cl",
+    "group": "moda"
+  },
+  {
+    "name": "Marathon",
+    "cat": "Vestuario y Calzado",
+    "status": "no",
+    "reason": "unreachable_or_custom status=0",
+    "host": "www.marathonsports.cl"
+  },
+  {
+    "name": "Mingo",
+    "cat": "Vestuario y Calzado",
+    "status": "no",
+    "reason": "unreachable_or_custom status=200",
+    "host": "www.mingo.cl"
+  },
+  {
+    "name": "North Star",
+    "cat": "Vestuario y Calzado",
+    "status": "no",
+    "reason": "unreachable_or_custom status=0",
+    "host": "www.northstar.cl"
+  },
+  {
+    "name": "O’neill",
+    "cat": "Vestuario y Calzado",
+    "status": "si",
+    "store_id": "oneill",
+    "platform": "vtex",
+    "host": "www.oneill.cl",
+    "group": "moda"
+  },
+  {
+    "name": "Panama Jack",
+    "cat": "Vestuario y Calzado",
+    "status": "no",
+    "reason": "unreachable_or_custom status=200",
+    "host": "www.panamajack.cl"
+  },
+  {
+    "name": "Penguin",
+    "cat": "Vestuario y Calzado",
+    "status": "si",
+    "store_id": "penguin",
+    "platform": "vtex",
+    "host": "www.originalpenguin.cl",
+    "group": "moda"
+  },
+  {
+    "name": "PIERO BUTTI",
+    "cat": "Vestuario y Calzado",
+    "status": "no",
+    "reason": "unreachable_or_custom status=0",
+    "host": "www.pierobutti.cl"
+  },
+  {
+    "name": "Pollini",
+    "cat": "Vestuario y Calzado",
+    "status": "no",
+    "reason": "unreachable_or_custom status=200",
+    "host": "www.pollini.cl"
+  },
+  {
+    "name": "Pz.cl",
+    "cat": "Vestuario y Calzado",
+    "status": "no",
+    "reason": "unreachable_or_custom status=200",
+    "host": "www.pz.cl"
+  },
+  {
+    "name": "Quebec",
+    "cat": "Vestuario y Calzado",
+    "status": "no",
+    "reason": "unreachable_or_custom status=404",
+    "host": "www.quebec.cl"
+  },
+  {
+    "name": "Renatta & Go",
+    "cat": "Vestuario y Calzado",
+    "status": "no",
+    "reason": "unreachable_or_custom status=0",
+    "host": "www.renattaandgo.cl"
+  },
+  {
+    "name": "Rockford",
+    "cat": "Vestuario y Calzado",
+    "status": "no",
+    "reason": "unreachable_or_custom status=0",
+    "host": "www.rockford.cl"
+  },
+  {
+    "name": "Rusty",
+    "cat": "Vestuario y Calzado",
+    "status": "si",
+    "store_id": "rusty",
+    "platform": "magento",
+    "host": "www.rusty.cl",
+    "group": "moda"
+  },
+  {
+    "name": "Sioux",
+    "cat": "Vestuario y Calzado",
+    "status": "no",
+    "reason": "unreachable_or_custom status=200",
+    "host": "www.sioux.cl"
+  },
+  {
+    "name": "Skechers",
+    "cat": "Vestuario y Calzado",
+    "status": "no",
+    "reason": "unreachable_or_custom status=200",
+    "host": "www.skechers.cl"
+  },
+  {
+    "name": "Surprice",
+    "cat": "Vestuario y Calzado",
+    "status": "si",
+    "store_id": "surprice",
+    "platform": "magento",
+    "host": "www.surprice.cl",
+    "group": "moda"
+  },
+  {
+    "name": "UGG",
+    "cat": "Vestuario y Calzado",
+    "status": "no",
+    "reason": "unreachable_or_custom status=403",
+    "host": "www.ugg.com"
+  },
+  {
+    "name": "Umbrale",
+    "cat": "Vestuario y Calzado",
+    "status": "si",
+    "store_id": "umbrale",
+    "platform": "vtex",
+    "host": "www.umbrale.cl",
+    "group": "moda"
+  },
+  {
+    "name": "Zapatos",
+    "cat": "Vestuario y Calzado",
+    "status": "si",
+    "store_id": "zapatos",
+    "platform": "vtex",
+    "host": "www.zapatos.cl",
+    "group": "moda"
+  },
+  {
+    "name": "Zappa",
+    "cat": "Vestuario y Calzado",
+    "status": "no",
+    "reason": "unreachable_or_custom status=200",
+    "host": "www.zappa.cl"
+  }
+]

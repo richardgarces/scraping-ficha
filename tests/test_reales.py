@@ -1,6 +1,12 @@
 from datetime import datetime, timezone
 
-from retail.reales import is_agotado, is_super_offer, pick_real_offer, previous_full_price_day
+from retail.reales import (
+    is_agotado,
+    is_excluded_real_offer_store,
+    is_super_offer,
+    pick_real_offer,
+    previous_full_price_day,
+)
 
 
 def _offer(**kwargs):
@@ -62,6 +68,36 @@ def test_oferta_normal_sigue_calificando():
     assert deal is not None
     assert deal["store"] == "falabella"
     assert is_agotado(deal) is False
+
+
+def test_knasta_no_participa_ni_como_oferta_ni_como_rival():
+    """El agregador no debe entrar en /reales ni nombrarse en la comparación."""
+    assert is_excluded_real_offer_store("knasta") is True
+    # Solo knasta vs retail: no hay par comparable (knasta se descarta).
+    assert pick_real_offer(
+        [
+            _offer(store="knasta", product_id="k1", price=5000, price_normal=10000),
+            _offer(store="ripley", product_id="b", price=10000, price_normal=10000),
+        ],
+        comparacion=True,
+        historial=False,
+    ) is None
+    # Con dos retailers reales, knasta no altera rival ni aparece en stores.
+    deal = pick_real_offer(
+        [
+            _offer(store="falabella", product_id="a", price=6000, price_normal=10000),
+            _offer(store="knasta", product_id="k1", price=5500, price_normal=10000),
+            _offer(store="ripley", product_id="b", price=10000, price_normal=10000),
+        ],
+        comparacion=True,
+        historial=False,
+    )
+    assert deal is not None
+    assert deal["store"] == "falabella"
+    assert deal["rival_store"] == "ripley"
+    assert deal["best_price_store"] == "falabella"
+    assert "knasta" not in {row["store"] for row in deal["stores"]}
+    assert "knasta" not in (deal.get("reason") or "").casefold()
 
 
 def test_shampoo_comparacion_vs_otra_tienda_a_precio_normal():

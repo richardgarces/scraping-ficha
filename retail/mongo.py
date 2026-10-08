@@ -2209,6 +2209,23 @@ class ProductRepository:
             kinds = set(card.get("kinds") or [])
             if not kinds.intersection(selected_kinds):
                 continue
+            from retail.reales import is_excluded_real_offer_store
+
+            if is_excluded_real_offer_store(card.get("store")):
+                continue
+            # Peers/rivales del agregador no deben filtrar ni aparecer en facetas.
+            card["stores"] = [
+                row for row in (card.get("stores") or [])
+                if isinstance(row, dict) and not is_excluded_real_offer_store(row.get("store"))
+            ]
+            for key in (
+                "rival_store",
+                "best_price_store",
+                "strongest_published_store",
+                "strongest_verified_store",
+            ):
+                if is_excluded_real_offer_store(card.get(key)):
+                    card[key] = None
             if card.get("store"):
                 all_stores.add(str(card["store"]))
             if card.get("category"):

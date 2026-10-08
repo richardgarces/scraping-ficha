@@ -64,6 +64,13 @@ CHILE_EVENT_WINDOWS: tuple[tuple[int, int, int, int, str], ...] = (
 )
 # Texto que delata sin stock en nombre/estado (scrapers a veces lo meten en el título).
 _AGOTADO_FIELDS = ("name", "title", "availability", "status", "stock_status", "availability_status")
+# Agregadores: no se comparan ni se listan en /reales (tampoco se nombran en la UI).
+EXCLUDED_REAL_OFFER_STORES = frozenset({"knasta"})
+
+
+def is_excluded_real_offer_store(store: Any) -> bool:
+    """True si la tienda no debe participar en ofertas reales."""
+    return normalize_store_id(store) in EXCLUDED_REAL_OFFER_STORES
 
 
 def is_agotado(item: dict[str, Any] | None) -> bool:
@@ -675,9 +682,14 @@ def pick_real_offer(
     """El mejor aviso del grupo de pares (mismo producto por nombre) pedido."""
     if not comparacion and not historial and not iguales:
         return None
+    # Knasta (y otros agregadores) no entran: ni como oferta ni como rival.
+    usable = [
+        item for item in offers
+        if not is_excluded_real_offer_store(item.get("store"))
+    ]
     shown = [
         item
-        for item in collapse_variants(offers)
+        for item in collapse_variants(usable)
         if (comparable_selling_price(item) or _int(item.get("price"))) and not is_agotado(item)
     ]
     ranked: list[dict[str, Any]] = []
@@ -726,10 +738,15 @@ def _score_pack_group(
     historial: bool,
     iguales: bool,
 ) -> dict[str, Any] | None:
+    shown = [
+        item for item in shown
+        if not is_excluded_real_offer_store(item.get("store"))
+    ]
     by_store = collapse_store_prices(shown)
     priced = [
         item for item in collapse_sisters(by_store)
-        if comparable_selling_price(item) or _int(item.get("price"))
+        if (comparable_selling_price(item) or _int(item.get("price")))
+        and not is_excluded_real_offer_store(item.get("store"))
     ]
     use_landed = shipping_comparable(priced)
     if use_landed:
@@ -1046,8 +1063,10 @@ def _reason(
     *,
     integrity: dict[str, Any] | None = None,
 ) -> str:
-    store = item.get("store") or "esta tienda"
-    other = rival.get("store") or "otra tienda"
+    from retail.store_display import public_store_label
+
+    store = public_store_label(item.get("store")) or "esta tienda"
+    other = public_store_label(rival.get("store")) or "otra tienda"
     price = comparable_selling_price(item) or _int(item.get("price"))
     normal = _int(item.get("price_normal"))
     rival_price = comparable_selling_price(rival) or _int(rival.get("price"))

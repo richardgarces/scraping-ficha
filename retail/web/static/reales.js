@@ -111,9 +111,10 @@ function dealCard(item) {
   const identity = confidence >= 90
     ? `<span class="badge">Coincidencia alta ${confidence}%</span>`
     : `<span class="badge ghost">Coincidencia ${confidence}%: revisa modelo y variante</span>`;
+  const bestStore = item.best_price_store_title || item.best_price_store || "otra tienda";
   const market = item.market_best
     ? '<span class="badge off">Es el menor precio actual</span>'
-    : `<span class="badge ghost">No es el menor precio · ${attr(item.best_price_store || "otra tienda")} tiene ${money(item.best_price)}</span>`;
+    : `<span class="badge ghost">No es el menor precio · ${attr(bestStore)} tiene ${money(item.best_price)}</span>`;
   const discountSummary = `Comercial: ${Math.round(item.commercial_discount || item.published_discount || 0)}% · ahorro real: ${Math.round(item.real_savings_percent || item.verified_discount || 0)}%`;
   const fresh = typeof updatedAgo === "function" ? updatedAgo(item.updated_at) : "";
   const suspicion = (item.suspicion_labels || []).length

@@ -2,7 +2,7 @@ function offerLoginHint() {
   const raw = new URLSearchParams(location.search).get("next") || "";
   if (raw.startsWith("/super")) return "Inicia sesión para ver super ofertas.";
   if (raw.startsWith("/reales")) return "Inicia sesión para ver ofertas reales.";
-  if (raw.startsWith("/tiendas")) return "Inicia sesión para ver las tiendas.";
+  if (raw.startsWith("/tiendas")) return "Solo administradores pueden ver el ranking de tiendas.";
   return "";
 }
 
@@ -21,6 +21,7 @@ function nextPath(user) {
     || dest.startsWith("/estadisticas")
     || dest.startsWith("/usuarios")
     || dest.startsWith("/cotizaciones")
+    || dest.startsWith("/tiendas")
   ) {
     if (!user || user.role !== "admin") {
       return "/siguiendo";

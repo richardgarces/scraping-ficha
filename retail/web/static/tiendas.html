@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#258fdf">
   <title>Tiendas · Retail Chile</title>
   <script>(function(){var m=localStorage.getItem("retail-theme");if(m==="day"||m==="night"){document.documentElement.dataset.theme=m;return;}var h=new Date().getHours();document.documentElement.dataset.theme=(h>=7&&h<19)?"day":"night";})();</script>
-  <link rel="stylesheet" href="/static/styles.css?v=77">
+  <link rel="stylesheet" href="/static/styles.css?v=85">
 </head>
 <body>
   <header class="top">
@@ -54,20 +54,36 @@
 
   <main class="settings">
     <p id="flash" class="summary" hidden></p>
+    <p id="report-meta" class="muted" hidden></p>
 
     <section class="panel">
       <p class="muted">
         Cada vez que una tienda baja un precio se revisa si esa baja es real o si solo deshace
         un alza de los días anteriores. El número de bajas abre justo esos productos.
+        «% infladas» es la proporción de esas bajas que parecen deshacer un alza reciente.
       </p>
       <p id="bot-checks" class="muted" hidden></p>
-      <table class="table">
+      <div class="tiendas-filters" id="tiendas-filters">
+        <label class="check compact-filter-check"><input type="checkbox" id="hide-sin-muestra" data-filter checked> Ocultar sin muestra</label>
+        <label class="check compact-filter-check"><input type="checkbox" id="solo-con-bajas" data-filter> Solo con bajas</label>
+        <label class="check compact-filter-check"><input type="checkbox" id="solo-antibot" data-filter> Solo antibot</label>
+        <label class="compact-filter-check">Ordenar
+          <select id="store-sort" data-filter>
+            <option value="fake_percent">% infladas</option>
+            <option value="drops">Bajas</option>
+            <option value="products">Productos vigilados</option>
+            <option value="name">Nombre</option>
+          </select>
+        </label>
+      </div>
+      <table class="table" id="stores-table">
         <thead>
           <tr>
             <th>Tienda</th>
             <th>Bajas de precio</th>
-            <th>De esas, infladas</th>
+            <th title="Porcentaje de bajas que solo deshacen un alza reciente (fake_drops / drops)">% infladas sobre bajas</th>
             <th>Productos vigilados</th>
+            <th>Último scrape</th>
           </tr>
         </thead>
         <tbody id="rows"></tbody>
@@ -76,6 +92,6 @@
   </main>
 
   <script src="/static/prices.js?v=36"></script>
-  <script src="/static/tiendas.js?v=7"></script>
+  <script src="/static/tiendas.js?v=8"></script>
 </body>
 </html>

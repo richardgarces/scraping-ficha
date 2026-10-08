@@ -1,9 +1,14 @@
 /* Ranking de tiendas según cuántas de sus bajas de precio son de verdad.
    El número de «Bajas de precio» abre justo esas bajas, no el catálogo. */
 
-function flash(message) {
+let reportStores = [];
+let reportMeta = {};
+const dropsCache = new Map();
+
+function flash(message, isError = false) {
   const box = $("flash");
   box.hidden = false;
+  box.className = isError ? "err" : "summary";
   box.textContent = message;
 }
 
@@ -20,6 +25,19 @@ function formatWhen(iso) {
     day: "numeric",
     month: "short",
     year: "numeric",
+    timeZone: "America/Santiago",
+  });
+}
+
+function formatWhenTime(iso) {
+  if (!iso) return "";
+  const day = new Date(iso);
+  if (Number.isNaN(day.getTime())) return "";
+  return day.toLocaleString("es-CL", {
+    day: "numeric",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
     timeZone: "America/Santiago",
   });
 }
@@ -114,9 +132,15 @@ function dropHeaders(key, dir) {
 
 let dropsView = null;
 
-function dropList(store, items, key, dir) {
+function dropList(store, items, key, dir, inflatedCount) {
   const n = items.length;
   const title = n === 1 ? "1 baja de precio" : `${n} bajas de precio`;
+  const inflated = inflatedCount != null
+    ? inflatedCount
+    : items.filter((item) => item.inflated).length;
+  const inflatedNote = n
+    ? ` · ${inflated} inflada${inflated === 1 ? "" : "s"} (${n ? Math.round((inflated * 100) / n) : 0}% de esta lista)`
+    : "";
   const body = n
     ? items.map((item) => {
         const when = formatWhen(item.dropped_at);
@@ -127,12 +151,12 @@ function dropList(store, items, key, dir) {
         const oferta = item.url
           ? `<a href="${attr(item.url)}" target="_blank" rel="noreferrer">Oferta</a>`
           : "";
-        const inflated = item.inflated ? ` <span class="badge fake">inflada</span>` : "";
+        const inflatedBadge = item.inflated ? ` <span class="badge fake">inflada</span>` : "";
         const pct = savingsPercent(item);
         const hot = pct != null && Math.abs(pct) > 40 ? "savings-high" : "";
         return `
           <tr class="${hot}">
-            <td>${titleHtml}${inflated}</td>
+            <td>${titleHtml}${inflatedBadge}</td>
             <td class="price was">${money(item.previous_price)}</td>
             <td class="price down">${money(item.price)}</td>
             <td class="pct">${savingsHtml(pct)}</td>
@@ -144,7 +168,7 @@ function dropList(store, items, key, dir) {
   return `
     <div class="drops-panel">
       <div class="drops-head">
-        <strong>${title} en ${attr(publicStoreLabel(store))}</strong>
+        <strong>${title} en ${attr(publicStoreLabel(store))}${attr(inflatedNote)}</strong>
         <button type="button" class="secondary" data-close-drops>Cerrar</button>
       </div>
       <p class="muted">Solo las bajas que cuenta ese número. No es el catálogo vigilado. Las filas en rojo ahorran más del 40%.</p>
@@ -161,8 +185,8 @@ function dropList(store, items, key, dir) {
 
 function paintDrops(focusHeader) {
   if (!dropsView) return;
-  const { store, items, key, dir, detail } = dropsView;
-  detail.innerHTML = `<td colspan="4">${dropList(store, sortDrops(items, key, dir), key, dir)}</td>`;
+  const { store, items, key, dir, detail, inflated } = dropsView;
+  detail.innerHTML = `<td colspan="5">${dropList(store, sortDrops(items, key, dir), key, dir, inflated)}</td>`;
   if (focusHeader) detail.querySelector(`button.sort[data-sort="${CSS.escape(key)}"]`)?.focus();
 }
 
@@ -175,23 +199,34 @@ async function openDrops(button) {
 
   const detail = document.createElement("tr");
   detail.className = "store-drops";
-  detail.innerHTML = `<td colspan="4"><p class="muted">Cargando las bajas de ${attr(publicStoreLabel(store))}…</p></td>`;
+  detail.innerHTML = `<td colspan="5"><p class="muted">Cargando las bajas de ${attr(publicStoreLabel(store))}…</p></td>`;
   row.after(detail);
   button.setAttribute("aria-expanded", "true");
 
-  const response = await fetch(`/api/stores-drops?store=${encodeURIComponent(store)}`);
-  if (response.status === 401) {
-    location.href = "/entrar?next=/tiendas";
-    return;
+  let data = dropsCache.get(store);
+  if (!data) {
+    const response = await fetch(`/api/stores-drops?store=${encodeURIComponent(store)}`);
+    if (response.status === 401 || response.status === 403) {
+      location.href = "/entrar?next=/tiendas";
+      return;
+    }
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      detail.innerHTML = `<td colspan="5"><p class="err">${attr(typeof err.detail === "string" ? err.detail : "No se pudieron cargar las bajas.")}</p></td>`;
+      return;
+    }
+    data = await response.json();
+    dropsCache.set(store, data);
   }
-  if (!response.ok) {
-    const data = await response.json().catch(() => ({}));
-    detail.innerHTML = `<td colspan="4"><p class="err">${attr(typeof data.detail === "string" ? data.detail : "No se pudieron cargar las bajas.")}</p></td>`;
-    return;
-  }
-  const data = await response.json();
   if (!detail.isConnected) return;
-  dropsView = { store, items: data.items || [], key: "percent", dir: "desc", detail };
+  dropsView = {
+    store,
+    items: data.items || [],
+    inflated: data.inflated,
+    key: "percent",
+    dir: "desc",
+    detail,
+  };
   paintDrops();
 }
 
@@ -202,6 +237,44 @@ function botCheckBadge(row) {
     ? `Comprobación antibot vista el ${when}. Esa captura no se adjunta.`
     : "Comprobación antibot. Esa captura no se adjunta.";
   return ` <span class="badge" title="${attr(hint)}">comprobación antibot</span>`;
+}
+
+function coverageBadge(row) {
+  if (row.coverage === "sin_muestra") {
+    return ` <span class="badge ghost" title="No hay productos de esta tienda en el scan de historial">Sin muestra en el scan</span>`;
+  }
+  if (row.coverage === "sin_bajas") {
+    return ` <span class="badge ghost" title="Hay productos vigilados pero no se contaron bajas">Sin bajas detectadas</span>`;
+  }
+  return "";
+}
+
+function staleBadge(row) {
+  if (!row.stale) return "";
+  const hours = reportMeta.stale_hours || 48;
+  const age = row.price_age_hours != null ? `${row.price_age_hours} h` : "";
+  return ` <span class="badge fake" title="Último scrape en la muestra fuera de ${hours} h${age ? ` (${age})` : ""}">datos viejos</span>`;
+}
+
+function inflatedCell(row) {
+  const percent = row.fake_percent;
+  if (percent == null) {
+    if (row.coverage === "sin_muestra") {
+      return `<span class="muted">sin muestra</span>`;
+    }
+    return `<span class="muted">sin bajas</span>`;
+  }
+  const count = `${row.fake_drops || 0}/${row.drops || 0}`;
+  return `${bar(percent)} <span title="Bajas infladas / bajas contadas">${percent}% <small class="muted">(${count})</small></span>`;
+}
+
+function lastSeenCell(row) {
+  if (!row.last_seen) {
+    return `<span class="muted">—</span>`;
+  }
+  const label = formatWhenTime(row.last_seen);
+  const age = row.price_age_hours != null ? ` · ${row.price_age_hours} h` : "";
+  return `<span class="${row.stale ? "err" : "muted"}" title="${attr(row.last_seen)}">${attr(label)}${attr(age)}</span>`;
 }
 
 function renderBotChecks(checks) {
@@ -224,30 +297,71 @@ function renderBotChecks(checks) {
     `Comprobación antibot: ${text}. Esas capturas no se adjuntan; el aviso usa la foto del producto.`;
 }
 
-function renderRows(stores) {
+function filteredStores() {
+  const hideSin = $("hide-sin-muestra")?.checked;
+  const soloBajas = $("solo-con-bajas")?.checked;
+  const soloBot = $("solo-antibot")?.checked;
+  const sortKey = $("store-sort")?.value || "fake_percent";
+  let rows = reportStores.slice();
+  if (hideSin) rows = rows.filter((row) => row.coverage !== "sin_muestra");
+  if (soloBajas) rows = rows.filter((row) => (row.drops || 0) > 0);
+  if (soloBot) rows = rows.filter((row) => row.bot_check);
+  rows.sort((a, b) => {
+    if (sortKey === "name") {
+      return String(a.store_title || a.store || "").localeCompare(
+        String(b.store_title || b.store || ""),
+        "es",
+        { sensitivity: "base" },
+      );
+    }
+    if (sortKey === "drops") return (b.drops || 0) - (a.drops || 0);
+    if (sortKey === "products") return (b.products || 0) - (a.products || 0);
+    const ap = a.fake_percent;
+    const bp = b.fake_percent;
+    if (ap == null && bp == null) return 0;
+    if (ap == null) return 1;
+    if (bp == null) return -1;
+    return bp - ap;
+  });
+  return rows;
+}
+
+function renderRows() {
+  const stores = filteredStores();
+  closeDrops();
   if (!stores.length) {
-    $("rows").innerHTML = `<tr><td colspan="4" class="muted">Todavía no hay historial guardado.</td></tr>`;
+    $("rows").innerHTML = `<tr><td colspan="5" class="muted">Ninguna tienda cumple esos filtros.</td></tr>`;
     return;
   }
   $("rows").innerHTML = stores
     .map((row) => {
-      const percent = row.fake_percent;
-      const cell = percent == null
-        ? `<span class="muted">no le hemos visto bajas</span>`
-        : `${bar(percent)} ${percent}%`;
+      const muted = row.coverage === "sin_muestra" ? " class=\"store-row-muted\"" : "";
       return `
-        <tr>
+        <tr${muted}>
           <td>
             <a class="store-link" href="/catalogo?store=${encodeURIComponent(row.store)}" title="Ver productos de ${attr(publicStoreLabel(row.store, row.store_title))}">
               ${storeLogo(row.display_store || row.store, row.store_title)}
-            </a>${botCheckBadge(row)}
+            </a>${botCheckBadge(row)}${coverageBadge(row)}${staleBadge(row)}
           </td>
           <td>${dropsButton(row)}</td>
-          <td>${cell}</td>
+          <td>${inflatedCell(row)}</td>
           <td class="muted">${row.products}</td>
+          <td>${lastSeenCell(row)}</td>
         </tr>`;
     })
     .join("");
+}
+
+function renderMeta() {
+  const box = $("report-meta");
+  if (!box) return;
+  const ranked = reportMeta.ranked_stores ?? "—";
+  const registry = reportMeta.registry_stores ?? "—";
+  const limit = reportMeta.scan_limit ?? "—";
+  const scanned = reportMeta.scanned_products ?? "—";
+  box.hidden = false;
+  box.textContent =
+    `Cobertura: ${ranked} tiendas con muestra / ${registry} en registry · scan ${scanned} productos (tope ${limit}).`;
 }
 
 $("rows").addEventListener("click", (event) => {
@@ -269,30 +383,43 @@ $("rows").addEventListener("click", (event) => {
   }
   const button = event.target.closest("[data-drops]");
   if (!button) return;
-  openDrops(button).catch((error) => flash(error.message));
+  openDrops(button).catch((error) => flash(error.message, true));
+});
+
+$("tiendas-filters")?.addEventListener("change", () => {
+  renderRows();
 });
 
 async function load() {
   const response = await fetch("/api/stores-report");
-  if (response.status === 401) {
+  if (response.status === 401 || response.status === 403) {
     location.href = "/entrar?next=/tiendas";
     return;
   }
   if (!response.ok) {
     const data = await response.json().catch(() => ({}));
-    flash(typeof data.detail === "string" ? data.detail : response.statusText);
+    flash(typeof data.detail === "string" ? data.detail : response.statusText, true);
     return;
   }
   const data = await response.json();
+  reportStores = data.stores || [];
+  reportMeta = data;
+  const sinMuestra = reportStores.filter((row) => row.coverage === "sin_muestra").length;
   if (!data.ready) {
-    // Con pocos días encima el ranking mide el azar, no a la tienda.
     flash(
       `Llevamos ${data.days_tracked} ${data.days_tracked === 1 ? "día" : "días"} de historial. ` +
-      `Desde los ${data.min_days} días esta comparación empieza a decir algo.`
+      `Desde los ${data.min_days} días esta comparación empieza a decir algo.` +
+      (sinMuestra ? ` Además, ${sinMuestra} tiendas del registry no tienen muestra en este scan.` : ""),
+    );
+  } else if (sinMuestra) {
+    flash(
+      `${sinMuestra} tienda${sinMuestra === 1 ? "" : "s"} del registry sin muestra en el scan ` +
+      `(tope ${data.scan_limit || "—"} productos). Usá el filtro «Ocultar sin muestra».`,
     );
   }
-  renderRows(data.stores || []);
+  renderMeta();
+  renderRows();
   renderBotChecks(data.bot_checks);
 }
 
-load().catch((error) => flash(error.message));
+load().catch((error) => flash(error.message, true));

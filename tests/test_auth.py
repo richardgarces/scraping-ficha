@@ -192,19 +192,20 @@ def test_real_and_super_offers_require_login():
             assert "Inicia sesión" in body["detail"]
     stores_api = client.get("/api/stores-report")
     if stores_api.status_code == 401:
-        assert stores_api.json()["detail"] == "Inicia sesión para ver las tiendas."
+        assert "administrador" in stores_api.json()["detail"].casefold()
     drops_api = client.get("/api/stores-drops?store=falabella")
     if drops_api.status_code == 401:
-        assert drops_api.json()["detail"] == "Inicia sesión para ver las tiendas."
+        assert "administrador" in drops_api.json()["detail"].casefold()
     for path in ("/", "/hoy", "/catalogo"):
         assert client.get(path).status_code == 200
     entrar = client.get("/entrar?next=/reales")
     assert entrar.status_code == 200
-    assert "entrar.js?v=14" in entrar.text
+    assert "entrar.js?v=15" in entrar.text
     js = Path("retail/web/static/entrar.js").read_text()
     assert "Inicia sesión para ver ofertas reales." in js
     assert "Inicia sesión para ver super ofertas." in js
-    assert "Inicia sesión para ver las tiendas." in js
+    assert "Solo administradores pueden ver el ranking de tiendas." in js
+    assert 'dest.startsWith("/tiendas")' in js
     assert 'dest.startsWith("/reales")' not in js
 
 

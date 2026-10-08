@@ -47,6 +47,11 @@ REPORT_MIN_DAYS = 30
 # de la tabla y la lista del clic dejarían de coincidir.
 REPORT_MIN_POINTS = 3
 REPORT_SCAN_LIMIT = 20000
+# Agregadores: no entran al ranking de /tiendas (misma política que /reales).
+EXCLUDED_STORES_REPORT = frozenset({"knasta"})
+# Señal mínima de frescura del scrape en la muestra del scan.
+REPORT_STALE_HOURS = 48
+_ADMIN_TIENDAS_DETAIL = "Solo el administrador puede ver el ranking de tiendas."
 
 
 def _repo_or_404():
@@ -636,10 +641,27 @@ def super_ofertas(
 
 
 def _title_real_offer(item: dict[str, Any], titles: dict[str, str]) -> None:
+    from retail.reales import is_excluded_real_offer_store
     from retail.store_display import display_store, public_store_label
 
+    # Nunca listar ni titular al agregador en /reales.
+    item["stores"] = [
+        row for row in (item.get("stores") or [])
+        if isinstance(row, dict) and not is_excluded_real_offer_store(row.get("store"))
+    ]
+    for key in (
+        "rival_store",
+        "best_price_store",
+        "strongest_published_store",
+        "strongest_verified_store",
+    ):
+        if is_excluded_real_offer_store(item.get(key)):
+            item[key] = None
     item["display_store"], item["store_title"] = display_store(item, titles)
-    item["rival_store_title"] = public_store_label(item.get("rival_store"), titles)
+    item["rival_store_title"] = public_store_label(item.get("rival_store"), titles) if item.get("rival_store") else ""
+    item["best_price_store_title"] = (
+        public_store_label(item.get("best_price_store"), titles) if item.get("best_price_store") else ""
+    )
     for row in item.get("stores") or []:
         row["display_store"], row["store_title"] = display_store(row, titles)
 
@@ -670,8 +692,35 @@ def _history_scan(repo, min_points: int, limit: int):
     """Productos con historial suficiente para entrar al ranking de tiendas."""
     return repo.collection.find(
         {f"price_history.{min_points - 1}": {"$exists": True}},
-        {"store": 1, "product_id": 1, "name": 1, "url": 1, "price": 1, "price_history": 1},
+        {
+            "store": 1,
+            "product_id": 1,
+            "name": 1,
+            "url": 1,
+            "price": 1,
+            "price_history": 1,
+            "updated_at": 1,
+        },
     ).limit(limit)
+
+
+def _document_last_seen(document: dict[str, Any]) -> datetime | None:
+    """Momento más reciente entre updated_at y el último punto de historial."""
+    moments: list[datetime] = []
+    updated = parse_moment(document.get("updated_at"))
+    if updated:
+        moments.append(updated)
+    for entry in document.get("price_history") or []:
+        if not isinstance(entry, dict):
+            continue
+        moment = parse_moment(entry.get("scraped_at"))
+        if moment:
+            moments.append(moment)
+    return max(moments) if moments else None
+
+
+def _is_excluded_store(store: str | None) -> bool:
+    return str(store or "").strip().lower() in EXCLUDED_STORES_REPORT
 
 
 def counted_drop_rows(document: dict[str, Any]) -> list[dict[str, Any]]:
@@ -699,6 +748,51 @@ def counted_drop_rows(document: dict[str, Any]) -> list[dict[str, Any]]:
     return rows
 
 
+def _empty_store_row(store_id: str) -> dict[str, Any]:
+    return {
+        "store": store_id,
+        "products": 0,
+        "drops": 0,
+        "fake_drops": 0,
+        "days_tracked": 0,
+        "fake_percent": None,
+        "coverage": "sin_muestra",
+        "last_seen": None,
+        "stale": False,
+        "price_age_hours": None,
+    }
+
+
+def _finalize_store_row(row: dict[str, Any], *, now: datetime) -> dict[str, Any]:
+    from retail.store_display import display_store
+
+    last = row.pop("_last_seen", None)
+    if isinstance(last, datetime):
+        if last.tzinfo is None:
+            last = last.replace(tzinfo=timezone.utc)
+        age_hours = max(0.0, (now - last).total_seconds() / 3600.0)
+        row["last_seen"] = last.isoformat()
+        row["price_age_hours"] = round(age_hours, 1)
+        row["stale"] = age_hours > REPORT_STALE_HOURS
+    else:
+        row["last_seen"] = None
+        row["price_age_hours"] = None
+        row["stale"] = False
+    products = int(row.get("products") or 0)
+    drops = int(row.get("drops") or 0)
+    if products <= 0:
+        row["coverage"] = "sin_muestra"
+    elif drops <= 0:
+        row["coverage"] = "sin_bajas"
+    else:
+        row["coverage"] = "ok"
+    row["fake_percent"] = (
+        round(row["fake_drops"] * 100 / row["drops"], 1) if row["drops"] else None
+    )
+    row["display_store"], row["store_title"] = display_store(row)
+    return row
+
+
 @router.get("/api/stores-report")
 def stores_report(
     request: Request,
@@ -716,32 +810,62 @@ def stores_report(
         current_user(
             request,
             repo,
-            required=True,
-            detail="Inicia sesión para ver las tiendas.",
+            admin=True,
+            detail=_ADMIN_TIENDAS_DETAIL,
         )
+        now = datetime.now(timezone.utc)
         por_tienda: dict[str, dict[str, Any]] = {}
+        scanned = 0
         for document in _history_scan(repo, min_points, limit):
-            store = document.get("store") or "?"
+            scanned += 1
+            store = str(document.get("store") or "").strip().lower() or "?"
+            if _is_excluded_store(store):
+                continue
             row = por_tienda.setdefault(
-                store, {"store": store, "products": 0, "drops": 0, "fake_drops": 0, "days_tracked": 0}
+                store,
+                {
+                    "store": store,
+                    "products": 0,
+                    "drops": 0,
+                    "fake_drops": 0,
+                    "days_tracked": 0,
+                    "_last_seen": None,
+                },
             )
             points = _points(document)
             row["products"] += 1
-            row["days_tracked"] = max(row["days_tracked"], buy_or_wait(points, document.get("price"))["days_tracked"])
+            row["days_tracked"] = max(
+                row["days_tracked"],
+                buy_or_wait(points, document.get("price"))["days_tracked"],
+            )
             drops = counted_drop_rows(document)
             row["drops"] += len(drops)
             row["fake_drops"] += sum(1 for drop in drops if drop["inflated"])
-        rows = []
-        from retail.store_display import display_store
+            seen = _document_last_seen(document)
+            if seen and (row["_last_seen"] is None or seen > row["_last_seen"]):
+                row["_last_seen"] = seen
 
-        for row in por_tienda.values():
-            row["fake_percent"] = round(row["fake_drops"] * 100 / row["drops"], 1) if row["drops"] else None
-            row["display_store"], row["store_title"] = display_store(row)
-            rows.append(row)
-        rows.sort(key=lambda item: (item["fake_percent"] is None, -(item["fake_percent"] or 0)))
+        registry_ids = [
+            spec.id for spec in list_stores() if not _is_excluded_store(spec.id)
+        ]
+        for store_id in registry_ids:
+            if store_id not in por_tienda:
+                por_tienda[store_id] = _empty_store_row(store_id)
+
+        rows = [_finalize_store_row(row, now=now) for row in por_tienda.values()]
+        rows.sort(
+            key=lambda item: (
+                item.get("coverage") == "sin_muestra",
+                item["fake_percent"] is None,
+                -(item["fake_percent"] or 0),
+                -(item.get("drops") or 0),
+                str(item.get("store_title") or item.get("store") or ""),
+            )
+        )
         checks = list_store_bot_checks(repo)
         annotate_store_bot_checks(rows, checks)
         seguidos = max((row["days_tracked"] for row in rows), default=0)
+        with_sample = sum(1 for row in rows if row.get("coverage") != "sin_muestra")
         return {
             "stores": rows,
             "days_tracked": seguidos,
@@ -749,6 +873,11 @@ def stores_report(
             "ready": seguidos >= REPORT_MIN_DAYS,
             "min_days": REPORT_MIN_DAYS,
             "bot_checks": bot_check_api_rows(checks),
+            "scan_limit": limit,
+            "scanned_products": scanned,
+            "registry_stores": len(registry_ids),
+            "ranked_stores": with_sample,
+            "stale_hours": REPORT_STALE_HOURS,
         }
     finally:
         repo.close()
@@ -770,21 +899,29 @@ def stores_drops(
     store = store.strip()
     if not store or len(store) > 40:
         raise HTTPException(status_code=400, detail="Tienda inválida.")
+    if _is_excluded_store(store):
+        raise HTTPException(status_code=404, detail="Tienda no disponible en este ranking.")
     repo = _repo_or_404()
     try:
         current_user(
             request,
             repo,
-            required=True,
-            detail="Inicia sesión para ver las tiendas.",
+            admin=True,
+            detail=_ADMIN_TIENDAS_DETAIL,
         )
         items: list[dict[str, Any]] = []
         for document in _history_scan(repo, min_points, limit):
-            if (document.get("store") or "?") != store:
+            if str(document.get("store") or "").strip().lower() != store.lower():
                 continue
             items.extend(counted_drop_rows(document))
         items.sort(key=lambda item: item.get("dropped_at") or "", reverse=True)
-        return {"store": store, "total": len(items), "items": items}
+        inflated = sum(1 for item in items if item.get("inflated"))
+        return {
+            "store": store,
+            "total": len(items),
+            "inflated": inflated,
+            "items": items,
+        }
     finally:
         repo.close()
 

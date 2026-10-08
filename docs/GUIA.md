@@ -301,7 +301,9 @@ Esa última respuesta es a propósito. Un veredicto sacado de tres días de dato
 
 ### Cuánto vale el "antes" de cada tienda
 
-`/tiendas` cuenta, cadena por cadena, cuántas de sus bajas de precio solo deshacen un alza de los días previos. Usa el mismo criterio que la alerta de descuento falso, pero agregado. Necesita al menos 30 días de historial para decir algo: con menos, la página lo advierte arriba.
+`/tiendas` (solo **admin**; HTML y `GET /api/stores-report` / `stores-drops`) cuenta, cadena por cadena, cuántas de sus bajas de precio solo deshacen un alza de los días previos. Usa el mismo criterio que la alerta de descuento falso, pero agregado. Necesita al menos 30 días de historial para decir algo: con menos, la página lo advierte arriba.
+
+El ranking completa filas con todas las tiendas del registry (excepto agregadores como Knasta): sin productos en el scan aparece como «sin muestra»; con productos pero sin bajas, «sin bajas». Muestra cobertura (tiendas con muestra / registry), tope del scan, % infladas sobre bajas (`fake_drops/drops`), último scrape de la muestra y aviso si supera 48 h.
 
 ### El historial de precios
 
