@@ -1,12 +1,18 @@
 """Matriz lista de compra × tiendas (catálogo Mongo, sin scrape síncrono)."""
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from retail.quotes import QuoteLine, parse_csv_quote
+from retail.relevance import equivalent_tokens
+from retail.search_cache import rewrite_search_query
 from retail.shopping_list import (
     EMPTY_CELL_LABEL,
+    PRICE_MAX_AGE_HOURS,
+    _empty_cell,
+    _line_search_query,
     best_match_for_store,
     list_candidate_for,
     matrix_export_csv,
+    refresh_quote_prices,
     shopping_matrix_report,
 )
 
@@ -124,6 +130,15 @@ def test_matrix_three_items_three_stores_and_basket_total():
     assert EMPTY_CELL_LABEL in csv_text
     assert "Mejor tienda canasta" in csv_text
     assert "unimarc" in csv_text
+    assert "Fecha precio mejor" in csv_text
+    assert "Stale mejor" in csv_text
+    assert "unimarc fecha precio" in csv_text
+    assert "unimarc stale" in csv_text
+    assert "Sin despacho" in csv_text
+    assert "Celdas stale" in csv_text
+    assert str(PRICE_MAX_AGE_HOURS) in csv_text
+    assert report["summary"]["shipping_note"]
+    assert report["summary"]["price_max_age_hours"] == PRICE_MAX_AGE_HOURS
 
 
 def test_matrix_empty_when_no_identity_match():
@@ -196,3 +211,101 @@ def test_short_azucar_matches_iansa_sugar_via_query_subset():
     # Case / acentos
     for raw in ("azucar", "AZÚCAR", "Azúcar"):
         assert list_candidate_for(QuoteLine(name=raw), sugar, now=NOW) is not None
+
+
+def test_stale_candidate_flags_price_outside_window():
+    line = QuoteLine(name="Azúcar granulada 1 kg")
+    old = NOW - timedelta(hours=PRICE_MAX_AGE_HOURS + 2)
+    fresh_doc = _doc("lider", "az", "Azúcar granulada 1 kg", 1290)
+    stale_doc = _doc("lider", "az", "Azúcar granulada 1 kg", 1290, updated_at=old)
+    fresh = list_candidate_for(line, fresh_doc, now=NOW)
+    stale = list_candidate_for(line, stale_doc, now=NOW)
+    assert fresh is not None and fresh["stale"] is False and fresh["usable"] is True
+    assert stale is not None and stale["stale"] is True
+    assert stale["usable"] is False
+    assert stale["price_age_hours"] and stale["price_age_hours"] > PRICE_MAX_AGE_HOURS
+    assert "fecha reciente" in " ".join(stale["issues"]).lower()
+
+    quote = {
+        "mode": "shopping_list",
+        "store_group": "supermercados",
+        "tax_included": True,
+        "items": [
+            {"name": "Azúcar granulada 1 kg", "quantity": 1, "unit": "unidad", "brand": "", "gtin": "", "condition": "new"},
+        ],
+    }
+    store_matches = {"0": {"lider": {"store": "lider", "product_id": "az"}}}
+    report = shopping_matrix_report(
+        quote, store_matches, {("lider", "az"): stale_doc}, stores=["lider"], now=NOW
+    )
+    cell = report["rows"][0]["cells"]["lider"]
+    assert cell["matched"] is True
+    assert cell["stale"] is True
+    assert report["summary"]["stale_cells"] == 1
+    assert cell["match_reason"]
+
+
+def test_empty_cell_hints_distinguish_no_match_vs_no_catalog():
+    no_match = _empty_cell(reason="no_match")
+    no_catalog = _empty_cell(reason="no_catalog")
+    assert "EAN" in no_match["label"] or "corto" in no_match["label"]
+    assert "catálogo" in no_catalog["label"]
+    assert no_match["empty_reason"] == "no_match"
+    assert no_catalog["empty_reason"] == "no_catalog"
+
+
+def test_pack_noise_stripped_from_list_search_query():
+    cases = [
+        ("Leche entera x 6 un", "leche"),
+        ("Yogurt pack de 12", "yogurt"),
+        ("Huevos 12 un por pack", "huevo"),
+    ]
+    for name, keep in cases:
+        query = _line_search_query(QuoteLine(name=name)).casefold()
+        assert keep in query
+        assert "x 6" not in query
+        assert "pack" not in query
+        assert "12 un" not in query
+
+
+def test_grocery_aliases_cover_common_list_tokens():
+    assert "iansa" in equivalent_tokens("ianza")
+    assert "yogurt" in equivalent_tokens("yogur")
+    assert "fideo" in equivalent_tokens("pasta") or "fideos" in equivalent_tokens("pasta")
+    assert "iansa" in rewrite_search_query("azúcar ianza").casefold()
+
+
+def test_refresh_quote_prices_boosts_matched_skus_with_catalog_id():
+    updates = []
+
+    class Priorities:
+        def update_one(self, query, updates_doc, upsert=False):
+            updates.append((query, updates_doc, upsert))
+            return None
+
+    repo = type("Repo", (), {
+        "scrape_priorities": Priorities(),
+        "product_detail": staticmethod(
+            lambda store, product_id: {
+                "store": store,
+                "product_id": product_id,
+                "catalog_id": f"cat-{store}-{product_id}",
+            }
+        ),
+        "watches": None,
+        "price_alerts": None,
+    })()
+    quote = {
+        "mode": "shopping_list",
+        "store_matches": {
+            "0": {
+                "lider": {"store": "lider", "product_id": "az"},
+                "unimarc": {"store": "unimarc", "product_id": "az"},
+            }
+        },
+    }
+    result = refresh_quote_prices(repo, quote)
+    assert result["targets"] == 2
+    assert result["boosted"] == 2
+    assert "prioridad" in result["message"].casefold() or "sku" in result["message"].casefold()
+    assert len(updates) == 2

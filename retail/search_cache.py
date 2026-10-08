@@ -83,9 +83,16 @@ def rewrite_search_query(query: str) -> str:
     parts: list[str] = []
     for token in text.split():
         key = fold(token)
-        # Si el token tiene alias de marca, siempre usar la canónica (case-insensitive).
+        # Marca con grafía canónica distinta (ianza→iansa) o solo mayúsculas ASCII (Iansa→iansa).
+        # Acentos/plurals (azúcar, azucares) se expanden en matching; no se aplanan aquí.
         if len(equivalent_tokens(key)) > 1:
-            parts.append(canonical_search_token(key))
+            canon = canonical_search_token(key)
+            if canon != key:
+                parts.append(canon)
+            elif token.isascii() and token != canon:
+                parts.append(canon)
+            else:
+                parts.append(token)
         else:
             parts.append(token)
     return " ".join(parts)

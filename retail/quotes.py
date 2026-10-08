@@ -398,6 +398,9 @@ def candidate_for(line: QuoteLine, doc: dict, now: datetime | None = None) -> di
     available = verified_stock or (line.quantity == 1 and availability in {"disponible", "available", "instock", "enstock"})
     unit_ok, unit_price, unit_issues = unit_price_for_quote(line.unit, int(price), product)
     issues = list(unit_issues)
+    age_hours = None
+    if observed:
+        age_hours = max(0.0, (now - observed).total_seconds() / 3600.0)
     if not fresh:
         issues.append("Precio sin fecha reciente (máximo 48 horas).")
     if unavailable:
@@ -407,10 +410,15 @@ def candidate_for(line: QuoteLine, doc: dict, now: datetime | None = None) -> di
     if product.currency != "CLP":
         issues.append("La moneda del catálogo no es CLP.")
     comparable_price = unit_price if unit_ok and unit_price else int(price)
+    conf = round(confidence, 3)
+    match_reason = f"Identidad {int(round(conf * 100))}%" if method else f"Coincidencia {int(round(conf * 100))}%"
     return {
         "store": product.store, "product_id": product.product_id, "name": product.name,
-        "price": comparable_price, "currency": product.currency, "confidence": round(confidence, 3),
-        "match_method": method, "observed_at": observed.isoformat() if observed else None,
+        "price": comparable_price, "currency": product.currency, "confidence": conf,
+        "match_method": method, "match_reason": match_reason,
+        "observed_at": observed.isoformat() if observed else None,
+        "price_age_hours": round(age_hours, 1) if age_hours is not None else None,
+        "stale": not fresh,
         "shipping_cost": product.shipping_cost, "shipping_region": product.shipping_region,
         "stock": product.stock, "issues": issues, "usable": not issues and product.currency == "CLP",
         "advice": buy_or_wait(doc.get("price_history"), int(price), now=now),
@@ -479,8 +487,14 @@ def comparison_report(quote: dict, selections: dict[str, dict], documents: dict[
         "potential_saving": saving, "complete": len(compared) == len(rows) and (not warnings or quote.get("source_reviewed") is True),
         "source_review_pending": bool(warnings and quote.get("source_reviewed") is not True),
         "extraction_warnings": warnings,
-        "shipping_included": False, "realized_saving": None,
-        "note": "Comparación de productos sin despacho. La diferencia es una oportunidad, no un ahorro realizado.",
+        "shipping_included": False,
+        "shipping_note": "Sin despacho: totales solo productos.",
+        "realized_saving": None,
+        "note": (
+            "Comparación de productos sin despacho. "
+            "La diferencia es una oportunidad, no un ahorro realizado. "
+            "Precios de catálogo con ventana de 48 h."
+        ),
     }
     report = {"rows": rows, "summary": summary, "generated_at": now.isoformat()}
     status_source = {**quote, "selections": selections}

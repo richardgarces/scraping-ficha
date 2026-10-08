@@ -106,42 +106,50 @@ def quotes_client(monkeypatch):
     catalog = {
         ("lider", "sku"): doc,
         ("lider", "az"): {
-            "store": "lider", "product_id": "az", "sku_id": "az", "name": "Azúcar granulada 1 kg",
+            "store": "lider", "product_id": "az", "sku_id": "az", "catalog_id": "cat-az-lider",
+            "name": "Azúcar granulada 1 kg",
             "brand": "", "price": 1290, "price_all_payment": 1290, "stock": 20, "condition": "new",
             "currency": "CLP", "updated_at": datetime.now(timezone.utc),
         },
         ("unimarc", "az"): {
-            "store": "unimarc", "product_id": "az", "sku_id": "az", "name": "Azúcar granulada 1 kg",
+            "store": "unimarc", "product_id": "az", "sku_id": "az", "catalog_id": "cat-az-unimarc",
+            "name": "Azúcar granulada 1 kg",
             "brand": "", "price": 1190, "price_all_payment": 1190, "stock": 20, "condition": "new",
             "currency": "CLP", "updated_at": datetime.now(timezone.utc),
         },
         ("tottus", "az"): {
-            "store": "tottus", "product_id": "az", "sku_id": "az", "name": "Azúcar granulada 1 kg",
+            "store": "tottus", "product_id": "az", "sku_id": "az", "catalog_id": "cat-az-tottus",
+            "name": "Azúcar granulada 1 kg",
             "brand": "", "price": 1350, "price_all_payment": 1350, "stock": 20, "condition": "new",
             "currency": "CLP", "updated_at": datetime.now(timezone.utc),
         },
         ("lider", "cf"): {
-            "store": "lider", "product_id": "cf", "sku_id": "cf", "name": "Café molido 500 g",
+            "store": "lider", "product_id": "cf", "sku_id": "cf", "catalog_id": "cat-cf-lider",
+            "name": "Café molido 500 g",
             "brand": "", "price": 4500, "price_all_payment": 4500, "stock": 20, "condition": "new",
             "currency": "CLP", "updated_at": datetime.now(timezone.utc),
         },
         ("unimarc", "cf"): {
-            "store": "unimarc", "product_id": "cf", "sku_id": "cf", "name": "Café molido 500 g",
+            "store": "unimarc", "product_id": "cf", "sku_id": "cf", "catalog_id": "cat-cf-unimarc",
+            "name": "Café molido 500 g",
             "brand": "", "price": 4200, "price_all_payment": 4200, "stock": 20, "condition": "new",
             "currency": "CLP", "updated_at": datetime.now(timezone.utc),
         },
         ("lider", "ph"): {
-            "store": "lider", "product_id": "ph", "sku_id": "ph", "name": "Papel higiénico 12 un",
+            "store": "lider", "product_id": "ph", "sku_id": "ph", "catalog_id": "cat-ph-lider",
+            "name": "Papel higiénico 12 un",
             "brand": "", "price": 5990, "price_all_payment": 5990, "stock": 20, "condition": "new",
             "currency": "CLP", "updated_at": datetime.now(timezone.utc),
         },
         ("unimarc", "ph"): {
-            "store": "unimarc", "product_id": "ph", "sku_id": "ph", "name": "Papel higiénico 12 un",
+            "store": "unimarc", "product_id": "ph", "sku_id": "ph", "catalog_id": "cat-ph-unimarc",
+            "name": "Papel higiénico 12 un",
             "brand": "", "price": 6200, "price_all_payment": 6200, "stock": 20, "condition": "new",
             "currency": "CLP", "updated_at": datetime.now(timezone.utc),
         },
         ("tottus", "ph"): {
-            "store": "tottus", "product_id": "ph", "sku_id": "ph", "name": "Papel higiénico 12 un",
+            "store": "tottus", "product_id": "ph", "sku_id": "ph", "catalog_id": "cat-ph-tottus",
+            "name": "Papel higiénico 12 un",
             "brand": "", "price": 5800, "price_all_payment": 5800, "stock": 20, "condition": "new",
             "currency": "CLP", "updated_at": datetime.now(timezone.utc),
         },
@@ -216,7 +224,17 @@ def test_shopping_list_matrix_import_and_export(quotes_client):
     assert exported.status_code == 200
     assert "lista-compra" in exported.headers.get("content-disposition", "")
     assert "Azúcar granulada 1 kg" in exported.text
-    assert "sin stock o sin match" in exported.text
+    assert "sin producto en catálogo" in exported.text or "sin match" in exported.text
+    assert "Fecha precio mejor" in exported.text
+    assert "Sin despacho" in exported.text
+    assert "Celdas stale" in exported.text
+    refresh = client.post(f"/api/quotes/{quote['id']}/refresh-prices")
+    assert refresh.status_code == 200
+    body = refresh.json()
+    assert body["ok"] is True
+    assert body["targets"] >= 1
+    assert "message" in body
+    assert report["rows"][1]["cells"]["tottus"]["empty_reason"] in {"no_catalog", "no_match", "unknown"}
 
 
 def test_quote_review_and_export_are_private_and_versioned(quotes_client):

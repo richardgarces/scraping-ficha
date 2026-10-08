@@ -89,8 +89,20 @@ main.settings > .panel {
 }
 .shopping-matrix th { background: color-mix(in srgb, var(--border) 35%, transparent); white-space: nowrap; }
 .shopping-matrix .matrix-empty { color: color-mix(in srgb, currentColor 55%, transparent); font-style: italic; }
+.shopping-matrix td.matrix-stale {
+  background: color-mix(in srgb, #c9852a 16%, transparent);
+}
 .shopping-matrix .matrix-price { font-weight: 600; display: block; }
 .shopping-matrix .matrix-meta { display: block; margin-top: .25rem; font-size: .8rem; opacity: .85; }
+.shopping-matrix .matrix-stale-badge {
+  display: inline-block;
+  margin-top: .3rem;
+  padding: .1rem .4rem;
+  border-radius: .35rem;
+  font-size: .75rem;
+  font-weight: 700;
+  background: color-mix(in srgb, #c9852a 30%, transparent);
+}
 .shopping-matrix button.matrix-cell-btn {
   appearance: none;
   border: 0;
@@ -105,3 +117,24 @@ main.settings > .panel {
 .shopping-matrix .best-mark { color: #2a7a4b; font-weight: 600; }
 .shopping-basket { margin: 1rem 0; }
 .shopping-basket li { margin: .35rem 0; }
+.quote-docling-help {
+  margin: .75rem 0 1rem;
+  padding: .85rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: .75rem;
+  background: color-mix(in srgb, var(--border) 22%, transparent);
+}
+.quote-docling-help h3 { margin: 0 0 .5rem; font-size: 1rem; }
+.quote-docling-help ol { margin: 0; padding-left: 1.2rem; }
+.quote-docling-cmd {
+  display: block;
+  margin: .45rem 0;
+  padding: .55rem .7rem;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: .8rem;
+  border-radius: .5rem;
+  background: color-mix(in srgb, #000 35%, transparent);
+}
+.shipping-note { font-size: .9rem; opacity: .9; }

@@ -51,7 +51,7 @@ def test_iansa_brand_aliases_match_case_insensitively(query):
     assert score_product(query, sugar).accepted is True
     assert "iansa" in equivalent_tokens("ianza")
     assert "ianza" in equivalent_tokens("iansa")
-    assert text_search_clause("azúcar ianza") == "azucar (iansa OR ianza)"
+    assert text_search_clause("azúcar ianza") == "(azucar OR azucares) (iansa OR ianza)"
     for raw in ("ianza", "Ianza", "IANZA", "iansa"):
         assert rewrite_search_query(raw) == "iansa"
     assert rewrite_search_query("azúcar ianza") == "azúcar iansa"

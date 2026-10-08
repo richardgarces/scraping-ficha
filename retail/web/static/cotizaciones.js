@@ -77,6 +77,13 @@ function isShopping(quote) {
   return (quote || activeQuote)?.mode === "shopping_list";
 }
 
+function formatObserved(iso) {
+  if (!iso) return "";
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleString("es-CL", { dateStyle: "short", timeStyle: "short" });
+}
+
 function renderMatrix(data) {
   const stores = data.report.stores || data.report.summary.stores || [];
   const wrap = $("shopping-matrix-wrap");
@@ -84,7 +91,7 @@ function renderMatrix(data) {
   let html = `<table class="shopping-matrix"><thead><tr>${head.map(h => `<th>${attr(h)}</th>`).join("")}</tr></thead><tbody>`;
   for (const row of data.report.rows) {
     const item = row.item;
-    html += `<tr><td>${attr(item.name)}${item.brand ? `<small>${attr(item.brand)}</small>` : ""}</td><td>${item.quantity}</td>`;
+    html += `<tr><td>${attr(item.name)}${item.brand ? `<small>${attr(item.brand)}</small>` : ""}</td><td>${item.quantity}${item.unit && item.unit !== "unidad" ? ` ${attr(item.unit)}` : ""}</td>`;
     for (const store of stores) {
       const cell = row.cells[store] || {};
       if (!cell.matched) {
@@ -92,10 +99,15 @@ function renderMatrix(data) {
         continue;
       }
       const conf = cell.confidence != null ? `${Math.round(cell.confidence * 100)}%` : "";
-      html += `<td><button type="button" class="matrix-cell-btn" data-matrix-index="${row.index}" data-matrix-store="${attr(store)}">
+      const observed = formatObserved(cell.observed_at);
+      const age = cell.price_age_hours != null ? `${cell.price_age_hours} h` : "";
+      const staleClass = cell.stale ? " matrix-stale" : "";
+      html += `<td class="${staleClass.trim()}"><button type="button" class="matrix-cell-btn" data-matrix-index="${row.index}" data-matrix-store="${attr(store)}">
         <span class="matrix-price">${money(cell.price)}</span>
         <span class="matrix-meta">${attr(cell.name || "")}</span>
-        <span class="matrix-meta">confianza ${attr(conf)}${cell.confirmed ? " · confirmada" : " · sugerida"}</span>
+        <span class="matrix-meta">${attr(cell.match_reason || (conf ? `confianza ${conf}` : ""))}${cell.confirmed ? " · confirmada" : " · sugerida"}</span>
+        ${observed ? `<span class="matrix-meta">precio ${attr(observed)}${age ? ` · ${attr(age)}` : ""}</span>` : ""}
+        ${cell.stale ? `<span class="matrix-stale-badge">stale · fuera de ${attr(data.report.summary.price_max_age_hours || 48)} h</span>` : ""}
         ${cell.issues?.length ? `<span class="matrix-meta">${attr(cell.issues.join(" "))}</span>` : ""}
       </button>
       ${cell.url ? `<a href="${attr(cell.url)}" target="_blank" rel="noopener">Ficha</a>` : ""}
@@ -123,6 +135,7 @@ function renderQuote(data) {
   $("quote-reviewed-wrap").hidden = shopping;
   $("quote-lines-wrap").hidden = shopping;
   $("shopping-rebuild").hidden = !shopping;
+  if ($("quote-refresh-prices")) $("quote-refresh-prices").hidden = false;
   $("quote-save-btn").textContent = shopping ? "Guardar nombres / cantidades" : "Guardar correcciones";
 
   if (shopping) {
@@ -162,12 +175,14 @@ function renderQuote(data) {
         <div><strong>${attr(summary.best_store || "—")}</strong>mejor tienda canasta</div>
         <div><strong>${money(summary.best_store_subtotal)}</strong>total canasta</div>
         <div><strong>${summary.confirmed_cells || 0}</strong>celdas confirmadas</div>
+        <div><strong>${summary.stale_cells || 0}</strong>precios stale (&gt;${summary.price_max_age_hours || 48} h)</div>
       </div>
       <p>${attr(summary.note)}</p>
+      <p class="shipping-note">${attr(summary.shipping_note || "Sin despacho: totales solo productos.")}</p>
       <div class="shopping-basket"><h4>Canasta por tienda</h4><ul>${basket}</ul></div>
       ${summary.best_store_missing?.length ? `<p class="err">En la mejor tienda faltan: ${attr(summary.best_store_missing.join(", "))}</p>` : ""}`;
   } else {
-    $("quote-report").innerHTML = `<h3>Comparación revisada · ${attr(summary.status_label || STATUS_LABELS[summary.status] || "")}</h3><div class="quote-summary"><div><strong>${summary.compared_items}/${summary.items}</strong>productos comparables</div><div><strong>${summary.confirmed_items ?? 0}</strong>coincidencias confirmadas</div><div><strong>${money(summary.reference_subtotal)}</strong>referencia comparable</div><div><strong>${money(summary.market_subtotal)}</strong>catálogo comparable</div><div><strong>${money(summary.potential_saving)}</strong>diferencia potencial</div></div><p>${attr(summary.note)}</p><ul>${data.report.rows.filter(row => row.issues?.length).map(row => `<li><strong>${attr(row.item.name)}:</strong> ${attr(row.issues.join(" "))}</li>`).join("")}</ul>`;
+    $("quote-report").innerHTML = `<h3>Comparación revisada · ${attr(summary.status_label || STATUS_LABELS[summary.status] || "")}</h3><div class="quote-summary"><div><strong>${summary.compared_items}/${summary.items}</strong>productos comparables</div><div><strong>${summary.confirmed_items ?? 0}</strong>coincidencias confirmadas</div><div><strong>${money(summary.reference_subtotal)}</strong>referencia comparable</div><div><strong>${money(summary.market_subtotal)}</strong>catálogo comparable</div><div><strong>${money(summary.potential_saving)}</strong>diferencia potencial</div></div><p>${attr(summary.note)}</p><p class="shipping-note">${attr(summary.shipping_note || "Sin despacho: totales solo productos.")}</p><ul>${data.report.rows.filter(row => row.issues?.length).map(row => `<li><strong>${attr(row.item.name)}:</strong> ${attr(row.issues.join(" "))}</li>`).join("")}</ul>`;
   }
   $("quote-export").href = `/api/quotes/${encodeURIComponent(activeQuote.id)}/export.csv`;
   $("quote-export").textContent = shopping ? "Exportar matriz CSV" : "Exportar comparación CSV";
@@ -196,7 +211,10 @@ async function showCandidates(index, store) {
     const card = document.createElement("div");
     card.className = "quote-candidate";
     const ficha = `/producto?${new URLSearchParams({ store: candidate.store, id: candidate.product_id })}`;
-    card.innerHTML = `<strong>${attr(candidate.name)}</strong><p>${attr(candidate.store)} · ${money(candidate.price)} · coincidencia ${(candidate.confidence * 100).toFixed(0)}%</p><p>${attr(candidate.observed_at ? new Date(candidate.observed_at).toLocaleString("es-CL") : "Fecha desconocida")}</p><p>${attr(candidate.issues.join(" ") || "Precio y cantidad disponibles para comparar.")}</p><p>${attr(candidate.advice.reason)}</p><a href="${attr(ficha)}" target="_blank" rel="noopener">Revisar ficha</a> `;
+    const reason = candidate.match_reason || `coincidencia ${(candidate.confidence * 100).toFixed(0)}%`;
+    const stale = candidate.stale ? " · stale (>48 h)" : "";
+    const age = candidate.price_age_hours != null ? ` · ${candidate.price_age_hours} h` : "";
+    card.innerHTML = `<strong>${attr(candidate.name)}</strong><p>${attr(candidate.store)} · ${money(candidate.price)} · ${attr(reason)}${attr(stale)}</p><p>${attr(candidate.observed_at ? new Date(candidate.observed_at).toLocaleString("es-CL") : "Fecha desconocida")}${attr(age)}</p><p>${attr((candidate.issues || []).join(" ") || "Precio y cantidad disponibles para comparar.")}</p><p>${attr(candidate.advice?.reason || "")}</p><a href="${attr(ficha)}" target="_blank" rel="noopener">Revisar ficha</a> `;
     const confirm = document.createElement("button");
     confirm.type = "button";
     confirm.textContent = "Confirmar coincidencia";
@@ -213,7 +231,12 @@ async function showCandidates(index, store) {
     card.append(confirm);
     box.append(card);
   }
-  if (!data.candidates.length) box.insertAdjacentHTML("beforeend", "<p>No encontramos una coincidencia suficientemente segura en esa tienda. Revisa el nombre.</p>");
+  if (!data.candidates.length) {
+    box.insertAdjacentHTML(
+      "beforeend",
+      "<p>No hay coincidencia segura en esa tienda. Probá un <strong>EAN</strong>, un nombre más corto (sin «x 6 un» / pack) o otra marca. Si el producto está en catálogo pero el precio es viejo, usá «Actualizar precios» y regenerá.</p>",
+    );
+  }
   box.scrollIntoView({ block: "start" });
 }
 
@@ -326,6 +349,16 @@ $("shopping-rebuild")?.addEventListener("click", async () => {
   } catch (error) { showQuoteError(error); }
 });
 
+$("quote-refresh-prices")?.addEventListener("click", async () => {
+  if (!activeQuote) return;
+  try {
+    const result = await quoteRequest(`/api/quotes/${encodeURIComponent(activeQuote.id)}/refresh-prices`, "POST");
+    quoteMessage(result.message || "Prioridad de scrape actualizada.");
+  } catch (error) {
+    showQuoteError(error);
+  }
+});
+
 $("quote-lines").addEventListener("click", async event => {
   const button = event.target.closest("[data-candidates]");
   if (!button || !activeQuote) return;
@@ -373,7 +406,28 @@ function showDoclingStatus(job) {
     needs_docling: "Requiere Docling (Soyo/scraping)",
     retry: "Reintento",
   };
-  $("quote-docling-status").textContent = `${labels[job.status] || job.status}${job.last_error ? ` · ${job.last_error}` : ""}`;
+  const help = $("quote-docling-help");
+  const cmd = $("quote-docling-cmd");
+  const needsHelp = job.status === "needs_docling" || job.status === "failed";
+  if (help) help.hidden = !needsHelp;
+  if (cmd && needsHelp) {
+    const source = job.source_name || job.source_path || "documento.pdf";
+    const title = JSON.stringify(job.title || "Cotización");
+    cmd.textContent = [
+      "python scripts/convert_quote_document.py \\",
+      `  ${source} \\`,
+      "  --output result.json \\",
+      `  --title ${title}`,
+      "",
+      "# Luego: Cargar JSON resultante aquí, o importá CSV en la pestaña Cotización.",
+    ].join("\n");
+  }
+  let detail = labels[job.status] || job.status;
+  if (job.last_error) detail += ` · ${job.last_error}`;
+  if (job.status === "failed") {
+    detail += " · Revisá el archivo o usá CSV.";
+  }
+  $("quote-docling-status").textContent = detail;
   $("quote-docling-actions").hidden = false;
   $("quote-docling-import").disabled = job.status !== "done";
 }

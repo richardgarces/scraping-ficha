@@ -18,8 +18,8 @@ from retail.quotes import (MAX_SOURCE_BYTES, QuoteInput, QuoteLine, candidate_fo
 from retail.search import connect_repo
 from retail.shopping_list import (MODE_SHOPPING_LIST, available_store_groups,
                                   build_store_matches, is_shopping_list,
-                                  matrix_export_csv, resolve_list_stores,
-                                  shopping_matrix_report)
+                                  matrix_export_csv, refresh_quote_prices,
+                                  resolve_list_stores, shopping_matrix_report)
 from retail.web.deps import current_user, require_admin_html
 
 def private_response(response: Response):
@@ -102,7 +102,12 @@ def _report(repo, quote):
         keys = []
         for per_store in store_matches.values():
             for selection in (per_store or {}).values():
-                keys.append((selection["store"], selection["product_id"]))
+                if not isinstance(selection, dict):
+                    continue
+                store = str(selection.get("store") or "").strip()
+                product_id = str(selection.get("product_id") or "").strip()
+                if store and product_id:
+                    keys.append((store, product_id))
         stores = quote.get("resolved_stores") or resolve_list_stores(quote, repo=repo)
         documents = _load_documents(repo, keys)
         return shopping_matrix_report(quote, store_matches, documents, stores=stores)
@@ -267,6 +272,30 @@ def rebuild_matrix(request: Request, quote_id: str):
                       detail={"matched_cells": report["summary"].get("matched_cells"),
                               "stores": stores})
         return {"quote": _public(quote), "report": report}
+    finally:
+        repo.close()
+
+
+@router.post("/api/quotes/{quote_id}/refresh-prices")
+def refresh_prices(request: Request, quote_id: str):
+    """Sube prioridad de scrape de los SKUs matcheados (sin scrapear en la petición)."""
+    repo = _repository()
+    try:
+        user = current_user(request, repo, admin=True)
+        quote = _owned(repo, user, quote_id)
+        result = refresh_quote_prices(repo, quote)
+        _record_event(
+            repo,
+            kind="refresh_prices",
+            user=user,
+            quote_id=quote_id,
+            detail={
+                "boosted": result.get("boosted"),
+                "following": result.get("following"),
+                "targets": result.get("targets"),
+            },
+        )
+        return {"ok": True, **result}
     finally:
         repo.close()
 
@@ -515,17 +544,37 @@ def export_quote(request: Request, quote_id: str):
         else:
             output = io.StringIO()
             writer = csv.writer(output, delimiter=";")
-            writer.writerow(["Producto", "Cantidad", "Referencia CLP", "Mercado CLP", "Diferencia sin despacho CLP",
-                             "Tienda", "Estado", "Revisión", "Evidencia"])
+            writer.writerow([
+                "Producto", "Cantidad", "Unidad",
+                "Referencia unitario CLP", "Referencia total CLP",
+                "Mercado unitario CLP", "Mercado total CLP",
+                "Diferencia sin despacho CLP",
+                "Tienda", "Fecha precio mercado", "Stale", "Motivo match",
+                "Estado", "Revisión", "Evidencia",
+            ])
             for row in report["rows"]:
                 selected = row["selected"] or {}
                 evidence = row["item"].get("evidence") or {}
-                values = [row["item"]["name"], row["item"]["quantity"], row["reference_subtotal"],
-                          row["market_subtotal"], row["potential_saving"], selected.get("store", ""),
-                          report["summary"]["status_label"],
-                          " | ".join(row["issues"]), f"{evidence.get('source', '')} fila {evidence.get('row', '')}"]
+                qty = row["item"].get("quantity") or 1
+                ref_unit = row["item"].get("unit_price")
+                market_unit = selected.get("price")
+                values = [
+                    row["item"]["name"], qty, row["item"].get("unit") or "unidad",
+                    ref_unit, row["reference_subtotal"],
+                    market_unit, row["market_subtotal"],
+                    row["potential_saving"],
+                    selected.get("store", ""),
+                    selected.get("observed_at") or "",
+                    "sí" if selected.get("stale") else ("no" if selected else ""),
+                    selected.get("match_reason") or "",
+                    report["summary"]["status_label"],
+                    " | ".join(row["issues"]),
+                    f"{evidence.get('source', '')} fila {evidence.get('row', '')}",
+                ]
                 writer.writerow([("'" + value if value.lstrip().startswith(("=", "+", "-", "@")) else value)
                                  if isinstance(value, str) else value for value in values])
+            writer.writerow([])
+            writer.writerow(["Nota", report["summary"].get("shipping_note") or "Sin despacho: totales solo productos."])
             body = "\ufeff" + output.getvalue()
             filename = f"cotizacion-{quote_id}.csv"
             export_detail = {

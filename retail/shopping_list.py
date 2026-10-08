@@ -25,9 +25,15 @@ MODE_SHOPPING_LIST = "shopping_list"
 EMPTY_CELL_LABEL = "sin stock o sin match"
 LIST_REFRESH_SCORE = 90
 LIST_FOLLOWING_SCORE = 96
+PRICE_MAX_AGE_HOURS = 48
 # Confianza mostrada cuando el ítem de la lista es un subconjunto del nombre/marca
 # (p. ej. «azúcar» → «Azúcar granulada Iansa»). Bajo el umbral de identidad 80%.
 LIST_QUERY_SUBSET_CONFIDENCE = 0.72
+# Quita "x 6 un", "pack de 12", etc. del nombre para buscar el producto base.
+_PACK_NOISE_RE = re.compile(
+    r"\b(?:x\s*\d+\s*(?:un(?:idades?)?|u|und|packs?)?|pack\s*(?:de\s*)?\d+|\d+\s*(?:un(?:idades?)?|u)\s*(?:por\s*)?pack)\b",
+    re.I,
+)
 
 
 def is_shopping_list(quote: dict) -> bool:
@@ -64,10 +70,36 @@ def resolve_list_stores(quote: dict, *, repo: Any | None = None) -> list[str]:
 
 def _line_search_query(line: QuoteLine) -> str:
     """Nombre (+ marca) normalizado: acentos/caso/alias (iansa↔ianza)."""
-    parts = [rewrite_search_query(line.name)]
+    name = _PACK_NOISE_RE.sub(" ", line.name or "")
+    name = re.sub(r"\s+", " ", name).strip()
+    parts = [rewrite_search_query(name)]
     if line.brand:
         parts.append(rewrite_search_query(line.brand))
     return " ".join(part for part in parts if part).strip()
+
+
+def _price_age_hours(observed: datetime | None, now: datetime | None = None) -> float | None:
+    if not observed:
+        return None
+    now = now or datetime.now(timezone.utc)
+    if observed.tzinfo is None:
+        observed = observed.replace(tzinfo=timezone.utc)
+    return max(0.0, (now - observed).total_seconds() / 3600.0)
+
+
+def _is_stale_issue(issues: list[str] | None) -> bool:
+    return any("fecha reciente" in str(item).lower() or "48 hora" in str(item).lower() for item in (issues or []))
+
+
+def _match_reason(candidate: dict) -> str:
+    method = str(candidate.get("match_method") or "")
+    confidence = candidate.get("confidence")
+    pct = f"{int(round(float(confidence) * 100))}%" if confidence is not None else ""
+    if method == "query_subset":
+        return f"Nombre contiene las palabras de la lista{f' · {pct}' if pct else ''}"
+    if pct:
+        return f"Identidad {pct}"
+    return "Coincidencia de catálogo"
 
 
 def _search_documents(repo: Any, line: QuoteLine) -> list[dict]:
@@ -152,7 +184,9 @@ def _query_subset_candidate(line: QuoteLine, doc: dict, now: datetime | None = N
     observed = parse_moment(doc.get("updated_at") or doc.get("scraped_at"))
     if observed and observed.tzinfo is None:
         observed = observed.replace(tzinfo=timezone.utc)
-    fresh = bool(observed and now - timedelta(hours=48) <= observed <= now + timedelta(minutes=10))
+    fresh = bool(
+        observed and now - timedelta(hours=PRICE_MAX_AGE_HOURS) <= observed <= now + timedelta(minutes=10)
+    )
     availability = column_key(product.availability)
     unavailable = product.stock == 0 or availability in {
         "agotado", "sinstock", "outofstock", "unavailable", "nodisponible",
@@ -163,8 +197,9 @@ def _query_subset_candidate(line: QuoteLine, doc: dict, now: datetime | None = N
     )
     unit_ok, unit_price, unit_issues = unit_price_for_quote(line.unit, int(price), product)
     issues = list(unit_issues)
+    age_hours = _price_age_hours(observed, now)
     if not fresh:
-        issues.append("Precio sin fecha reciente (máximo 48 horas).")
+        issues.append(f"Precio sin fecha reciente (máximo {PRICE_MAX_AGE_HOURS} horas).")
     if unavailable:
         issues.append("Producto sin stock.")
     elif not available:
@@ -177,7 +212,7 @@ def _query_subset_candidate(line: QuoteLine, doc: dict, now: datetime | None = N
         min(0.79, max(LIST_QUERY_SUBSET_CONFIDENCE, 0.55 + 0.25 * float(relevance.score) + max(0.0, rank) * 0.1)),
         3,
     )
-    return {
+    candidate = {
         "store": product.store,
         "product_id": product.product_id,
         "name": product.name,
@@ -187,6 +222,8 @@ def _query_subset_candidate(line: QuoteLine, doc: dict, now: datetime | None = N
         "match_method": "query_subset",
         "rank_boost": rank,
         "observed_at": observed.isoformat() if observed else None,
+        "price_age_hours": round(age_hours, 1) if age_hours is not None else None,
+        "stale": not fresh,
         "shipping_cost": product.shipping_cost,
         "shipping_region": product.shipping_region,
         "stock": product.stock,
@@ -197,6 +234,8 @@ def _query_subset_candidate(line: QuoteLine, doc: dict, now: datetime | None = N
         "unit_compatible": unit_ok,
         "catalog_pack_price": int(price),
     }
+    candidate["match_reason"] = _match_reason(candidate)
+    return candidate
 
 
 def list_candidate_for(line: QuoteLine, doc: dict, now=None) -> dict | None:
@@ -251,10 +290,66 @@ def build_store_matches(repo: Any, quote: dict, *, now=None, enqueue_refresh: bo
                     "confirmed": False,
                 }
                 refresh_keys.append((best["store"], best["product_id"]))
+            else:
+                store_docs = [
+                    doc for doc in docs
+                    if str(doc.get("store") or "").lower() == store.lower()
+                ]
+                per_store[store] = {
+                    "empty_reason": "no_match" if store_docs else "no_catalog",
+                    "empty_label": (
+                        "sin match suficiente (prueba EAN o nombre más corto)"
+                        if store_docs
+                        else "sin producto en catálogo"
+                    ),
+                }
         matches[str(index)] = per_store
     if enqueue_refresh and refresh_keys:
         maybe_enqueue_matched_refresh(repo, refresh_keys)
     return matches
+
+
+def refresh_quote_prices(repo: Any, quote: dict) -> dict[str, Any]:
+    """Re-encola boost de scrape para SKUs ya matcheados en la lista/cotización."""
+    keys: list[tuple[str, str]] = []
+    if is_shopping_list(quote):
+        for per_store in (quote.get("store_matches") or {}).values():
+            if not isinstance(per_store, dict):
+                continue
+            for selected in per_store.values():
+                if not isinstance(selected, dict):
+                    continue
+                store = str(selected.get("store") or "").strip()
+                product_id = str(selected.get("product_id") or "").strip()
+                if store and product_id:
+                    keys.append((store, product_id))
+    else:
+        for selected in (quote.get("selections") or {}).values():
+            if not isinstance(selected, dict):
+                continue
+            store = str(selected.get("store") or "").strip()
+            product_id = str(selected.get("product_id") or "").strip()
+            if store and product_id:
+                keys.append((store, product_id))
+    stats = maybe_enqueue_matched_refresh(repo, keys)
+    return {
+        **stats,
+        "targets": len(set(keys)),
+        "message": (
+            (
+                f"Prioridad de scrape subida en {stats.get('boosted', 0)} SKU(s)"
+                + (
+                    f" ({stats.get('following', 0)} en Siguiendo)"
+                    if stats.get("following")
+                    else ""
+                )
+                + ". Esperá unos minutos y regenerá la matriz o recargá la cotización."
+            )
+            if stats.get("boosted")
+            else "No hay SKUs matcheados para actualizar, o no hay cola de prioridades."
+        ),
+        "price_max_age_hours": PRICE_MAX_AGE_HOURS,
+    }
 
 
 def maybe_enqueue_matched_refresh(repo: Any, keys: list[tuple[str, str]]) -> dict[str, int]:
@@ -313,32 +408,53 @@ def maybe_enqueue_matched_refresh(repo: Any, keys: list[tuple[str, str]]) -> dic
     return {"boosted": boosted, "following": following_hits}
 
 
+def _empty_cell(*, reason: str = "no_match", label: str | None = None) -> dict:
+    labels = {
+        "no_match": "sin match suficiente (prueba EAN o nombre más corto)",
+        "no_catalog": "sin producto en catálogo",
+        "stale_only": "precio fuera de ventana 48 h",
+        "unknown": EMPTY_CELL_LABEL,
+    }
+    return {
+        "matched": False,
+        "label": label or labels.get(reason, EMPTY_CELL_LABEL),
+        "empty_reason": reason,
+        "price": None,
+        "subtotal": None,
+        "confidence": None,
+        "product_id": None,
+        "name": None,
+        "url": None,
+        "issues": [],
+        "usable": False,
+        "confirmed": False,
+        "stale": reason == "stale_only",
+        "observed_at": None,
+        "price_age_hours": None,
+        "match_reason": None,
+    }
+
+
 def _cell_from_candidate(candidate: dict | None) -> dict:
     if not candidate:
-        return {
-            "matched": False,
-            "label": EMPTY_CELL_LABEL,
-            "price": None,
-            "subtotal": None,
-            "confidence": None,
-            "product_id": None,
-            "name": None,
-            "url": None,
-            "issues": [],
-            "usable": False,
-            "confirmed": False,
-        }
+        return _empty_cell(reason="unknown")
+    issues = list(candidate.get("issues") or [])
+    stale = bool(candidate.get("stale")) or _is_stale_issue(issues)
     return {
         "matched": True,
         "label": None,
+        "empty_reason": None,
         "store": candidate["store"],
         "product_id": candidate["product_id"],
         "name": candidate["name"],
         "price": candidate["price"],
         "confidence": candidate["confidence"],
         "match_method": candidate.get("match_method"),
+        "match_reason": candidate.get("match_reason") or _match_reason(candidate),
         "observed_at": candidate.get("observed_at"),
-        "issues": list(candidate.get("issues") or []),
+        "price_age_hours": candidate.get("price_age_hours"),
+        "stale": stale,
+        "issues": issues,
         "usable": bool(candidate.get("usable")),
         "url": f"/producto?store={candidate['store']}&id={candidate['product_id']}",
         "confirmed": False,
@@ -368,16 +484,16 @@ def shopping_matrix_report(
         cells = {}
         item_prices = []
         for store in stores:
-            selected = per_store.get(store)
+            selected = per_store.get(store) or {}
             candidate = None
             confirmed = False
-            if selected:
+            if selected.get("store") and selected.get("product_id"):
                 key = selected["store"], selected["product_id"]
                 candidate = list_candidate_for(line, documents.get(key, {}), now=now)
                 confirmed = bool(selected.get("confirmed"))
-            cell = _cell_from_candidate(candidate)
-            cell["confirmed"] = confirmed
             if candidate:
+                cell = _cell_from_candidate(candidate)
+                cell["confirmed"] = confirmed
                 cell["subtotal"] = candidate["price"] * line.quantity
                 item_prices.append({
                     "store": store,
@@ -389,6 +505,10 @@ def shopping_matrix_report(
                 store_totals[store]["subtotal"] += cell["subtotal"]
                 store_totals[store]["matched_items"] += 1
             else:
+                cell = _empty_cell(
+                    reason=str(selected.get("empty_reason") or "unknown"),
+                    label=selected.get("empty_label"),
+                )
                 store_totals[store]["missing_items"] += 1
                 store_totals[store]["missing_names"].append(line.name)
             cells[store] = cell
@@ -436,6 +556,9 @@ def shopping_matrix_report(
     confirmed_cells = sum(
         1 for row in rows for store in stores if row["cells"][store].get("confirmed")
     )
+    stale_cells = sum(
+        1 for row in rows for store in stores if row["cells"][store].get("stale")
+    )
     summary = {
         "mode": MODE_SHOPPING_LIST,
         "items": len(rows),
@@ -443,7 +566,9 @@ def shopping_matrix_report(
         "store_group": quote.get("store_group") or "",
         "matched_cells": matched_cells,
         "confirmed_cells": confirmed_cells,
+        "stale_cells": stale_cells,
         "total_cells": len(rows) * len(stores),
+        "price_max_age_hours": PRICE_MAX_AGE_HOURS,
         "best_store": (best_store or {}).get("store"),
         "best_store_subtotal": (best_store or {}).get("subtotal"),
         "best_store_complete": bool((best_store or {}).get("complete")),
@@ -457,11 +582,13 @@ def shopping_matrix_report(
             else ("Revisión" if matched_cells else "Borrador")
         ),
         "note": (
-            "Matriz lista × tiendas con precios del catálogo Mongo (máx. 48 h). "
-            "Sin despacho. Celdas vacías = sin match (identidad o nombre) o sin stock usable. "
-            "Confirma coincidencias dudosas antes de decidir la compra."
+            f"Matriz lista × tiendas con precios del catálogo Mongo "
+            f"(ventana {PRICE_MAX_AGE_HOURS} h). Totales sin despacho. "
+            "Celdas vacías: sin producto en catálogo o sin match suficiente. "
+            "Amarillo = precio fuera de ventana. Usá «Actualizar precios» y regenerá."
         ),
         "shipping_included": False,
+        "shipping_note": "Sin despacho: totales solo productos.",
         "realized_saving": None,
     }
     if quote.get("exported_at") and summary["complete"]:
@@ -483,29 +610,63 @@ def matrix_export_csv(report: dict) -> str:
     stores = report.get("stores") or []
     output = io.StringIO()
     writer = csv.writer(output, delimiter=";")
-    header = ["Producto", "Cantidad", "Marca", "Mejor tienda", "Mejor precio CLP"]
+    header = [
+        "Producto", "Cantidad", "Marca", "Unidad",
+        "Mejor tienda", "Mejor precio unitario CLP", "Mejor total línea CLP",
+        "Fecha precio mejor", "Stale mejor",
+    ]
     for store in stores:
-        header.extend([f"{store} CLP", f"{store} confianza", f"{store} ficha"])
+        header.extend([
+            f"{store} CLP",
+            f"{store} total línea",
+            f"{store} confianza",
+            f"{store} fecha precio",
+            f"{store} stale",
+            f"{store} motivo",
+            f"{store} ficha",
+        ])
     writer.writerow(header)
     for row in report.get("rows") or []:
         item = row.get("item") or {}
+        qty = item.get("quantity", 1)
+        best_store = row.get("best_store") or ""
+        best_cell = (row.get("cells") or {}).get(best_store) or {}
+        best_price = row.get("best_price")
+        best_total = (best_price * qty) if isinstance(best_price, (int, float)) else ""
         values = [
             item.get("name", ""),
-            item.get("quantity", 1),
+            qty,
             item.get("brand", ""),
-            row.get("best_store") or "",
-            row.get("best_price"),
+            item.get("unit", "unidad"),
+            best_store,
+            best_price,
+            best_total,
+            best_cell.get("observed_at") or "",
+            "sí" if best_cell.get("stale") else ("no" if best_cell.get("matched") else ""),
         ]
         for store in stores:
             cell = (row.get("cells") or {}).get(store) or {}
             if cell.get("matched"):
+                price = cell.get("price")
                 values.extend([
-                    cell.get("price"),
+                    price,
+                    (price * qty) if isinstance(price, (int, float)) else "",
                     f"{int(round((cell.get('confidence') or 0) * 100))}%" if cell.get("confidence") is not None else "",
+                    cell.get("observed_at") or "",
+                    "sí" if cell.get("stale") else "no",
+                    cell.get("match_reason") or "",
                     cell.get("url") or "",
                 ])
             else:
-                values.extend([EMPTY_CELL_LABEL, "", ""])
+                values.extend([
+                    cell.get("label") or EMPTY_CELL_LABEL,
+                    "",
+                    "",
+                    "",
+                    "",
+                    cell.get("empty_reason") or "",
+                    "",
+                ])
         writer.writerow([
             ("'" + value if isinstance(value, str) and value.lstrip().startswith(("=", "+", "-", "@")) else value)
             for value in values
@@ -529,4 +690,8 @@ def matrix_export_csv(report: dict) -> str:
         best.get("best_store_subtotal"),
         "completa" if best.get("best_store_complete") else "parcial",
     ])
+    writer.writerow([])
+    writer.writerow(["Nota", best.get("shipping_note") or "Sin despacho: totales solo productos."])
+    writer.writerow(["Celdas stale", best.get("stale_cells") or 0])
+    writer.writerow(["Ventana precio horas", best.get("price_max_age_hours") or PRICE_MAX_AGE_HOURS])
     return "\ufeff" + output.getvalue()

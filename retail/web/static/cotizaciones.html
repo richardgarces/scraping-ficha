@@ -4,7 +4,7 @@
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Cotizaciones y listas · Retail Chile</title>
   <link rel="stylesheet" href="/static/styles.css?v=83">
-  <link rel="stylesheet" href="/static/cotizaciones.css?v=3">
+  <link rel="stylesheet" href="/static/cotizaciones.css?v=4">
 </head>
 <body>
   <header class="top"><div><p class="eyebrow">Retail Chile</p><h1>Cotizaciones y listas</h1></div>
@@ -64,12 +64,23 @@
 
     <section class="panel" id="quote-docling-panel">
       <h2>Conversión PDF (Docling async)</h2>
-      <p class="muted">Solo para el modo cotización. El PDF se convierte fuera de la petición web. En BMAX sin Docling el job queda en <code>needs_docling</code>; ejecuta el worker en Soyo/scraping o <code>scripts/convert_quote_document.py</code> y luego carga el JSON.</p>
+      <p class="muted">Solo para el modo cotización. El PDF se convierte fuera de la petición web. Si ves <code>needs_docling</code>, el contenedor web no tiene Docling: usá CSV aquí o el flujo offline abajo. El modo CSV nunca se bloquea.</p>
       <form id="quote-docling" class="form-grid">
         <label class="span">PDF o imagen <input id="quote-pdf" type="file" accept=".pdf,.png,.jpg,.jpeg,.json" required></label>
         <button type="submit">Encolar conversión</button>
       </form>
       <p id="quote-docling-status" class="summary" aria-live="polite"></p>
+      <div id="quote-docling-help" class="quote-docling-help" hidden>
+        <h3>Qué hacer si requiere Docling</h3>
+        <ol>
+          <li>En Soyo/scraping (con Docling instalado), convertí el archivo:
+            <pre id="quote-docling-cmd" class="quote-docling-cmd"></pre>
+          </li>
+          <li>O corré el worker de jobs Docling contra Mongo/BMAX.</li>
+          <li>Cuando el estado sea <strong>Listo</strong>, usá «Cargar JSON resultante».</li>
+          <li>Si preferís no usar PDF, importá la cotización como <strong>CSV</strong> en la pestaña de arriba.</li>
+        </ol>
+      </div>
       <p class="auth-actions" id="quote-docling-actions" hidden>
         <button type="button" id="quote-docling-refresh" class="secondary">Actualizar estado</button>
         <button type="button" id="quote-docling-import">Cargar JSON resultante</button>
@@ -88,6 +99,7 @@
         <div class="table-wrap span" id="shopping-matrix-wrap" hidden></div>
         <button type="submit" id="quote-save-btn">Guardar correcciones</button>
         <button type="button" id="shopping-rebuild" class="secondary" hidden>Regenerar matriz desde catálogo</button>
+        <button type="button" id="quote-refresh-prices" class="secondary" hidden>Actualizar precios</button>
       </form>
       <div id="quote-candidates" aria-live="polite"></div>
       <div id="quote-report" aria-live="polite"></div>
@@ -95,6 +107,6 @@
       <p class="auth-actions"><a id="quote-export" class="btn secondary">Exportar CSV</a><button type="button" data-feedback="useful">Me resultó útil</button><button type="button" data-feedback="needs_correction" class="secondary">Necesita corrección</button></p>
     </section>
   </main>
-  <script src="/static/prices.js?v=36"></script><script src="/static/cotizaciones.js?v=4"></script>
+  <script src="/static/prices.js?v=36"></script><script src="/static/cotizaciones.js?v=5"></script>
 </body>
 </html>
