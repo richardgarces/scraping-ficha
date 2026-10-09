@@ -45,18 +45,49 @@ def get_forecasts(request: Request, product_id: str, store: str | None = Query(d
             {"_id": 0, "patterns": 1, "updated_at": 1},
         ) if store else None
         patterns = list((pattern_doc or {}).get("patterns") or [])
+        price_now = (current or {}).get("price")
+        prefer = (
+            "cyber_event_dense",
+            "cyber_event_trend",
+            "cyber_future_transfer",
+            "timesfm",
+            "last_value_baseline",
+        )
+        ranked = sorted(
+            rows,
+            key=lambda row: (
+                prefer.index(str(row.get("model") or ""))
+                if str(row.get("model") or "") in prefer
+                else 99
+            ),
+        )
         summary = None
-        for row in rows:
-            if str(row.get("model") or "").lower() == "simulated":
+        future_summary = None
+        for row in ranked:
+            model = str(row.get("model") or "").lower()
+            if model == "simulated":
                 continue
-            summary = forecast_summary(row, (current or {}).get("price"))
-            if summary is not None:
-                break
+            built = forecast_summary(row, price_now)
+            if built is None:
+                continue
+            mode = str(built.get("mode") or "")
+            if mode == "cyber_future" or model == "cyber_future_transfer":
+                if future_summary is None:
+                    future_summary = built
+                continue
+            if summary is None:
+                summary = built
+        if summary is None and future_summary is not None:
+            summary = future_summary
         if summary is None and not patterns:
             raise HTTPException(status_code=404, detail="No usable forecast found for product")
         return {
-            "product_id": product_id, "store": store, "summary": summary,
-            "forecasts": rows, "patterns": patterns,
+            "product_id": product_id,
+            "store": store,
+            "summary": summary,
+            "future_summary": future_summary,
+            "forecasts": rows,
+            "patterns": patterns,
         }
     finally:
         repo.close()

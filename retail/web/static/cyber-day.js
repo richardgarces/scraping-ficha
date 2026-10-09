@@ -78,6 +78,144 @@
   let loadReady = false;
   let editingQueryN = null;
   let savingQueryN = null;
+  let currentProducts = [];
+  /** @type {{ key: string, dir: "asc"|"desc", type: string }} */
+  let sortState = { key: "n", dir: "asc", type: "num" };
+
+  const ADVICE_RANK = { comprar: 0, esperar: 1, observar: 2 };
+
+  function sortValue(row, key, type) {
+    if (type === "advice") {
+      const advice = row?.buy_advice?.advice || "observar";
+      return ADVICE_RANK[advice] ?? 9;
+    }
+    if (type === "date") {
+      const raw = row?.[key];
+      if (!raw) return null;
+      const ms = Date.parse(raw);
+      return Number.isFinite(ms) ? ms : null;
+    }
+    if (type === "num") {
+      const n = Number(row?.[key]);
+      return Number.isFinite(n) ? n : null;
+    }
+    if (key === "best_store") {
+      const text = bestStoreCellText(row);
+      return text === "—" ? "" : text.toLocaleLowerCase("es");
+    }
+    const text = String(row?.[key] ?? "").trim().toLocaleLowerCase("es");
+    return text || null;
+  }
+
+  function sortProducts(rows) {
+    const list = Array.isArray(rows) ? rows.slice() : [];
+    const { key, dir, type } = sortState;
+    const factor = dir === "desc" ? -1 : 1;
+    list.sort((a, b) => {
+      const av = sortValue(a, key, type);
+      const bv = sortValue(b, key, type);
+      const aEmpty = av == null || av === "";
+      const bEmpty = bv == null || bv === "";
+      if (aEmpty && bEmpty) {
+        return (Number(a?.n) || 0) - (Number(b?.n) || 0);
+      }
+      if (aEmpty) return 1;
+      if (bEmpty) return -1;
+      if (typeof av === "number" && typeof bv === "number") {
+        if (av !== bv) return (av - bv) * factor;
+      } else {
+        const cmp = String(av).localeCompare(String(bv), "es", { sensitivity: "base", numeric: true });
+        if (cmp) return cmp * factor;
+      }
+      return (Number(a?.n) || 0) - (Number(b?.n) || 0);
+    });
+    return list;
+  }
+
+  function syncSortHeaders() {
+    document.querySelectorAll("#cyber-products-table .cyber-sort").forEach((button) => {
+      const active = button.dataset.sort === sortState.key;
+      button.dataset.dir = active ? sortState.dir : "";
+      button.setAttribute("aria-sort", active
+        ? (sortState.dir === "asc" ? "ascending" : "descending")
+        : "none");
+      const label = button.textContent.replace(/\s*[↑↓]$/, "").trim();
+      button.textContent = active
+        ? `${label} ${sortState.dir === "asc" ? "↑" : "↓"}`
+        : label;
+    });
+  }
+
+  function renderProductsTable(rows) {
+    const wrap = el("cyber-products-wrap");
+    const body = el("cyber-products-body");
+    if (!wrap || !body) return;
+    wrap.hidden = false;
+    syncSortHeaders();
+    const sorted = sortProducts(rows);
+    if (!sorted.length) {
+      body.innerHTML = `<tr><td colspan="16" class="muted">Sin filas en la lista. Importá CSV/JSON o creá la lista con seed.</td></tr>`;
+      return;
+    }
+    body.innerHTML = sorted.map((row) => {
+      const n = row.n ?? (row.order != null ? row.order + 1 : "");
+      const query = row.query || row.name || "";
+      const offerUrl = String(row.best_offer_url || "").trim();
+      const offerCell = offerUrl
+        ? `<a href="${escapeHtml(offerUrl)}" target="_blank" rel="noopener">Ver oferta</a>`
+        : "—";
+      const evoParams = new URLSearchParams();
+      if (n !== "" && n != null) evoParams.set("n", String(n));
+      if (currentListId) evoParams.set("list", currentListId);
+      const evoHref = evoParams.has("n")
+        ? `/cyber-day/evolucion?${evoParams.toString()}`
+        : "";
+      const evoCell = evoHref
+        ? `<a href="${escapeHtml(evoHref)}">Informe</a>`
+        : "—";
+      const changeAt = formatLastChange(row.last_change_at);
+      const deleteCell = usingSeedFallback
+        ? `<td class="cyber-row-actions muted">—</td>`
+        : `<td class="cyber-row-actions">
+          <button
+            type="button"
+            class="secondary cyber-delete-item"
+            data-n="${escapeHtml(n)}"
+            data-query="${escapeHtml(query)}"
+            aria-label="Eliminar query ${escapeHtml(n)}"
+          >Eliminar</button>
+        </td>`;
+      return `
+      <tr data-n="${escapeHtml(n)}">
+        <td>${escapeHtml(n || "—")}</td>
+        <td>
+          <input
+            type="text"
+            class="cyber-query-input"
+            data-n="${escapeHtml(n)}"
+            data-original="${escapeHtml(query)}"
+            value="${escapeHtml(query)}"
+            aria-label="Query ${escapeHtml(n)}"
+            ${usingSeedFallback ? "disabled" : ""}
+          >
+        </td>
+        <td>${escapeHtml(row.category || "—")}</td>
+        ${priceCellHtml(row)}
+        ${discountCellHtml(row)}
+        ${adviceCellHtml(row, evoHref)}
+        <td>${escapeHtml(bestStoreCellText(row))}</td>
+        <td title="${escapeHtml(row.last_change_at || "")}">${escapeHtml(changeAt)}</td>
+        <td>${escapeHtml(row.stores_scraped != null ? row.stores_scraped : 0)}</td>
+        <td>${formatPrice(row.max_price_normal)}</td>
+        <td>${formatPrice(row.min_price_normal)}</td>
+        <td>${formatPrice(row.max_offer_price)}</td>
+        <td>${offerCell}</td>
+        <td>${evoCell}</td>
+        <td class="muted">${escapeHtml(row.last_error || "")}</td>
+        ${deleteCell}
+      </tr>`;
+    }).join("");
+  }
 
   function formatSeconds(value) {
     const total = Math.max(0, Number(value) || 0);
@@ -203,14 +341,26 @@
   }
 
   function adviceCellHtml(row, evoHref) {
-    const advice = row?.buy_advice || {};
+    const price = Number(row?.last_price);
+    const hasPrice = Number.isFinite(price) && price > 0;
+    // Sin precio en la fila no mostramos «Conviene comprar» aunque venga del API.
+    const advice = hasPrice
+      ? (row?.buy_advice || {})
+      : {
+          advice: "observar",
+          label: "Sin señal",
+          reason: "Sin precio actual en esta vuelta.",
+        };
     const key = String(advice.advice || "observar");
     const label = String(advice.label || {
       comprar: "Comprar",
       esperar: "Esperar",
       observar: "Observar",
     }[key] || "Observar");
-    const reason = String(advice.reason || "");
+    const modeHint = String(row?.forecast_mode || advice.forecast_mode || "") === "cyber_event"
+      ? "Pronóstico Cyber del evento (serie densa). "
+      : "";
+    const reason = `${modeHint}${String(advice.reason || "")}`.trim();
     const chip = `<span class="cyber-advice-chip ${escapeHtml(key)}" title="${escapeHtml(reason)}">${escapeHtml(label)}</span>`;
     if (!evoHref) return `<td>${chip}</td>`;
     return `<td><a class="cyber-advice-link" href="${escapeHtml(evoHref)}">${chip}</a></td>`;
@@ -432,68 +582,20 @@
     applyActionButtons(status, total, currentListsCount);
     renderDashboard(payload?.dashboard);
 
-    const wrap = el("cyber-products-wrap");
-    const body = el("cyber-products-body");
-    const rows = payload?.products || payload?.products_preview || [];
+    if (payload?.products || payload?.products_preview) {
+      currentProducts = payload?.products || payload?.products_preview || [];
+    }
     const editingActive = Boolean(
       editingQueryN != null
       || savingQueryN != null
       || document.activeElement?.classList?.contains("cyber-query-input"),
     );
-    if (wrap && body && !editingActive) {
-      wrap.hidden = false;
-      if (!rows.length) {
-        body.innerHTML = `<tr><td colspan="15" class="muted">Sin filas en la lista. Importá CSV/JSON o creá la lista con seed.</td></tr>`;
-      } else {
-        body.innerHTML = rows.map((row) => {
-          const n = row.n ?? (row.order != null ? row.order + 1 : "");
-          const query = row.query || row.name || "";
-          const offerUrl = String(row.best_offer_url || "").trim();
-          const offerCell = offerUrl
-            ? `<a href="${escapeHtml(offerUrl)}" target="_blank" rel="noopener">Ver oferta</a>`
-            : "—";
-          const evoParams = new URLSearchParams();
-          if (n !== "" && n != null) evoParams.set("n", String(n));
-          if (currentListId) evoParams.set("list", currentListId);
-          const evoHref = evoParams.has("n")
-            ? `/cyber-day/evolucion?${evoParams.toString()}`
-            : "";
-          const evoCell = evoHref
-            ? `<a href="${escapeHtml(evoHref)}">Informe</a>`
-            : "—";
-          const changeAt = formatLastChange(row.last_change_at);
-          return `
-      <tr data-n="${escapeHtml(n)}">
-        <td>${escapeHtml(n || "—")}</td>
-        <td>
-          <input
-            type="text"
-            class="cyber-query-input"
-            data-n="${escapeHtml(n)}"
-            data-original="${escapeHtml(query)}"
-            value="${escapeHtml(query)}"
-            aria-label="Query ${escapeHtml(n)}"
-            ${usingSeedFallback ? "disabled" : ""}
-          >
-        </td>
-        <td>${escapeHtml(row.category || "—")}</td>
-        ${priceCellHtml(row)}
-        ${discountCellHtml(row)}
-        ${adviceCellHtml(row, evoHref)}
-        <td>${escapeHtml(bestStoreCellText(row))}</td>
-        <td title="${escapeHtml(row.last_change_at || "")}">${escapeHtml(changeAt)}</td>
-        <td>${escapeHtml(row.stores_scraped != null ? row.stores_scraped : 0)}</td>
-        <td>${formatPrice(row.max_price_normal)}</td>
-        <td>${formatPrice(row.min_price_normal)}</td>
-        <td>${formatPrice(row.max_offer_price)}</td>
-        <td>${offerCell}</td>
-        <td>${evoCell}</td>
-        <td class="muted">${escapeHtml(row.last_error || "")}</td>
-      </tr>`;
-        }).join("");
-      }
+    const wrap = el("cyber-products-wrap");
+    if (wrap && !editingActive) {
+      renderProductsTable(currentProducts);
     } else if (wrap) {
       wrap.hidden = false;
+      syncSortHeaders();
     }
     const refreshHint = el("cyber-refresh");
     if (refreshHint) {
@@ -683,6 +785,64 @@
       editingQueryN = null;
       input.blur();
     }
+  });
+
+  async function deleteListItem(button) {
+    if (!button || button.disabled || usingSeedFallback) return;
+    const n = Number(button.dataset.n);
+    const query = String(button.dataset.query || "").trim();
+    if (!Number.isFinite(n) || n < 1) return;
+    const label = query || `#${n}`;
+    if (!window.confirm(
+      `¿Eliminar «${label}» de la lista?\nSe borra la query y su historial Cyber. No se puede deshacer.`,
+    )) {
+      return;
+    }
+    const prev = button.textContent;
+    button.disabled = true;
+    button.textContent = "…";
+    try {
+      const result = await apiJson(listQuery(`/api/admin/cyber-day/items/${n}`), {
+        method: "DELETE",
+      });
+      showFlash(result.message || `Producto #${n} eliminado.`);
+      renderCyber(result);
+      await refreshCyber();
+    } catch (error) {
+      showFlash(error.message, false);
+      await refreshCyber().catch(() => {});
+    } finally {
+      button.disabled = false;
+      button.textContent = prev;
+    }
+  }
+
+  productsBody?.addEventListener("click", (event) => {
+    const button = event.target?.closest?.(".cyber-delete-item");
+    if (!button || !productsBody.contains(button)) return;
+    deleteListItem(button).catch((error) => showFlash(error.message, false));
+  });
+
+  el("cyber-products-table")?.addEventListener("click", (event) => {
+    const button = event.target?.closest?.(".cyber-sort");
+    if (!button) return;
+    const key = button.dataset.sort || "";
+    const type = button.dataset.type || "text";
+    if (!key) return;
+    if (editingQueryN != null || savingQueryN != null) {
+      showFlash("Terminá de editar la query antes de ordenar.", false);
+      return;
+    }
+    if (sortState.key === key) {
+      sortState.dir = sortState.dir === "asc" ? "desc" : "asc";
+    } else {
+      sortState = {
+        key,
+        type,
+        dir: type === "num" || type === "date" || type === "advice" ? "desc" : "asc",
+      };
+    }
+    renderProductsTable(currentProducts);
   });
 
   el("cyber-start")?.addEventListener("click", () => {

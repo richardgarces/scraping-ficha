@@ -1018,32 +1018,94 @@ function buyAdviceMarkup(summary) {
     </div>`;
 }
 
-function renderForecast(summary, patterns = []) {
+function forecastRangeLabel(summary) {
+  const low = summary.range_low;
+  const high = summary.range_high;
+  if (low == null && high == null) return "—";
+  if (low != null && high != null && Number(low) === Number(high)) {
+    return money(low);
+  }
+  return `${money(low)} – ${money(high)}`;
+}
+
+function forecastSection(summary) {
+  if (!summary) return "";
+  const trend = FORECAST_TRENDS[summary.trend] || FORECAST_TRENDS.stable;
+  const isCyber = summary.mode === "cyber_event"
+    || summary.mode === "cyber_future"
+    || summary.model === "cyber_event_trend"
+    || summary.model === "cyber_event_dense"
+    || summary.model === "cyber_future_transfer";
+  const modeLabel = summary.mode_label
+    || (summary.mode === "cyber_future"
+      ? "Patrón para próximo Cyber"
+      : (isCyber ? "Pronóstico Cyber del evento" : "Pronóstico diario"));
+  const sameRange = summary.range_low != null
+    && summary.range_high != null
+    && Number(summary.range_low) === Number(summary.range_high);
+  const rangeNote = summary.range_has_uncertainty
+    ? "Banda de incertidumbre del modelo."
+    : (sameRange
+      ? "Un solo valor proyectado (sin banda)."
+      : (summary.mode === "cyber_future"
+        ? "Banda entre Cybers previos densos."
+        : "Valores centrales proyectados."));
+  const horizonNote = summary.mode === "cyber_future"
+    ? `${summary.horizon_days} días tipicos · ${summary.observation_count || 0} obs.`
+    : (isCyber
+      ? `${summary.horizon_days} día${summary.horizon_days === 1 ? "" : "s"} Cyber · ${summary.observation_count || 0} vueltas`
+      : `${summary.horizon_days} días · ${summary.observation_count || 0} observados`);
+  const confidenceNote = String(summary.confidence_reason || "").trim();
+  return `
+    <section class="forecast-mode-block">
+      <h3>${attr(modeLabel)}</h3>
+      ${buyAdviceMarkup(summary)}
+      <dl class="forecast-metrics">
+        <div class="forecast-metric">
+          <dt>Tendencia</dt>
+          <dd>
+            <strong class="forecast-${attr(summary.trend)}">${attr(trend[0])}</strong>
+            <small>${attr(trend[1])}</small>
+          </dd>
+        </div>
+        <div class="forecast-metric">
+          <dt>Rango</dt>
+          <dd>
+            <strong>${attr(forecastRangeLabel(summary))}</strong>
+            <small>${attr(rangeNote)}</small>
+          </dd>
+        </div>
+        <div class="forecast-metric">
+          <dt>Confianza</dt>
+          <dd>
+            <strong>${attr(FORECAST_CONFIDENCE[summary.confidence] || "Baja")}</strong>
+            <small title="${attr(confidenceNote)}">${attr(confidenceNote)}</small>
+          </dd>
+        </div>
+        <div class="forecast-metric">
+          <dt>Generado</dt>
+          <dd>
+            <strong>${attr(forecastDate(summary.generated_at))}</strong>
+            <small>${attr(horizonNote)}</small>
+          </dd>
+        </div>
+      </dl>
+    </section>`;
+}
+
+function renderForecast(summary, patterns = [], futureSummary = null) {
   const panel = $("forecast-panel");
   if (!panel) return;
   panel.open = false;
-  if (!summary) {
+  if (!summary && !futureSummary) {
     $("forecast-content").innerHTML = `
-      <p class="muted">Todavía no hay un pronóstico para este producto. Hacen falta al menos 30 días de precios válidos, o varias vueltas Cyber con cambios de precio en la ventana del evento (~3 días).</p>
+      <p class="muted">Todavía no hay un pronóstico para este producto. Hacen falta al menos 30 días de precios válidos, o varias vueltas Cyber con cambios de precio en la ventana del evento (~3 días). Para el patrón del próximo Cyber se necesitan al menos dos eventos densos previos.</p>
       ${patternMarkup(patterns)}`;
     return;
   }
-  const trend = FORECAST_TRENDS[summary.trend] || FORECAST_TRENDS.stable;
-  const isCyber = summary.mode === "cyber_event" || summary.model === "cyber_event_trend";
-  const rangeNote = summary.range_has_uncertainty
-    ? "Rango de incertidumbre calculado por el modelo."
-    : "Rango observado entre los valores centrales estimados; el modelo no entregó límites de incertidumbre.";
-  const horizonNote = isCyber
-    ? `${summary.horizon_days} día${summary.horizon_days === 1 ? "" : "s"} de ventana Cyber · ${summary.observation_count || 0} observaciones de vueltas`
-    : `${summary.horizon_days} días estimados · ${summary.observation_count || 0} días analizados`;
   $("forecast-content").innerHTML = `
-    ${buyAdviceMarkup(summary)}
-    <div class="forecast-grid">
-      <div class="forecast-stat"><span>Tendencia probable</span><strong class="forecast-${attr(summary.trend)}">${attr(trend[0])}</strong><small>${attr(trend[1])}</small></div>
-      <div class="forecast-stat"><span>Rango esperado</span><strong>${money(summary.range_low)} – ${money(summary.range_high)}</strong><small>${attr(rangeNote)}</small></div>
-      <div class="forecast-stat"><span>Nivel de confianza</span><strong>${attr(FORECAST_CONFIDENCE[summary.confidence] || "Baja")}</strong><small title="${attr(summary.confidence_reason)}">${attr(summary.confidence_reason)}</small></div>
-      <div class="forecast-stat"><span>Generado</span><strong>${attr(forecastDate(summary.generated_at))}</strong><small>${attr(horizonNote)}</small></div>
-    </div>
+    ${forecastSection(summary)}
+    ${futureSummary && futureSummary !== summary ? forecastSection(futureSummary) : ""}
     ${patternMarkup(patterns)}`;
 }
 
@@ -1064,12 +1126,12 @@ async function loadForecast(store, id) {
     const params = new URLSearchParams({ store });
     const response = await fetch(`/api/forecasts/${encodeURIComponent(id)}?${params}`);
     if (response.status === 404) {
-      renderForecast(null, []);
+      renderForecast(null, [], null);
       return;
     }
     const data = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(typeof data.detail === "string" ? data.detail : response.statusText);
-    renderForecast(data.summary || null, data.patterns || []);
+    renderForecast(data.summary || null, data.patterns || [], data.future_summary || null);
   } catch (_error) {
     if (panel.hidden) return;
     panel.open = false;

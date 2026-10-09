@@ -26,6 +26,7 @@ def test_cyber_day_api_requires_admin(anonymous_repo):
     assert client.get("/api/admin/cyber-day/export.json").status_code == 401
     assert client.patch("/api/admin/cyber-day/items/1", json={"query": "x"}).status_code == 401
     assert client.put("/api/admin/cyber-day/items/1", json={"query": "x"}).status_code == 401
+    assert client.delete("/api/admin/cyber-day/items/1").status_code == 401
     assert client.get("/api/admin/cyber-day/items/1/evolution").status_code == 401
     assert client.delete("/api/admin/cyber-day/lists?list=x").status_code == 401
 
@@ -44,8 +45,14 @@ def test_cyber_day_static_assets_exist():
     assert "Eliminar lista" in html
     assert "Importar / actualizar lista activa" in html
     assert "reemplaza las queries" in html
-    assert "cyber-day.js?v=23" in html
-    assert "styles.css?v=92" in html
+    assert "cyber-day.js?v=25" in html
+    assert "styles.css?v=95-forecast-rows" in html
+    js = (root / "cyber-day.js").read_text(encoding="utf-8")
+    assert "cyber-delete-item" in js
+    assert "eliminar" in html
+    assert 'data-sort="' in html
+    assert "sortProducts" in js
+    assert "cyber-sort" in js
     assert 'href="/cambios-precio"' in html
     assert "application/json; charset=utf-8" in js  # import raw JSON (no FormData/multipart)
     assert "new FormData()" not in js
@@ -66,13 +73,14 @@ def test_cyber_day_static_assets_exist():
     assert "Tiendas" in html
     assert "Mejor oferta" in html
     assert "<th>Evolución</th>" in html
-    assert "<th>Descuento</th>" in html
-    assert "<th>Pronóstico</th>" in html
+    assert "Descuento" in html and 'data-sort="discount_pct"' in html
+    assert "Pronóstico" in html and 'data-sort="advice"' in html
     assert "cyber-legend" in html
     assert "cyber-dashboard" in html
     assert "renderDashboard" in js
     assert "discountCellHtml" in js
     assert "adviceCellHtml" in js
+    assert "Sin precio actual" in js
     assert "scroll-x" in html
     assert "/api/admin/cyber-day" in js
     assert "cyber-day/lists" in js
@@ -82,8 +90,11 @@ def test_cyber_day_static_assets_exist():
     evo_html = (root / "cyber-day-evolucion.html").read_text(encoding="utf-8")
     evo_js = (root / "cyber-day-evolucion.js").read_text(encoding="utf-8")
     assert "Evolución del precio" in evo_html
-    assert "cyber-day-evolucion.js?v=4" in evo_html
-    assert "styles.css?v=92" in evo_html
+    assert "cyber-day-evolucion.js?v=7" in evo_html
+    assert "future_summary" in evo_js
+    assert "Patrón para próximo Cyber" in evo_js
+    assert "forecast-metrics" in evo_js
+    assert "styles.css?v=95-forecast-rows" in evo_html
     assert "chart-observations" in evo_html
     assert "Pronóstico experimental" in evo_html
     assert "cyber-evo-forecast" in evo_html
@@ -171,11 +182,17 @@ def test_cyber_day_update_item_api_admin(monkeypatch, mongo_uri):
         assert payload["updated"]["last_match_count"] == 0
         empty = client.patch("/api/admin/cyber-day/items/1", json={"query": "  "})
         assert empty.status_code == 400
-        evo = client.get("/api/admin/cyber-day/items/1/evolution?list=cyber_junio2026")
+        removed = client.delete("/api/admin/cyber-day/items/1?list=cyber_junio2026")
+        assert removed.status_code == 200
+        assert removed.json()["deleted"]["n"] == 1
+        assert "eliminado" in (removed.json().get("message") or "").lower()
+        gone = client.delete("/api/admin/cyber-day/items/1?list=cyber_junio2026")
+        assert gone.status_code == 400
+        evo = client.get("/api/admin/cyber-day/items/2/evolution?list=cyber_junio2026")
         assert evo.status_code == 200
         evo_payload = evo.json()
         assert evo_payload["ok"] is True
-        assert evo_payload["n"] == 1
+        assert evo_payload["n"] == 2
         assert evo_payload["list_id"] == "cyber_junio2026"
         assert evo_payload["timezone"] == "America/Santiago"
         assert isinstance(evo_payload["observations"], list)
@@ -185,7 +202,7 @@ def test_cyber_day_update_item_api_admin(monkeypatch, mongo_uri):
             evo_payload["forecast"]["summary"], dict
         )
         monkeypatch.setattr("retail.web.app.require_admin_html", lambda *a, **k: None)
-        page = client.get("/cyber-day/evolucion?list=cyber_junio2026&n=1")
+        page = client.get("/cyber-day/evolucion?list=cyber_junio2026&n=2")
         assert page.status_code == 200
         assert "Evolución del precio" in page.text
         assert "Pronóstico experimental" in page.text

@@ -828,6 +828,24 @@ async def cyber_day_update_item(n: int, request: Request) -> dict:
         repo.close()
 
 
+@router.delete("/api/admin/cyber-day/items/{n}")
+def cyber_day_delete_item(n: int, request: Request) -> dict:
+    """Elimina una query de la lista (también con el loop en curso)."""
+    current_user(request, admin=True)
+    repo = connect_repo()
+    if repo is None:
+        raise HTTPException(status_code=503, detail="MongoDB no está disponible.")
+    try:
+        from retail.cyber_day import CyberDayError, delete_item
+
+        try:
+            return delete_item(repo, n, list_id=_cyber_list_param(request))
+        except CyberDayError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+    finally:
+        repo.close()
+
+
 def _price_changes_days(request: Request, body: dict | None = None) -> int:
     raw = None
     if body:

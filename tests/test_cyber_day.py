@@ -19,11 +19,13 @@ from retail.cyber_day import (
     _rank_matches,
     append_best_price_observation,
     as_cron_group,
+    attach_buy_advice_to_products,
     continue_run,
     create_list,
     cyber_match_accepted,
     day_evolution_report,
     dedupe_items,
+    delete_item,
     delete_list,
     detect_changes,
     ensure_cyber_category,
@@ -978,6 +980,74 @@ def test_update_item_query_while_running(repo, monkeypatch):
 
     with pytest.raises(CyberDayError, match="vacía"):
         update_item(repo, 1, query="   ")
+
+
+def test_buy_advice_without_current_price_is_sin_senal(repo):
+    """Historial viejo no debe decir «Conviene comprar» si la fila no tiene precio."""
+    create_list(repo, name="Cyber Advice", slug="cyber_advice", use_seed=False)
+    import_products(
+        repo,
+        [normalize_import_row({"n": 1, "query": "Lavadora", "category": "Línea blanca"}, 0)],
+        source="advice-test",
+        list_id="cyber_advice",
+    )
+    base = datetime(2026, 10, 6, 12, 0, tzinfo=timezone.utc)
+    for offset, price in enumerate((350000, 340000, 330000, 320000)):
+        history_collection(repo).insert_one({
+            "list_id": "cyber_advice",
+            "n": 1,
+            "day": "2026-10-06",
+            "price": price,
+            "at": base.replace(hour=12 + offset),
+        })
+    rows = attach_buy_advice_to_products(
+        repo,
+        "cyber_advice",
+        [{"n": 1, "query": "Lavadora", "last_price": None}],
+    )
+    assert rows[0]["buy_advice"]["advice"] == "observar"
+    assert "Sin señal" in rows[0]["buy_advice"]["label"]
+    with_price = attach_buy_advice_to_products(
+        repo,
+        "cyber_advice",
+        [{"n": 1, "query": "Lavadora", "last_price": 320000}],
+    )
+    assert with_price[0]["buy_advice"]["advice"] in {"comprar", "esperar", "observar"}
+    assert "precio actual" not in (with_price[0]["buy_advice"].get("reason") or "").lower()
+
+
+def test_delete_item_removes_query_and_history(repo):
+    create_list(repo, name="Cyber Del Item", slug="cyber_del_item", use_seed=False)
+    import_products(
+        repo,
+        [
+            normalize_import_row({"n": 1, "query": "TV OLED", "category": "TV"}, 0),
+            normalize_import_row({"n": 2, "query": "AirPods", "category": "Audio"}, 1),
+            normalize_import_row({"n": 3, "query": "Lavadora", "category": "Línea blanca"}, 2),
+        ],
+        source="delete-item-test",
+        list_id="cyber_del_item",
+    )
+    history_collection(repo).insert_one({
+        "list_id": "cyber_del_item",
+        "n": 2,
+        "day": "2026-10-06",
+        "price": 900,
+        "at": NOW,
+    })
+    start_run(repo, list_id="cyber_del_item")
+    before = products_count(repo, "cyber_del_item")
+    result = delete_item(repo, 2, list_id="cyber_del_item")
+    assert result["deleted"]["n"] == 2
+    assert result["deleted"]["query"] == "AirPods"
+    assert products_count(repo, "cyber_del_item") == before - 1
+    queries = {row["query"] for row in result["products"]}
+    assert "AirPods" not in queries
+    assert "TV OLED" in queries and "Lavadora" in queries
+    assert history_collection(repo).count_documents({"list_id": "cyber_del_item", "n": 2}) == 0
+    assert result["run"]["total"] == before - 1
+    with pytest.raises(CyberDayError, match="No hay ítem"):
+        delete_item(repo, 2, list_id="cyber_del_item")
 
 
 def test_export_csv_and_json(repo):

@@ -1152,8 +1152,11 @@ def attach_buy_advice_to_products(
     from retail.cyber_forecast import (
         CYBER_EVENT_DAYS,
         CYBER_FORECAST_MIN_OBSERVATIONS,
+        bucket_relative_series,
         cyber_buy_advice,
+        is_dense_enough,
         project_cyber_event_prices,
+        project_dense_event_prices,
         remaining_cyber_horizon,
     )
 
@@ -1187,6 +1190,16 @@ def attach_buy_advice_to_products(
         n = _as_int(row.get("n"))
         points = by_n.get(n or -1) or []
         prices = [point["price"] for point in points]
+        current_price = _as_int(row.get("last_price"))
+        # Sin precio actual en la fila: no opinar con historial viejo
+        # (antes `or prices[-1]` hacía «Conviene comprar» con celdas en —).
+        if current_price is None or current_price <= 0:
+            row["buy_advice"] = {
+                "advice": "observar",
+                "label": "Sin señal",
+                "reason": "Sin precio actual en esta vuelta; no hay base para el consejo.",
+            }
+            continue
         if len(prices) < CYBER_FORECAST_MIN_OBSERVATIONS:
             row["buy_advice"] = {
                 "advice": "observar",
@@ -1194,17 +1207,40 @@ def attach_buy_advice_to_products(
                 "reason": "Faltan observaciones Cyber para el pronóstico.",
             }
             continue
-        current = float(_as_int(row.get("last_price")) or prices[-1])
+        current = float(current_price)
         first_at = points[0]["scraped_at"]
         last_at = points[-1]["scraped_at"]
         span_seconds = max(0.0, (last_at - first_at).total_seconds())
         horizon = remaining_cyber_horizon(points)
-        projected = project_cyber_event_prices(prices, horizon=horizon, span_seconds=span_seconds)
-        row["buy_advice"] = cyber_buy_advice(
+        bucketed = bucket_relative_series(
+            [{"price": p["price"], "scraped_at": p["scraped_at"]} for p in points]
+        )
+        dense = is_dense_enough(
+            [{"price": p["price"], "scraped_at": p["scraped_at"]} for p in points],
+            bucketed,
+        )
+        if dense:
+            projected = project_dense_event_prices(bucketed, horizon=horizon, current=current)
+            series_for_advice = [float(item["price"]) for item in bucketed]
+        else:
+            projected = project_cyber_event_prices(prices, horizon=horizon, span_seconds=span_seconds)
+            series_for_advice = prices
+        advice = cyber_buy_advice(
             current=current,
-            prices=prices,
+            prices=series_for_advice,
             point_forecast=projected,
         )
+        if dense:
+            advice = {
+                **advice,
+                "reason": (
+                    str(advice.get("reason") or "")
+                    + " Basado en serie densa de vueltas del evento Cyber."
+                ).strip(),
+                "forecast_mode": "cyber_event",
+            }
+        row["buy_advice"] = advice
+        row["forecast_mode"] = "cyber_event" if dense else "cyber_event_light"
     return products
 
 
@@ -1276,6 +1312,7 @@ def product_row_view(row: dict[str, Any]) -> dict[str, Any]:
         "discount_signal": discount["discount_signal"],
         "discount_label": discount["discount_label"],
         "buy_advice": advice,
+        "forecast_mode": row.get("forecast_mode"),
         "stores_scraped": int(stores or 0),
         "max_price_normal": max_normal,
         "min_price_normal": min_normal,
@@ -1372,12 +1409,19 @@ def clear_products(repo: Any, list_id: str | None = None) -> None:
 
 
 def _find_item_by_n(repo: Any, n: int, list_id: str) -> dict[str, Any] | None:
-    """Busca ítem por `n`; si no, por posición (order / índice 1-based)."""
+    """Busca ítem por `n`; fallback posicional solo si la lista no usa `n`.
+
+    Si hay filas con ``n``, no se usa el índice: tras borrar el #2, el skip(1)
+    devolvería el #3 y un segundo DELETE borraría la fila equivocada.
+    """
     coll = products_collection(repo)
     filt = _products_filter(list_id)
     item = coll.find_one({**filt, "n": int(n)})
     if item is not None:
         return item
+    numbered = coll.count_documents({**filt, "n": {"$exists": True, "$ne": None}})
+    if numbered > 0:
+        return None
     return next(
         coll.find(filt).sort([("order", 1), ("_id", 1)]).skip(max(0, int(n) - 1)).limit(1),
         None,
@@ -1459,6 +1503,74 @@ def update_item(
     payload = status_payload(repo, list_id=lid, enrich_missing=False)
     payload["updated"] = view
     payload["message"] = "Query actualizada" if query is not None else "Ítem actualizado"
+    return payload
+
+
+def delete_item(
+    repo: Any,
+    n: int,
+    *,
+    list_id: str | None = None,
+) -> dict[str, Any]:
+    """Quita una query de la lista activa. No renumera el resto (el historial usa n).
+
+    También borra puntos de ``cyber_day_price_history`` de esa query. Permite
+    hacerlo con el loop en curso: ajusta total/cursor/processed.
+    """
+    lid = resolve_list_id(repo, list_id)
+    try:
+        index = int(n)
+    except (TypeError, ValueError) as exc:
+        raise CyberDayError("n inválido.") from exc
+    if index < 1:
+        raise CyberDayError("n inválido.")
+    item = _find_item_by_n(repo, index, lid)
+    if item is None:
+        raise CyberDayError(f"No hay ítem #{index} en la lista.")
+
+    query_n = _as_int(item.get("n")) or index
+    query_text = str(item.get("query") or item.get("name") or "").strip()
+    products_collection(repo).delete_one({"_id": item["_id"]})
+    try:
+        hist_filt: dict[str, Any] = {"n": int(query_n)}
+        if lid == CYBER_LIST_ID:
+            hist_filt = {
+                "n": int(query_n),
+                "$or": [
+                    {"list_id": lid},
+                    {"list_id": {"$exists": False}},
+                    {"list_id": None},
+                    {"list_id": ""},
+                ],
+            }
+        else:
+            hist_filt = {"list_id": lid, "n": int(query_n)}
+        history_collection(repo).delete_many(hist_filt)
+    except Exception as exc:
+        print(f"cyber-day: delete history #{query_n}: {exc}", flush=True)
+
+    remaining = products_count(repo, lid)
+    run = load_run(repo, lid)
+    run["total"] = remaining
+    run["cursor"] = min(int(run.get("cursor") or 0), remaining)
+    run["processed"] = min(int(run.get("processed") or 0), remaining)
+    run["list_id"] = lid
+    save_run(repo, run, list_id=lid)
+    try:
+        lists_collection(repo).update_one(
+            {"slug": lid},
+            {"$set": {"updated_at": _now()}},
+        )
+    except Exception:
+        pass
+
+    payload = status_payload(repo, list_id=lid, enrich_missing=False)
+    payload["deleted"] = {"n": query_n, "query": query_text}
+    payload["message"] = (
+        f"Producto #{query_n} eliminado"
+        + (f" («{query_text}»)" if query_text else "")
+        + "."
+    )
     return payload
 
 

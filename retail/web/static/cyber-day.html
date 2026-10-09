@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#258fdf">
   <title>Cyber</title>
   <script>(function(){var m=localStorage.getItem("retail-theme");if(m==="day"||m==="night"){document.documentElement.dataset.theme=m;return;}var h=new Date().getHours();document.documentElement.dataset.theme=(h>=7&&h<19)?"day":"night";})();</script>
-  <link rel="stylesheet" href="/static/styles.css?v=92">
+  <link rel="stylesheet" href="/static/styles.css?v=95-forecast-rows">
 </head>
 <body>
   <header class="top">
@@ -133,36 +133,37 @@
         <a id="cyber-export-csv" class="btn secondary" href="/api/admin/cyber-day/export.csv">Exportar CSV</a>
         <a id="cyber-export-json" class="btn secondary" href="/api/admin/cyber-day/export.json">Exportar JSON</a>
       </form>
-      <p id="cyber-import-hint" class="muted">Reimportar <strong>reemplaza las queries</strong> de la lista activa (mismo slug/nombre). Campos: n, query, category (+ matches, precios, tiendas, link en export). Podés editar la <strong>Query</strong> inline (también con el loop en curso). Cada lista es independiente y aparece en <a href="/cron">Cron / lotes</a>. Para armar una lista desde productos con cambios recientes: <a href="/cambios-precio">Cambios de precio</a>.</p>
+      <p id="cyber-import-hint" class="muted">Reimportar <strong>reemplaza las queries</strong> de la lista activa (mismo slug/nombre). Campos: n, query, category (+ matches, precios, tiendas, link en export). Podés editar la <strong>Query</strong> inline o <strong>eliminar</strong> una fila (también con el loop en curso). Clic en el encabezado ordena la columna. Cada lista es independiente y aparece en <a href="/cron">Cron / lotes</a>. Para armar una lista desde productos con cambios recientes: <a href="/cambios-precio">Cambios de precio</a>.</p>
       <div class="table-wrap scroll-x" id="cyber-products-wrap">
-        <table class="results cron-table">
+        <table class="results cron-table" id="cyber-products-table">
           <thead>
             <tr>
-              <th>#</th>
-              <th>Query</th>
-              <th>Categoría</th>
-              <th>Mejor precio</th>
-              <th>Descuento</th>
-              <th>Pronóstico</th>
-              <th>Tienda mejor precio</th>
-              <th>Último cambio</th>
-              <th>Tiendas</th>
-              <th>Precio más alto normal</th>
-              <th>Precio más bajo normal</th>
-              <th>Precio más alto oferta</th>
+              <th><button type="button" class="cyber-sort" data-sort="n" data-type="num">#</button></th>
+              <th><button type="button" class="cyber-sort" data-sort="query" data-type="text">Query</button></th>
+              <th><button type="button" class="cyber-sort" data-sort="category" data-type="text">Categoría</button></th>
+              <th><button type="button" class="cyber-sort" data-sort="last_price" data-type="num">Mejor precio</button></th>
+              <th><button type="button" class="cyber-sort" data-sort="discount_pct" data-type="num">Descuento</button></th>
+              <th><button type="button" class="cyber-sort" data-sort="advice" data-type="advice">Pronóstico</button></th>
+              <th><button type="button" class="cyber-sort" data-sort="best_store" data-type="text">Tienda mejor precio</button></th>
+              <th><button type="button" class="cyber-sort" data-sort="last_change_at" data-type="date">Último cambio</button></th>
+              <th><button type="button" class="cyber-sort" data-sort="stores_scraped" data-type="num">Tiendas</button></th>
+              <th><button type="button" class="cyber-sort" data-sort="max_price_normal" data-type="num">Precio más alto normal</button></th>
+              <th><button type="button" class="cyber-sort" data-sort="min_price_normal" data-type="num">Precio más bajo normal</button></th>
+              <th><button type="button" class="cyber-sort" data-sort="max_offer_price" data-type="num">Precio más alto oferta</button></th>
               <th>Mejor oferta</th>
               <th>Evolución</th>
-              <th>Error</th>
+              <th><button type="button" class="cyber-sort" data-sort="last_error" data-type="text">Error</button></th>
+              <th></th>
             </tr>
           </thead>
           <tbody id="cyber-products-body">
-            <tr><td colspan="15" class="muted">Cargando lista…</td></tr>
+            <tr><td colspan="16" class="muted">Cargando lista…</td></tr>
           </tbody>
         </table>
       </div>
     </section>
   </main>
   <script src="/static/prices.js?v=37"></script>
-  <script src="/static/cyber-day.js?v=23"></script>
+  <script src="/static/cyber-day.js?v=25"></script>
 </body>
 </html>

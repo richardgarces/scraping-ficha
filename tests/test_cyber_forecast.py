@@ -15,9 +15,15 @@ from retail.cyber_day import (
     ensure_seed,
 )
 from retail.cyber_forecast import (
+    CYBER_DENSE_MIN_CHANGES,
+    CYBER_DENSE_MIN_POINTS,
+    CYBER_DENSE_MODEL,
     CYBER_EVENT_MODEL,
     CYBER_FORECAST_MIN_OBSERVATIONS,
+    CYBER_FUTURE_MODEL,
     MANY_CYBER_CHANGES,
+    bucket_relative_series,
+    count_price_changes,
     cyber_buy_advice,
     cyber_change_count,
     cyber_product_keys,
@@ -26,12 +32,16 @@ from retail.cyber_forecast import (
     experimental_forecast_for_cyber_query,
     feed_cyber_observation_to_product_history,
     forecast_cyber_list_ids,
+    is_dense_enough,
     latest_forecast,
     matches_forecast_cyber_list,
     merge_price_history_with_cyber,
+    prepare_cyber_dense_event_product,
     prepare_cyber_enriched_product,
     prepare_cyber_event_product,
+    prepare_cyber_future_transfer_product,
     project_cyber_event_prices,
+    project_dense_event_prices,
     record_cyber_lap_samples,
 )
 
@@ -372,10 +382,10 @@ def test_experimental_forecast_for_cyber_query_from_day_history(repo):
     assert payload["ok"] is True
     assert payload["source"] == "query_history"
     assert payload["summary"] is not None
-    assert payload["summary"]["model"] == CYBER_EVENT_MODEL
+    assert payload["summary"]["model"] in {CYBER_EVENT_MODEL, CYBER_DENSE_MODEL}
     assert payload["summary"]["buy_advice"]["advice"] in {"comprar", "esperar", "observar"}
     report = day_evolution_report(repo, 4, list_id="cyber_oct2026", day="2026-10-06")
-    assert report["forecast"]["summary"]["model"] == CYBER_EVENT_MODEL
+    assert report["forecast"]["summary"]["model"] in {CYBER_EVENT_MODEL, CYBER_DENSE_MODEL}
     assert report["forecast"]["summary"]["range_low"] is not None
     assert report["forecast"]["summary"]["range_high"] is not None
 
@@ -416,5 +426,129 @@ def test_prepare_cyber_event_without_30_calendar_days(repo):
         repo, store, product_id, list_ids=["cyber_oct2026"], force=True,
     )
     assert result["ok"] is True
-    assert result["model"] == CYBER_EVENT_MODEL
+    assert result["model"] in {CYBER_EVENT_MODEL, CYBER_DENSE_MODEL}
     assert result["buy_advice"] in {"comprar", "esperar", "observar"}
+
+
+def _dense_history(repo, *, list_id, n, store, product_id, start, count=10, step_min=12, drop=3000):
+    for index in range(count):
+        repo.cyber_day_price_history.insert_one({
+            "list_id": list_id,
+            "n": n,
+            "query": "Dense TV",
+            "day": (start + timedelta(minutes=index * step_min)).date().isoformat(),
+            "at": start + timedelta(minutes=index * step_min),
+            "price": 400_000 - index * drop,
+            "store": store,
+            "product_id": product_id,
+        })
+
+
+def test_dense_series_helpers_and_event_forecast(repo):
+    ensure_seed(repo)
+    create_list(repo, name="Cyber Oct 2026", slug="cyber_oct2026", use_seed=False)
+    store, product_id = "falabella", "DENSE-1"
+    repo.collection.insert_one({
+        "store": store,
+        "product_id": product_id,
+        "name": "Dense TV",
+        "price": 370_000,
+        "price_history": [],
+    })
+    _dense_history(
+        repo,
+        list_id="cyber_oct2026",
+        n=11,
+        store=store,
+        product_id=product_id,
+        start=NOW,
+        count=max(CYBER_DENSE_MIN_POINTS, 10),
+    )
+    points = [
+        {"price": 400_000 - i * 3000, "scraped_at": NOW + timedelta(minutes=i * 12)}
+        for i in range(max(CYBER_DENSE_MIN_POINTS, 10))
+    ]
+    bucketed = bucket_relative_series(points)
+    assert is_dense_enough(points, bucketed)
+    assert count_price_changes([p["price"] for p in points]) >= CYBER_DENSE_MIN_CHANGES
+    projected = project_dense_event_prices(bucketed, horizon=2, current=370_000)
+    assert len(projected) == 2
+    prepared, reason = prepare_cyber_dense_event_product(
+        repo, store, product_id, list_ids=["cyber_oct2026"], current_price=370_000,
+    )
+    assert reason is None
+    assert prepared is not None
+    assert prepared["model"] == CYBER_DENSE_MODEL
+    assert prepared["mode"] == "cyber_event"
+    result = ensure_forecast_for_product(
+        repo, store, product_id, list_ids=["cyber_oct2026"], force=True,
+    )
+    assert result["ok"] is True
+    assert result["model"] == CYBER_DENSE_MODEL
+    doc = latest_forecast(repo, store, product_id)
+    assert doc["model"] == CYBER_DENSE_MODEL
+
+
+def test_future_transfer_needs_two_dense_cybers(repo):
+    ensure_seed(repo)  # incluye cyber_junio2026
+    create_list(repo, name="Cyber Oct 2026", slug="cyber_oct2026", use_seed=False)
+    store, product_id = "falabella", "FUTURE-1"
+    repo.collection.insert_one({
+        "store": store,
+        "product_id": product_id,
+        "name": "Future TV",
+        "price": 390_000,
+        "price_history": [],
+    })
+    blocked, reason = prepare_cyber_future_transfer_product(
+        repo, store, product_id, list_ids=["cyber_oct2026", "cyber_junio2026"],
+    )
+    assert blocked is None
+    assert reason == "need_another_dense_cyber"
+
+    _dense_history(
+        repo,
+        list_id="cyber_junio2026",
+        n=1,
+        store=store,
+        product_id=product_id,
+        start=NOW - timedelta(days=90),
+        count=10,
+    )
+    still, reason2 = prepare_cyber_future_transfer_product(
+        repo, store, product_id, list_ids=["cyber_oct2026", "cyber_junio2026"],
+    )
+    assert still is None
+    assert reason2 == "need_another_dense_cyber"
+
+    _dense_history(
+        repo,
+        list_id="cyber_oct2026",
+        n=1,
+        store=store,
+        product_id=product_id,
+        start=NOW,
+        count=10,
+        drop=2500,
+    )
+    prepared, ok_reason = prepare_cyber_future_transfer_product(
+        repo, store, product_id, list_ids=["cyber_oct2026", "cyber_junio2026"], scale_price=390_000,
+    )
+    assert ok_reason is None
+    assert prepared is not None
+    assert prepared["model"] == CYBER_FUTURE_MODEL
+    assert prepared["mode"] == "cyber_future"
+    assert len(prepared["point_forecast"]) >= 1
+    assert len(prepared["source_events"]) >= 2
+
+    payload = experimental_forecast_for_cyber_query(
+        repo,
+        list_id="cyber_oct2026",
+        n=1,
+        product={"best_store": store, "last_product_id": product_id, "last_price": 390_000},
+        current_price=390_000,
+    )
+    assert payload["future_summary"] is not None
+    assert payload["future_summary"]["mode"] == "cyber_future"
+    assert "próximo" in (payload["future_summary"].get("mode_label") or "").lower() or \
+        payload["future_summary"]["model"] == CYBER_FUTURE_MODEL

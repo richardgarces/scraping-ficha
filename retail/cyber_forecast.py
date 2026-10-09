@@ -51,6 +51,12 @@ CYBER_EVENT_REFRESH_HOURS = max(
     1, int(os.environ.get("CYBER_EVENT_REFRESH_HOURS") or "2")
 )
 CYBER_EVENT_MODEL = "cyber_event_trend"
+CYBER_DENSE_MODEL = "cyber_event_dense"
+CYBER_FUTURE_MODEL = "cyber_future_transfer"
+CYBER_BUCKET_MINUTES = max(5, int(os.environ.get("CYBER_BUCKET_MINUTES") or "15"))
+CYBER_DENSE_MIN_POINTS = max(3, int(os.environ.get("CYBER_DENSE_MIN_POINTS") or "8"))
+CYBER_DENSE_MIN_CHANGES = max(1, int(os.environ.get("CYBER_DENSE_MIN_CHANGES") or "3"))
+CYBER_FUTURE_MIN_EVENTS = max(2, int(os.environ.get("CYBER_FUTURE_MIN_EVENTS") or "2"))
 CYBER_BUY_DROP_THRESHOLD_PCT = float(os.environ.get("CYBER_BUY_DROP_THRESHOLD_PCT") or "2")
 CYBER_BUY_NEAR_LOW_PCT = float(os.environ.get("CYBER_BUY_NEAR_LOW_PCT") or "2")
 
@@ -382,10 +388,195 @@ def _forecast_is_fresh(doc: dict[str, Any] | None, *, hours: int = CYBER_FORECAS
 def _is_cyber_event_forecast(doc: dict[str, Any] | None) -> bool:
     if not doc:
         return False
-    if str(doc.get("model") or "") == CYBER_EVENT_MODEL:
+    model = str(doc.get("model") or "")
+    if model in {CYBER_EVENT_MODEL, CYBER_DENSE_MODEL}:
         return True
     metadata = doc.get("metadata") if isinstance(doc.get("metadata"), dict) else {}
     return str(metadata.get("mode") or "") == "cyber_event"
+
+
+def _is_cyber_future_forecast(doc: dict[str, Any] | None) -> bool:
+    if not doc:
+        return False
+    if str(doc.get("model") or "") == CYBER_FUTURE_MODEL:
+        return True
+    metadata = doc.get("metadata") if isinstance(doc.get("metadata"), dict) else {}
+    return str(metadata.get("mode") or "") == "cyber_future"
+
+
+def count_price_changes(prices: list[float]) -> int:
+    changes = 0
+    prev: float | None = None
+    for raw in prices:
+        try:
+            price = float(raw)
+        except (TypeError, ValueError):
+            continue
+        if prev is not None and price != prev:
+            changes += 1
+        prev = price
+    return changes
+
+
+def bucket_relative_series(
+    points: list[dict[str, Any]],
+    *,
+    bucket_minutes: int = CYBER_BUCKET_MINUTES,
+) -> list[dict[str, Any]]:
+    """Serie densa en eje relativo al evento: bucket 0 = primer punto."""
+    timed: list[tuple[datetime, float]] = []
+    for point in points or []:
+        at = point.get("scraped_at")
+        price = _as_int(point.get("price"))
+        if not isinstance(at, datetime) or price is None:
+            continue
+        if at.tzinfo is None:
+            at = at.replace(tzinfo=timezone.utc)
+        timed.append((at, float(price)))
+    if not timed:
+        return []
+    timed.sort(key=lambda item: item[0])
+    t0 = timed[0][0]
+    width = max(1, int(bucket_minutes)) * 60
+    buckets: dict[int, list[float]] = {}
+    for at, price in timed:
+        idx = int(max(0.0, (at - t0).total_seconds()) // width)
+        buckets.setdefault(idx, []).append(price)
+    rows: list[dict[str, Any]] = []
+    for idx in sorted(buckets):
+        vals = sorted(buckets[idx])
+        median = vals[len(vals) // 2]
+        rows.append({
+            "bucket": idx,
+            "offset_hours": round((idx * width) / 3600.0, 4),
+            "price": float(median),
+        })
+    return rows
+
+
+def is_dense_enough(
+    points: list[dict[str, Any]],
+    bucketed: list[dict[str, Any]] | None = None,
+) -> bool:
+    """True si hay muchas muestras y cambios reales de precio en el día/evento."""
+    prices = [float(p["price"]) for p in points if _as_int(p.get("price"))]
+    if len(prices) >= CYBER_DENSE_MIN_POINTS and count_price_changes(prices) >= CYBER_DENSE_MIN_CHANGES:
+        return True
+    series = bucketed if bucketed is not None else bucket_relative_series(points)
+    bucket_prices = [float(item["price"]) for item in series]
+    return (
+        len(bucket_prices) >= max(3, CYBER_DENSE_MIN_POINTS // 2)
+        and count_price_changes(bucket_prices) >= CYBER_DENSE_MIN_CHANGES
+    )
+
+
+def project_dense_event_prices(
+    bucketed: list[dict[str, Any]],
+    *,
+    horizon: int,
+    current: float | None = None,
+    bucket_minutes: int = CYBER_BUCKET_MINUTES,
+) -> list[float]:
+    """Proyecta resto del evento desde curva densificada (pendiente + ancla al mínimo)."""
+    prices = [float(item["price"]) for item in bucketed]
+    if not prices:
+        return [0.0] * max(1, horizon)
+    last = float(current) if current and current > 0 else prices[-1]
+    event_low = min(prices)
+    if len(prices) < 2:
+        return [last] * max(1, horizon)
+    slope = _linear_slope(prices)
+    buckets_per_day = max(1.0, (24 * 60) / max(1, bucket_minutes))
+    daily_delta = slope * buckets_per_day
+    projected: list[float] = []
+    for step in range(1, max(1, horizon) + 1):
+        value = last + daily_delta * step
+        if daily_delta < 0:
+            value = max(event_low * 0.97, value)
+        projected.append(max(1.0, round(value, 2)))
+    return projected
+
+
+def group_cyber_points_by_event(points: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for point in points or []:
+        lid = str(point.get("cyber_list_id") or "").strip()
+        if not lid:
+            continue
+        grouped.setdefault(lid, []).append(point)
+    for lid in list(grouped):
+        grouped[lid] = sorted(
+            grouped[lid],
+            key=lambda row: row.get("scraped_at") or datetime.min.replace(tzinfo=timezone.utc),
+        )
+    return grouped
+
+
+def _percentile(sorted_vals: list[float], pct: float) -> float:
+    if not sorted_vals:
+        return 0.0
+    if len(sorted_vals) == 1:
+        return sorted_vals[0]
+    rank = (len(sorted_vals) - 1) * max(0.0, min(1.0, pct))
+    low = int(rank)
+    high = min(low + 1, len(sorted_vals) - 1)
+    frac = rank - low
+    return sorted_vals[low] * (1 - frac) + sorted_vals[high] * frac
+
+
+def build_future_transfer_curve(
+    event_curves: list[dict[str, Any]],
+    *,
+    scale_price: float,
+    horizon: int = CYBER_EVENT_DAYS,
+) -> tuple[list[float], dict[str, Any]]:
+    """Mediana de curvas normalizadas (precio/apertura) escalada al precio base."""
+    if scale_price <= 0 or not event_curves:
+        return [], {}
+    # Rejilla: un punto por día relativo del horizonte Cyber.
+    grid = list(range(max(1, horizon)))
+    ratio_rows: list[list[float]] = []
+    source_events: list[str] = []
+    min_offsets: list[float] = []
+    for curve in event_curves:
+        bucketed = curve.get("bucketed") or []
+        open_price = float(curve.get("open") or 0)
+        if open_price <= 0 or len(bucketed) < 2:
+            continue
+        source_events.append(str(curve.get("list_id") or ""))
+        # Mapear offset_hours → ratio; muestrear a días 0..horizon-1
+        by_day: dict[int, list[float]] = {}
+        for item in bucketed:
+            day_idx = int(float(item.get("offset_hours") or 0) // 24)
+            by_day.setdefault(day_idx, []).append(float(item["price"]) / open_price)
+        row: list[float] = []
+        last_ratio = 1.0
+        for day in grid:
+            vals = by_day.get(day)
+            if vals:
+                last_ratio = sum(vals) / len(vals)
+            row.append(last_ratio)
+        ratio_rows.append(row)
+        low_item = min(bucketed, key=lambda item: float(item["price"]))
+        min_offsets.append(float(low_item.get("offset_hours") or 0))
+    if len(ratio_rows) < CYBER_FUTURE_MIN_EVENTS:
+        return [], {"source_events": source_events, "event_count": len(ratio_rows)}
+    median_ratios: list[float] = []
+    p20: list[float] = []
+    p80: list[float] = []
+    for day in grid:
+        col = sorted(row[day] for row in ratio_rows)
+        med = _percentile(col, 0.5)
+        median_ratios.append(max(1.0, round(scale_price * med, 2)))
+        p20.append(max(1.0, round(scale_price * _percentile(col, 0.2), 2)))
+        p80.append(max(1.0, round(scale_price * _percentile(col, 0.8), 2)))
+    typical_min_hour = _percentile(sorted(min_offsets), 0.5) if min_offsets else None
+    return median_ratios, {
+        "source_events": [item for item in source_events if item],
+        "event_count": len(ratio_rows),
+        "typical_min_offset_hours": round(typical_min_hour, 2) if typical_min_hour is not None else None,
+        "quantiles": {"0.2": p20, "0.8": p80},
+    }
 
 
 def _linear_slope(values: list[float]) -> float:
@@ -581,6 +772,154 @@ def prepare_cyber_event_product(
         "horizon": horizon,
         "buy_advice": advice,
         "mode": "cyber_event",
+        "model": CYBER_EVENT_MODEL,
+    }, None
+
+
+def prepare_cyber_dense_event_product(
+    repo: Any,
+    store: str,
+    product_id: str,
+    *,
+    list_ids: list[str] | None = None,
+    current_price: Any = None,
+) -> tuple[dict[str, Any] | None, str | None]:
+    """Pronóstico denso del resto del Cyber actual (buckets relativos + muchos cambios)."""
+    base, reason = prepare_cyber_event_product(repo, store, product_id, list_ids=list_ids)
+    if base is None:
+        return None, reason
+    lids = list(list_ids or forecast_cyber_list_ids(repo))
+    cyber_points = cyber_history_points_for_product(
+        repo, _norm_store(store), _norm_product_id(product_id), list_ids=lids,
+    )
+    bucketed = bucket_relative_series(cyber_points)
+    if not is_dense_enough(cyber_points, bucketed):
+        return None, "not_dense_enough"
+    current = float(_as_int(current_price) or base["series"][-1])
+    horizon = int(base.get("horizon") or remaining_cyber_horizon(cyber_points))
+    point_forecast = project_dense_event_prices(bucketed, horizon=horizon, current=current)
+    advice = cyber_buy_advice(
+        current=current,
+        prices=[float(item["price"]) for item in bucketed],
+        point_forecast=point_forecast,
+    )
+    reason_txt = str(advice.get("reason") or "")
+    if "serie densa" not in reason_txt.lower():
+        advice = {
+            **advice,
+            "reason": (reason_txt + " Basado en serie densa de vueltas del evento Cyber.").strip(),
+        }
+    prepared = {
+        **base,
+        "series": [float(item["price"]) for item in bucketed],
+        "bucketed": bucketed,
+        "point_forecast": point_forecast,
+        "horizon": horizon,
+        "buy_advice": advice,
+        "mode": "cyber_event",
+        "model": CYBER_DENSE_MODEL,
+        "observation_count": len(bucketed),
+        "cyber_observation_count": len(cyber_points),
+        "dense": True,
+        "price_changes": count_price_changes([float(p["price"]) for p in cyber_points]),
+    }
+    return prepared, None
+
+
+def prepare_cyber_future_transfer_product(
+    repo: Any,
+    store: str,
+    product_id: str,
+    *,
+    list_ids: list[str] | None = None,
+    scale_price: Any = None,
+) -> tuple[dict[str, Any] | None, str | None]:
+    """Patrón de Cybers pasados densos → trayectoria tipica del próximo evento."""
+    store_n = _norm_store(store)
+    product_n = _norm_product_id(product_id)
+    if not store_n or not product_n:
+        return None, "missing_identity"
+    coll = getattr(repo, "collection", None)
+    if coll is None:
+        return None, "missing_identity"
+    document = coll.find_one({"store": store_n, "product_id": product_n})
+    if document is None:
+        document = coll.find_one({
+            "store": {"$regex": f"^{re.escape(store_n)}$", "$options": "i"},
+            "product_id": product_n,
+        })
+    if document is None:
+        return None, "product_not_found"
+
+    lids = list(list_ids or forecast_cyber_list_ids(repo))
+    cyber_points = cyber_history_points_for_product(repo, store_n, product_n, list_ids=lids)
+    grouped = group_cyber_points_by_event(cyber_points)
+    event_curves: list[dict[str, Any]] = []
+    for lid, group in grouped.items():
+        bucketed = bucket_relative_series(group)
+        if not is_dense_enough(group, bucketed):
+            continue
+        event_curves.append({
+            "list_id": lid,
+            "bucketed": bucketed,
+            "open": float(bucketed[0]["price"]),
+            "low": min(float(item["price"]) for item in bucketed),
+        })
+    if len(event_curves) < CYBER_FUTURE_MIN_EVENTS:
+        return None, "need_another_dense_cyber"
+
+    scale = float(
+        _as_int(scale_price)
+        or _as_int(document.get("price"))
+        or event_curves[-1]["open"]
+    )
+    horizon = CYBER_EVENT_DAYS
+    point_forecast, meta = build_future_transfer_curve(
+        event_curves, scale_price=scale, horizon=horizon,
+    )
+    if not point_forecast:
+        return None, "need_another_dense_cyber"
+
+    current = scale
+    advice = cyber_buy_advice(
+        current=current,
+        prices=point_forecast,
+        point_forecast=point_forecast,
+    )
+    advice = {
+        **advice,
+        "reason": (
+            f"Patrón transferido de {meta.get('event_count')} Cybers previos con historial denso. "
+            + str(advice.get("reason") or "")
+        ).strip(),
+        "label": advice.get("label") or "Sin señal clara",
+    }
+    times = [p["scraped_at"] for p in cyber_points if isinstance(p.get("scraped_at"), datetime)]
+    first_at = times[0] if times else _now()
+    last_at = times[-1] if times else _now()
+    return {
+        "forecast_key": f"{store_n}:{product_n}",
+        "store": store_n,
+        "product_id": product_n,
+        "source_document_id": str(document.get("_id") or ""),
+        "name": str(document.get("name") or ""),
+        "dates": [],
+        "series": [float(curve["open"]) for curve in event_curves],
+        "history_start": first_at.date().isoformat() if hasattr(first_at, "date") else str(first_at)[:10],
+        "history_end": last_at.date().isoformat() if hasattr(last_at, "date") else str(last_at)[:10],
+        "observation_count": sum(len(curve["bucketed"]) for curve in event_curves),
+        "cyber_observation_count": len(cyber_points),
+        "cyber_list_ids": lids,
+        "cyber_distinct_days": cyber_distinct_days(cyber_points),
+        "cyber_span_seconds": max(0.0, (last_at - first_at).total_seconds()),
+        "point_forecast": point_forecast,
+        "horizon": horizon,
+        "buy_advice": advice,
+        "mode": "cyber_future",
+        "model": CYBER_FUTURE_MODEL,
+        "source_events": meta.get("source_events") or [],
+        "typical_min_offset_hours": meta.get("typical_min_offset_hours"),
+        "quantiles": meta.get("quantiles") or {},
     }, None
 
 
@@ -662,11 +1001,17 @@ def build_forecast_document(
     last = series[-1] if series else 0.0
     points = point_forecast if point_forecast is not None else [last] * horizon
     mode = str(prepared.get("mode") or "daily")
-    is_event = mode == "cyber_event"
+    is_event = mode in {"cyber_event", "cyber_future"}
+    if mode == "cyber_future":
+        frequency = "event_transfer"
+    elif mode == "cyber_event":
+        frequency = "intra_event"
+    else:
+        frequency = "daily"
     metadata: dict[str, Any] = {
         "source": "cyber_day",
         "mode": mode,
-        "frequency": "intra_event" if is_event else "daily",
+        "frequency": frequency,
         "timezone": "America/Santiago",
         "observation_count": prepared.get("observation_count"),
         "history_start": prepared.get("history_start"),
@@ -679,6 +1024,10 @@ def build_forecast_document(
         "cyber_distinct_days": prepared.get("cyber_distinct_days") or [],
         "cyber_span_seconds": prepared.get("cyber_span_seconds"),
         "buy_advice": prepared.get("buy_advice"),
+        "source_events": prepared.get("source_events") or [],
+        "typical_min_offset_hours": prepared.get("typical_min_offset_hours"),
+        "dense": bool(prepared.get("dense")),
+        "price_changes": prepared.get("price_changes"),
     }
     return {
         "forecast_key": prepared["forecast_key"],
@@ -690,7 +1039,7 @@ def build_forecast_document(
         "generated_at": _now(),
         "model": model,
         "point_forecast": points,
-        "quantiles": quantiles or {},
+        "quantiles": quantiles if quantiles is not None else (prepared.get("quantiles") or {}),
         "metadata": metadata,
         "buy_advice": prepared.get("buy_advice"),
     }
@@ -704,18 +1053,28 @@ def _write_cyber_event_forecast(
 ) -> dict[str, Any]:
     horizon = int(prepared.get("horizon") or CYBER_EVENT_HORIZON)
     points = list(prepared.get("point_forecast") or [])
+    model = str(prepared.get("model") or CYBER_EVENT_MODEL)
+    mode = str(prepared.get("mode") or "cyber_event")
     if len(points) != horizon:
-        prices = [float(value) for value in prepared.get("series") or []]
-        points = project_cyber_event_prices(
-            prices,
-            horizon=horizon,
-            span_seconds=float(prepared.get("cyber_span_seconds") or 0.0),
-        )
+        if model == CYBER_DENSE_MODEL and prepared.get("bucketed"):
+            points = project_dense_event_prices(
+                list(prepared.get("bucketed") or []),
+                horizon=horizon,
+                current=float((prepared.get("series") or [0])[-1] or 0) or None,
+            )
+        else:
+            prices = [float(value) for value in prepared.get("series") or []]
+            points = project_cyber_event_prices(
+                prices,
+                horizon=horizon,
+                span_seconds=float(prepared.get("cyber_span_seconds") or 0.0),
+            )
     doc = build_forecast_document(
         prepared,
         horizon=horizon,
-        model=CYBER_EVENT_MODEL,
+        model=model,
         point_forecast=points,
+        quantiles=prepared.get("quantiles") if isinstance(prepared.get("quantiles"), dict) else None,
         min_history_days=0,
     )
     write_forecast_docs(repo, [doc])
@@ -724,8 +1083,8 @@ def _write_cyber_event_forecast(
         "ok": True,
         "action": "written",
         "forecast_key": doc["forecast_key"],
-        "model": CYBER_EVENT_MODEL,
-        "mode": "cyber_event",
+        "model": model,
+        "mode": mode,
         "observation_count": prepared.get("observation_count"),
         "cyber_changes": changes,
         "cyber_observation_count": prepared.get("cyber_observation_count") or 0,
@@ -785,10 +1144,36 @@ def ensure_forecast_for_product(
             "has_forecast": existing is not None,
         }
 
-    # 1) Camino Cyber-evento primero: muchas vueltas / puntos del mismo día bastan
-    # (sin depender de timesfm_poc ni de 30 días calendario).
+    # 1) Serie densa del evento actual (muchos cambios / buckets).
+    # 2) Transferencia a Cyber futuro (≥2 eventos densos previos).
+    # 3) cyber_event_trend simple.
+    # 4) Diario TimesFM / baseline (≥30 días).
     event_block_reason = None
     if prefer_cyber_event:
+        dense_prepared, dense_reason = prepare_cyber_dense_event_product(
+            repo, store_n, product_n, list_ids=lids,
+        )
+        if dense_prepared is not None:
+            written = _write_cyber_event_forecast(repo, dense_prepared, changes=changes)
+            future_prepared, _future_reason = prepare_cyber_future_transfer_product(
+                repo, store_n, product_n, list_ids=lids,
+            )
+            if future_prepared is not None:
+                future_result = _write_cyber_event_forecast(
+                    repo, future_prepared, changes=changes,
+                )
+                written["future"] = future_result
+            return written
+        event_block_reason = dense_reason
+
+        future_prepared, future_reason = prepare_cyber_future_transfer_product(
+            repo, store_n, product_n, list_ids=lids,
+        )
+        if future_prepared is not None:
+            return _write_cyber_event_forecast(repo, future_prepared, changes=changes)
+        if event_block_reason in {None, "not_dense_enough"}:
+            event_block_reason = future_reason or event_block_reason
+
         event_prepared, event_reason = prepare_cyber_event_product(
             repo,
             store_n,
@@ -797,9 +1182,9 @@ def ensure_forecast_for_product(
         )
         if event_prepared is not None:
             return _write_cyber_event_forecast(repo, event_prepared, changes=changes)
-        event_block_reason = event_reason
+        event_block_reason = event_reason or event_block_reason
 
-    # 2) Camino diario clásico (TimesFM / baseline con ≥30 días).
+    # 4) Camino diario clásico (TimesFM / baseline con ≥30 días).
     prepared = None
     reason = event_block_reason or "invalid"
     try:
@@ -885,6 +1270,8 @@ def ensure_cyber_list_forecasts(
         "candidates": len(keys),
         "written": 0,
         "written_cyber_event": 0,
+        "written_cyber_dense": 0,
+        "written_cyber_future": 0,
         "fresh": 0,
         "blocked": 0,
         "missing_forecast_with_many_changes": 0,
@@ -912,8 +1299,17 @@ def ensure_cyber_list_forecasts(
         action = result.get("action")
         if action == "written":
             stats["written"] += 1
-            if result.get("mode") == "cyber_event" or result.get("model") == CYBER_EVENT_MODEL:
+            model = str(result.get("model") or "")
+            mode = str(result.get("mode") or "")
+            if mode == "cyber_event" or model in {CYBER_EVENT_MODEL, CYBER_DENSE_MODEL}:
                 stats["written_cyber_event"] += 1
+            if model == CYBER_DENSE_MODEL:
+                stats["written_cyber_dense"] += 1
+            if mode == "cyber_future" or model == CYBER_FUTURE_MODEL:
+                stats["written_cyber_future"] += 1
+            future = result.get("future") if isinstance(result.get("future"), dict) else None
+            if future and future.get("action") == "written":
+                stats["written_cyber_future"] += 1
         elif action == "fresh":
             stats["fresh"] += 1
         elif action == "blocked":
@@ -1141,33 +1537,100 @@ def _summary_from_cyber_points(
     last_at = times[-1] if times else _now()
     span_seconds = max(0.0, (last_at - first_at).total_seconds())
     horizon = remaining_cyber_horizon(points)
-    point_forecast = project_cyber_event_prices(prices, horizon=horizon, span_seconds=span_seconds)
+    bucketed = bucket_relative_series(points)
+    dense = is_dense_enough(points, bucketed)
     current = float(current_price) if _as_int(current_price) else prices[-1]
-    advice = cyber_buy_advice(current=current, prices=prices, point_forecast=point_forecast)
+    if dense:
+        point_forecast = project_dense_event_prices(bucketed, horizon=horizon, current=current)
+        model = CYBER_DENSE_MODEL
+        series_for_advice = [float(item["price"]) for item in bucketed]
+    else:
+        point_forecast = project_cyber_event_prices(prices, horizon=horizon, span_seconds=span_seconds)
+        model = CYBER_EVENT_MODEL
+        series_for_advice = prices
+    advice = cyber_buy_advice(current=current, prices=series_for_advice, point_forecast=point_forecast)
+    if dense:
+        advice = {
+            **advice,
+            "reason": (
+                str(advice.get("reason") or "")
+                + " Basado en serie densa de vueltas del evento Cyber."
+            ).strip(),
+        }
     doc = {
         "forecast_key": f"{store}:{product_id}" if store and product_id else f"cyber_query:{list_id}",
         "store": store,
         "product_id": product_id,
         "horizon": horizon,
         "generated_at": _now(),
-        "model": CYBER_EVENT_MODEL,
+        "model": model,
         "point_forecast": point_forecast,
         "quantiles": {},
         "buy_advice": advice,
         "metadata": {
             "source": "cyber_day_evolution",
             "mode": "cyber_event",
-            "observation_count": len(prices),
+            "observation_count": len(series_for_advice),
             "cyber_observation_count": len(points),
             "cyber_list_ids": [list_id] if list_id else [],
             "cyber_event_days": CYBER_EVENT_DAYS,
             "cyber_distinct_days": cyber_distinct_days(points),
             "cyber_span_seconds": span_seconds,
             "buy_advice": advice,
+            "dense": dense,
             "ephemeral": True,
         },
     }
     return forecast_summary(doc, current)
+
+
+def _future_summary_for_identity(
+    repo: Any,
+    store: str,
+    product_id: str,
+    *,
+    current_price: Any = None,
+) -> dict[str, Any] | None:
+    from retail.forecast_presentation import forecast_summary
+
+    if not store or not product_id:
+        return None
+    prepared, reason = prepare_cyber_future_transfer_product(
+        repo, store, product_id, scale_price=current_price,
+    )
+    if prepared is None:
+        existing = latest_forecast_for_model(repo, store, product_id, CYBER_FUTURE_MODEL)
+        if existing is not None:
+            return forecast_summary(existing, current_price)
+        return None
+    doc = build_forecast_document(
+        prepared,
+        horizon=int(prepared.get("horizon") or CYBER_EVENT_DAYS),
+        model=CYBER_FUTURE_MODEL,
+        point_forecast=list(prepared.get("point_forecast") or []),
+        quantiles=prepared.get("quantiles") if isinstance(prepared.get("quantiles"), dict) else None,
+        min_history_days=0,
+    )
+    doc["metadata"] = {**(doc.get("metadata") or {}), "ephemeral": True}
+    return forecast_summary(doc, current_price or prepared.get("series", [None])[-1])
+
+
+def latest_forecast_for_model(
+    repo: Any,
+    store: str,
+    product_id: str,
+    model: str,
+) -> dict[str, Any] | None:
+    forecasts = getattr(repo, "forecasts", None)
+    if forecasts is None and hasattr(repo, "db"):
+        forecasts = repo.db["forecasts"]
+    if forecasts is None:
+        return None
+    key = f"{_norm_store(store)}:{_norm_product_id(product_id)}"
+    return forecasts.find_one(
+        {"forecast_key": key, "model": model},
+        sort=[("generated_at", -1)],
+    )
 
 
 def experimental_forecast_for_cyber_query(
@@ -1181,10 +1644,10 @@ def experimental_forecast_for_cyber_query(
 ) -> dict[str, Any]:
     """Pronóstico experimental para el informe diario Cyber de una query.
 
-    Prioridad:
-    1. Serie densa de la query (día + muestras Cyber previas) → cyber_event_trend
-    2. Pronóstico guardado del producto vinculado (si existe)
-    3. Estado vacío con motivo si faltan observaciones
+    Prioridad del resumen actual:
+    1. Serie densa / trend de la query
+    2. Pronóstico guardado del producto vinculado
+    Además intenta ``future_summary`` (transferencia entre Cybers).
     """
     from retail.cyber_day import resolve_list_id
     from retail.forecast_presentation import forecast_summary
@@ -1200,6 +1663,10 @@ def experimental_forecast_for_cyber_query(
     if current is None and isinstance(product, dict):
         current = _as_int(product.get("last_price"))
 
+    future_summary = _future_summary_for_identity(
+        repo, store, product_id, current_price=current,
+    )
+
     query_summary = _summary_from_cyber_points(
         history_points,
         current_price=current,
@@ -1211,27 +1678,47 @@ def experimental_forecast_for_cyber_query(
         return {
             "ok": True,
             "summary": query_summary,
+            "future_summary": future_summary,
             "source": "query_history",
             "store": store or None,
             "product_id": product_id or None,
             "observation_count": len(history_points),
             "empty_reason": None,
+            "future_empty_reason": (
+                None if future_summary
+                else "Hace falta otro Cyber con historial denso para proyectar el próximo evento."
+            ),
         }
 
     stored_summary = None
     if store and product_id:
-        existing = latest_forecast(repo, store, product_id)
-        if existing is not None and str(existing.get("model") or "").lower() != "simulated":
+        for model in (CYBER_DENSE_MODEL, CYBER_EVENT_MODEL, "timesfm", "last_value_baseline"):
+            existing = latest_forecast_for_model(repo, store, product_id, model)
+            if existing is None:
+                continue
+            if str(existing.get("model") or "").lower() == "simulated":
+                continue
             stored_summary = forecast_summary(existing, current)
+            if stored_summary is not None:
+                break
+        if stored_summary is None:
+            existing = latest_forecast(repo, store, product_id)
+            if existing is not None and str(existing.get("model") or "").lower() != "simulated":
+                stored_summary = forecast_summary(existing, current)
     if stored_summary is not None:
         return {
             "ok": True,
             "summary": stored_summary,
+            "future_summary": future_summary,
             "source": "stored_forecast",
             "store": store,
             "product_id": product_id,
             "observation_count": len(history_points),
             "empty_reason": None,
+            "future_empty_reason": (
+                None if future_summary
+                else "Hace falta otro Cyber con historial denso para proyectar el próximo evento."
+            ),
         }
 
     needed = CYBER_FORECAST_MIN_OBSERVATIONS
@@ -1250,9 +1737,14 @@ def experimental_forecast_for_cyber_query(
     return {
         "ok": True,
         "summary": None,
+        "future_summary": future_summary,
         "source": "none",
         "store": store or None,
         "product_id": product_id or None,
         "observation_count": have,
         "empty_reason": empty_reason,
+        "future_empty_reason": (
+            None if future_summary
+            else "Hace falta otro Cyber con historial denso para proyectar el próximo evento."
+        ),
     }

@@ -525,24 +525,42 @@ class ProductRepository:
             return False
 
     def last_points(self, keys: list[tuple[str, str]]) -> dict[tuple[str, str], tuple[Any, str, Any]]:
-        """Último precio guardado y el día en que se guardó, por producto."""
+        """Último precio de oferta guardado (historial o documento) y su día."""
         wanted = [(store, product_id) for store, product_id in keys if store and product_id]
         if not wanted:
             return {}
         cursor = self.collection.find(
             {"$or": [{"store": store, "product_id": product_id} for store, product_id in wanted]},
-            {"store": 1, "product_id": 1, "price_history": {"$slice": -1}},
+            {
+                "store": 1,
+                "product_id": 1,
+                "price": 1,
+                "price_normal": 1,
+                "updated_at": 1,
+                "price_history": {"$slice": -1},
+            },
         )
-        found: dict[tuple[str, str], tuple[Any, str]] = {}
+        found: dict[tuple[str, str], tuple[Any, str, Any]] = {}
         for item in cursor:
-            points = item.get("price_history") or []
-            if not points:
-                continue
             key = (item.get("store") or "", item.get("product_id") or "")
+            if not key[0] or not key[1]:
+                continue
+            points = item.get("price_history") or []
+            if points:
+                found[key] = (
+                    points[-1].get("price"),
+                    _day(points[-1].get("scraped_at")),
+                    points[-1].get("price_normal"),
+                )
+                continue
+            # Sin historial aún: el precio de oferta del documento es la base
+            # (p. ej. 900 guardado → 890 nuevo debe disparar la alerta).
+            if item.get("price") in (None, "", 0):
+                continue
             found[key] = (
-                points[-1].get("price"),
-                _day(points[-1].get("scraped_at")),
-                points[-1].get("price_normal"),
+                item.get("price"),
+                _day(item.get("updated_at")),
+                item.get("price_normal"),
             )
         return found
 

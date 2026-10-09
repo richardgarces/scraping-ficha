@@ -83,17 +83,18 @@ def forecast_summary(item: dict[str, Any], current_price: Any = None) -> dict[st
     if not isinstance(buy_advice, dict):
         buy_advice = metadata.get("buy_advice") if isinstance(metadata.get("buy_advice"), dict) else None
     mode = str(metadata.get("mode") or "")
-    if model == "cyber_event_trend" or mode == "cyber_event":
+    if model in {"cyber_event_trend", "cyber_event_dense"} or mode == "cyber_event":
         cyber_obs = 0
         try:
             cyber_obs = max(0, int(metadata.get("cyber_observation_count") or observations or 0))
         except (TypeError, ValueError):
             cyber_obs = observations
-        if cyber_obs >= 20:
+        dense = bool(metadata.get("dense")) or model == "cyber_event_dense"
+        if cyber_obs >= 20 or dense:
             confidence = "medium"
             confidence_reason = (
-                f"Pronóstico de ventana Cyber con {cyber_obs} observaciones de vueltas "
-                "(horizonte corto del evento, sin exigir 30 días calendario)."
+                f"Pronóstico Cyber del evento con {cyber_obs} observaciones de vueltas "
+                + ("(serie densa)." if dense else "(horizonte corto del evento).")
             )
         else:
             confidence = "low"
@@ -103,6 +104,24 @@ def forecast_summary(item: dict[str, Any], current_price: Any = None) -> dict[st
             )
         if observations < cyber_obs:
             observations = cyber_obs
+    elif model == "cyber_future_transfer" or mode == "cyber_future":
+        events = metadata.get("source_events") or metadata.get("cyber_list_ids") or []
+        try:
+            event_count = max(len(events), int(metadata.get("event_count") or 0))
+        except (TypeError, ValueError):
+            event_count = len(events) if isinstance(events, list) else 0
+        confidence = "medium" if event_count >= 2 else "low"
+        confidence_reason = (
+            f"Patrón para próximo Cyber transferido desde {event_count or 'varios'} eventos "
+            "previos con historial denso (independiente de TimesFM diario)."
+        )
+        mode = "cyber_future"
+
+    resolved_mode = mode or (
+        "cyber_event"
+        if model in {"cyber_event_trend", "cyber_event_dense"}
+        else ("cyber_future" if model == "cyber_future_transfer" else "daily")
+    )
 
     result = {
         "trend": trend,
@@ -118,7 +137,13 @@ def forecast_summary(item: dict[str, Any], current_price: Any = None) -> dict[st
         "model": model or "unknown",
         "observation_count": observations,
         "experimental": True,
-        "mode": mode or ("cyber_event" if model == "cyber_event_trend" else "daily"),
+        "mode": resolved_mode,
+        "mode_label": {
+            "cyber_event": "Pronóstico Cyber del evento",
+            "cyber_future": "Patrón para próximo Cyber",
+            "daily": "Pronóstico diario",
+        }.get(resolved_mode, "Pronóstico experimental"),
+        "source_events": list(metadata.get("source_events") or []),
     }
     if isinstance(buy_advice, dict) and buy_advice.get("advice"):
         result["buy_advice"] = {

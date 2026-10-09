@@ -43,15 +43,20 @@ El scraping Cyber registra cambios en `cyber_day_price_history`. Esos puntos se
 reutilizan para el pronóstico experimental:
 
 1. Se empujan al `price_history` del `store:product_id` ganador.
-2. Cada vuelta del worker guarda una muestra de precio y alimenta un pronóstico
-   de **ventana Cyber** (~3 días) con ≥3 observaciones (`cyber_event_trend` +
-   consejo comprar/esperar), sin exigir 30 días calendario.
-3. La generación diaria prioriza todos los productos de listas que matchean
-   octubre 2026 y junio 2026 (slugs tipo `cyber_oct2026`, `cyber_junio2026`).
-4. Al preparar la serie diaria se vuelve a mezclar el historial Cyber por si
+2. Con **serie densa** (muchos puntos y cambios reales en el día, buckets de
+   ~15 min) se genera `cyber_event_dense`: resto del Cyber actual + consejo
+   comprar/esperar. Si no alcanza densidad, cae a `cyber_event_trend` (≥3
+   observaciones). **No usa TimesFM**.
+3. Con **≥2 Cybers densos previos** del mismo producto se genera
+   `cyber_future_transfer`: patrón tipico del próximo evento (curva mediana
+   normalizada por precio de apertura). Tampoco depende de TimesFM diario.
+4. La generación diaria (cron BMAX / `ensure_cyber_list_forecasts`) prioriza
+   listas octubre/junio 2026; TimesFM diario (≥30 días) queda como fallback.
+5. Al preparar la serie diaria se vuelve a mezclar el historial Cyber por si
    faltó algún punto en catálogo.
 
-Desactivar: `FORECAST_INCLUDE_CYBER=0` o `--no-include-cyber`.
+Desactivar prioridad Cyber en el batch TimesFM: `FORECAST_INCLUDE_CYBER=0` o
+`--no-include-cyber`.
 
 ## Presentación experimental
 

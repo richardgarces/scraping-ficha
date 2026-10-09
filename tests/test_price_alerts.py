@@ -23,10 +23,11 @@ def test_delete_price_alert_is_scoped_to_owner():
 
 
 class _Product:
-    def __init__(self, store, product_id, price, name="Auriculares", image_url=None):
+    def __init__(self, store, product_id, price, name="Auriculares", image_url=None, price_normal=None):
         self.store = store
         self.product_id = product_id
         self.price = price
+        self.price_normal = price_normal
         self.name = name
         self.url = "https://tienda.example/p"
         self.image_url = image_url
@@ -54,6 +55,19 @@ def test_price_deltas_covers_up_and_down():
     assert up[0]["name"] == "Notebook"
 
 
+def test_price_deltas_offer_change_keeps_normal():
+    """Normal 1000, oferta 900→890: alerta por el precio de oferta."""
+    changes = price_deltas(
+        {("lider", "sku"): (900, "2026-10-01", 1000)},
+        [_Product("lider", "sku", 890, price_normal=1000)],
+    )
+    assert len(changes) == 1
+    assert changes[0]["previous_price"] == 900
+    assert changes[0]["price"] == 890
+    assert changes[0]["price_normal"] == 1000
+    assert changes[0]["previous_price_normal"] == 1000
+
+
 def test_price_delta_keeps_product_image():
     changes = price_deltas(
         {("falabella", "p1"): (2000, "2026-09-15")},
@@ -70,13 +84,16 @@ def test_price_change_message_is_spanish_and_links_ficha():
             "product_id": "sku 1",
             "previous_price": 20000,
             "price": 15000,
+            "price_normal": 25000,
         }
     )
     assert subject.startswith("Cambió el precio:")
     assert "Audífonos Sony" in body
     assert "Tienda:" in body
-    assert "Precio anterior: $20.000" in body
-    assert "Precio nuevo: $15.000" in body
+    assert "Precio oferta anterior: $20.000" in body
+    assert "Precio oferta nuevo: $15.000" in body
+    assert "Precio normal: $25.000" in body
+    assert "precio de oferta" in body
     assert "bajó" in body
     assert "/producto?store=falabella&id=sku%201" in body
 
@@ -131,9 +148,89 @@ def test_notify_sends_once_per_change(monkeypatch):
     assert notify_price_changes(repo, [change]) == 0
     assert len(sent) == 1
     assert sent[0][0] == "ana@example.com"
-    assert "Precio anterior" in sent[0][2]
+    assert "Precio oferta anterior" in sent[0][2]
     assert "Ver ficha del producto" in sent[0][3]["html"]
     assert "Audífonos" in sent[0][3]["html"]
+
+
+def test_notify_push_without_email_on_offer_change(monkeypatch):
+    """Push sale aunque la cuenta no tenga correo, si cambió el precio de oferta."""
+    pushes = []
+
+    monkeypatch.setattr(
+        "retail.batch.rules.load_rules",
+        lambda: {"channels": ["log", "file", "push"]},
+    )
+    monkeypatch.setattr(
+        "retail.web_push.send_user_push",
+        lambda user, payload, repo=None, tag=None: pushes.append((user, payload, tag)) or True,
+    )
+    monkeypatch.setattr(
+        "retail.price_alerts.send_email",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("email no debe enviarse")),
+    )
+
+    class Repo:
+        price_alerts = object()
+
+        def price_alerts_for(self, keys):
+            return [
+                {
+                    "user_id": "u-push",
+                    "store": "lider",
+                    "product_id": "sku-oferta",
+                    "active": True,
+                }
+            ]
+
+        def claim_price_alert_send(self, *args, **kwargs):
+            return True
+
+        def find_user_by_id(self, user_id):
+            return {
+                "status": "approved",
+                "notification_preferences": {"channels": ["push"]},
+                "push_subscriptions": [{"endpoint": "https://push.example/1"}],
+            }
+
+    change = {
+        "store": "lider",
+        "product_id": "sku-oferta",
+        "name": "Leche",
+        "previous_price": 900,
+        "price": 890,
+        "price_normal": 1000,
+    }
+    assert notify_price_changes(Repo(), [change]) == 1
+    assert len(pushes) == 1
+    assert pushes[0][1]["previous_price"] == 900
+    assert pushes[0][1]["price"] == 890
+    assert "precio de oferta" in pushes[0][1]["message"]
+
+
+def test_last_points_uses_document_price_without_history():
+    """Sin price_history, el price del doc es la base (900→890)."""
+    from retail.mongo import ProductRepository
+
+    class MemCollection:
+        def find(self, query, projection=None):
+            yield {
+                "store": "lider",
+                "product_id": "sku",
+                "price": 900,
+                "price_normal": 1000,
+                "updated_at": "2026-10-01T12:00:00",
+                "price_history": [],
+            }
+
+    repo = ProductRepository.__new__(ProductRepository)
+    repo.collection = MemCollection()
+    found = repo.last_points([("lider", "sku")])
+    assert found[("lider", "sku")][0] == 900
+    assert found[("lider", "sku")][2] == 1000
+    deltas = price_deltas(found, [_Product("lider", "sku", 890, price_normal=1000)])
+    assert deltas[0]["previous_price"] == 900
+    assert deltas[0]["price"] == 890
 
 
 def test_notify_skips_email_when_admin_correo_disabled(monkeypatch):

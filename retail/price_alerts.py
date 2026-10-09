@@ -22,8 +22,14 @@ def _as_int(value: Any) -> int | None:
         return None
 
 
-def price_deltas(previous: dict[tuple[str, str], tuple[Any, str]], products: list[Any]) -> list[dict[str, Any]]:
-    """Cambios reales de precio. El primer avistamiento no cuenta: no hay anterior."""
+def price_deltas(previous: dict[tuple[str, str], tuple[Any, ...]], products: list[Any]) -> list[dict[str, Any]]:
+    """Cambios del precio de oferta/descuento vs lo último guardado.
+
+    Compara ``product.price`` (oferta / todo medio) con el precio anterior del
+    historial o, si no hay puntos, el ``price`` del documento. El primer
+    avistamiento no cuenta. Un cambio 900→890 sí dispara alerta aunque el
+    precio normal siga en 1000.
+    """
     changes: list[dict[str, Any]] = []
     for product in products:
         store = getattr(product, "store", None) or ""
@@ -35,6 +41,8 @@ def price_deltas(previous: dict[tuple[str, str], tuple[Any, str]], products: lis
         new = _as_int(getattr(product, "price", None))
         if old is None or new is None or old == new:
             continue
+        old_normal = _as_int(prior[2]) if prior and len(prior) > 2 else None
+        new_normal = _as_int(getattr(product, "price_normal", None))
         changes.append(
             {
                 "store": store,
@@ -45,6 +53,8 @@ def price_deltas(previous: dict[tuple[str, str], tuple[Any, str]], products: lis
                 "seller": getattr(product, "seller", None) or "",
                 "previous_price": old,
                 "price": new,
+                "previous_price_normal": old_normal,
+                "price_normal": new_normal,
             }
         )
     return changes
@@ -70,19 +80,19 @@ def price_change_message(change: dict[str, Any]) -> tuple[str, str]:
         str(change.get("store") or ""), str(change.get("product_id") or "")
     ))
     subject = f"Cambió el precio: {name}"
-    body = "\n".join(
-        [
-            f"El precio {direction}.",
-            "",
-            name,
-            f"Tienda: {store}",
-            f"Precio anterior: {_money(old)}",
-            f"Precio nuevo: {_money(new)}",
-            "",
-            f"Ver ficha: {link}",
-        ]
-    )
-    return subject, body
+    lines = [
+        f"El precio de oferta {direction}.",
+        "",
+        name,
+        f"Tienda: {store}",
+        f"Precio oferta anterior: {_money(old)}",
+        f"Precio oferta nuevo: {_money(new)}",
+    ]
+    normal = _as_int(change.get("price_normal"))
+    if normal and normal > new:
+        lines.append(f"Precio normal: {_money(normal)}")
+    lines.extend(["", f"Ver ficha: {link}"])
+    return subject, "\n".join(lines)
 
 
 def _recipient(repo: Any, alert: dict[str, Any]) -> str:
@@ -134,7 +144,10 @@ def notify_price_changes(repo: Any, changes: list[dict[str, Any]]) -> int:
         payload = {
             **change,
             "saving": max(0, int(change["previous_price"]) - int(change["price"])),
-            "message": f"El precio {direction.lower()} de {_money(change['previous_price'])} a {_money(change['price'])}.",
+            "message": (
+                f"El precio de oferta {direction.lower()} de "
+                f"{_money(change['previous_price'])} a {_money(change['price'])}."
+            ),
             "extra": {
                 "product_id": change.get("product_id"),
                 "store_title": store_name,
@@ -170,14 +183,29 @@ def notify_price_changes(repo: Any, changes: list[dict[str, Any]]) -> int:
                     return False
 
             email = _recipient(repo, alert)
-            if not email:
-                print("Alerta de precio: la cuenta no tiene correo; no se envía.")
+            user = {}
+            if user_id and hasattr(repo, "find_user_by_id"):
+                try:
+                    user = repo.find_user_by_id(user_id) or {}
+                except Exception:
+                    user = {}
+            if str(user.get("status") or alert.get("status") or "approved") != "approved":
                 continue
-            # Enviar por email y webhook/Telegram si están configurados.
+            # Correo opcional: push/Telegram siguen aunque la cuenta no tenga email.
             try:
-                if email_enabled and claim("email") and send_email(email, subject, body, **send_kwargs):
+                if (
+                    email
+                    and email_enabled
+                    and claim("email")
+                    and send_email(email, subject, body, **send_kwargs)
+                ):
                     sent += 1
                     print(f"Correo de alerta de precio enviado ({change['store']} {change['product_id']}).")
+                elif email_enabled and not email:
+                    print(
+                        f"Alerta de precio: sin correo en {user_id or 'cuenta'}; "
+                        "se omite email y se intentan push/Telegram."
+                    )
             except Exception:
                 pass
             try:
@@ -195,14 +223,13 @@ def notify_price_changes(repo: Any, changes: list[dict[str, Any]]) -> int:
             try:
                 from retail.batch.alerts import send_to_user
 
-                if claim("telegram") and send_to_user(repo.find_user_by_id(user_id) or {}, body, image_url=image_url):
+                if claim("telegram") and send_to_user(user, body, image_url=image_url):
                     sent += 1
             except Exception:
                 pass
             try:
                 from retail.web_push import send_user_push
 
-                user = repo.find_user_by_id(user_id) or {}
                 prefs = user.get("notification_preferences") or {}
                 push_payload = {**payload, "product_image_url": original_image}
                 if (
@@ -213,6 +240,7 @@ def notify_price_changes(repo: Any, changes: list[dict[str, Any]]) -> int:
                     and send_user_push(user, push_payload, repo=repo, tag=f"{change['store']}:{change['product_id']}")
                 ):
                     sent += 1
+                    print(f"Push de alerta de precio enviado ({change['store']} {change['product_id']}).")
             except Exception:
                 pass
     if sent:
