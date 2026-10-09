@@ -357,9 +357,12 @@
       esperar: "Esperar",
       observar: "Observar",
     }[key] || "Observar");
-    const modeHint = String(row?.forecast_mode || advice.forecast_mode || "") === "cyber_event"
-      ? "Pronóstico Cyber del evento (serie densa). "
-      : "";
+    const forecastMode = String(row?.forecast_mode || advice.forecast_mode || "");
+    const modeHint = forecastMode === "cyber_future"
+      ? "Patrón para próximo Cyber (no es el evento en curso). "
+      : (forecastMode === "cyber_event" || forecastMode === "cyber_event_light")
+        ? "Pronóstico Cyber del evento en curso. "
+        : "";
     const reason = `${modeHint}${String(advice.reason || "")}`.trim();
     const chip = `<span class="cyber-advice-chip ${escapeHtml(key)}" title="${escapeHtml(reason)}">${escapeHtml(label)}</span>`;
     if (!evoHref) return `<td>${chip}</td>`;

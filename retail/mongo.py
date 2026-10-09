@@ -2138,9 +2138,12 @@ class ProductRepository:
                 for item in page_items
                 if item.get("store") and item.get("product_id")
             ]
+            from retail.offer_forecast_signal import CYBER_FORECAST_MODELS
+
+            signal_models = ["timesfm", *sorted(CYBER_FORECAST_MODELS)]
             forecasts = list(
                 self.forecasts.find(
-                    {"forecast_key": {"$in": keys}, "model": "timesfm"},
+                    {"forecast_key": {"$in": keys}, "model": {"$in": signal_models}},
                     {
                         "_id": 0, "forecast_key": 1, "model": 1, "horizon": 1,
                         "point_forecast": 1, "quantiles": 1, "metadata": 1, "generated_at": 1,
@@ -2300,8 +2303,11 @@ class ProductRepository:
                 f"{str(item.get('store') or '').strip().lower()}:{str(item.get('product_id') or '').strip()}"
                 for item in page_items
             ]
+            from retail.offer_forecast_signal import CYBER_FORECAST_MODELS
+
+            signal_models = ["timesfm", *sorted(CYBER_FORECAST_MODELS)]
             forecasts = list(self.forecasts.find(
-                {"forecast_key": {"$in": keys}, "model": "timesfm"},
+                {"forecast_key": {"$in": keys}, "model": {"$in": signal_models}},
                 {"_id": 0, "forecast_key": 1, "model": 1, "horizon": 1,
                  "point_forecast": 1, "quantiles": 1, "metadata": 1, "generated_at": 1},
             ).sort("generated_at", -1))

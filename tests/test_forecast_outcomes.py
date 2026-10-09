@@ -5,9 +5,12 @@ from types import SimpleNamespace
 from fastapi.testclient import TestClient
 
 from retail.forecast_outcomes import (
+    STATUS_EXPIRED,
     build_outcome_snapshot,
+    counts_for_quality_metrics,
     evaluate_outcome_document,
     list_outcomes,
+    mode_group,
     outcome_stats,
     snapshot_forecast_docs,
 )
@@ -81,6 +84,47 @@ def test_evaluate_pending_tracks_eta_and_elapsed():
     assert updates["status"] == "pending"
     assert updates["days_elapsed"] == 1
     assert updates["eta_days"] >= 0
+
+
+def test_stable_trend_does_not_hit_on_small_move():
+    snap = build_outcome_snapshot(
+        _forecast_doc(
+            point_forecast=[100000, 100000, 100000, 100000, 100000],
+            quantiles={"0.1": [90000] * 5, "0.9": [95000] * 5},
+        ),
+        baseline_price=100000,
+    )
+    assert snap is not None
+    assert snap["trend"] == "stable"
+    gen = snap["generated_at"]
+    history = [{"price": 99000, "scraped_at": (gen + timedelta(days=1)).isoformat()}]
+    updates = evaluate_outcome_document(snap, history, now=gen + timedelta(days=2))
+    assert updates["status"] == "pending"
+    assert updates.get("hit_reason") in (None, "")
+
+
+def test_expired_when_horizon_ends_without_prices():
+    snap = build_outcome_snapshot(_forecast_doc(horizon=3), baseline_price=100000)
+    gen = snap["generated_at"]
+    updates = evaluate_outcome_document(snap, [], now=gen + timedelta(days=5))
+    assert updates["status"] == STATUS_EXPIRED
+
+
+def test_baseline_fallback_metadata_on_snapshot():
+    doc = _forecast_doc(
+        model="last_value_baseline",
+        metadata={"inference_fallback": True, "observation_count": 40},
+    )
+    snap = build_outcome_snapshot(doc, baseline_price=100000)
+    assert snap is not None
+    assert snap["inference_fallback"] is True
+    assert counts_for_quality_metrics({**snap, "status": "miss"}) is False
+
+
+def test_mode_group_helpers():
+    assert mode_group(mode="cyber_event", model="timesfm") == "cyber_event"
+    assert mode_group(model="cyber_future_transfer") == "cyber_future"
+    assert mode_group(mode="daily", model="timesfm") == "daily"
 
 
 def test_directional_hit_without_tight_range():
@@ -198,12 +242,18 @@ def test_list_and_stats_helpers():
             status = query.get("status")
             return sum(1 for row in rows if row.get("status") == status)
 
-        def find(self, query=None, *_a, **_k):
+        def find(self, query=None, projection=None, *_a, **_k):
             query = query or {}
             items = rows
             if query.get("status"):
                 items = [row for row in rows if row["status"] == query["status"]]
-            return Cursor([{**row} for row in items])
+            projected = []
+            for row in items:
+                if not projection:
+                    projected.append({**row})
+                    continue
+                projected.append({key: row.get(key) for key in projection if key in row})
+            return Cursor(projected)
 
         def aggregate(self, *_a, **_k):
             return [
@@ -228,7 +278,17 @@ def test_list_and_stats_helpers():
         def distinct(self, *_a, **_k):
             return []
 
-    repo = SimpleNamespace(forecast_outcomes=Coll(), db=None)
+    repo = SimpleNamespace(
+        forecast_outcomes=Coll(),
+        db=None,
+        get_app_setting=lambda *_a, **_k: {
+            "model": "timesfm",
+            "evaluated_series": 40,
+            "improvement_vs_baseline_percent": 8,
+            "direction_accuracy": 0.6,
+            "validated_at": "2026-10-01T12:00:00+00:00",
+        },
+    )
     listed = list_outcomes(repo, page=1, size=40)
     assert listed["total"] == 3
     assert len(listed["items"]) == 3
@@ -236,8 +296,10 @@ def test_list_and_stats_helpers():
     assert stats["total"] == 3
     assert stats["by_status"]["hit"] == 1
     assert stats["hit_rate"] == 50.0
+    assert stats["timesfm_hit_rate"] == 50.0
     assert stats["median_days_to_hit"] == 2
     assert any(item["model"] == "timesfm" for item in stats["by_model"])
+    assert stats["timesfm_validation"]["evaluated_series"] == 40
 
 
 def test_pronosticos_page_requires_admin():
@@ -252,7 +314,8 @@ def test_pronosticos_page_assets_and_nav_links():
     js = Path("retail/web/static/pronosticos.js").read_text(encoding="utf-8")
     assert "Cumplimiento" in html
     assert "outcome-stats" in html
-    assert "pronosticos.js?v=1" in html
+    assert "pronosticos.js?v=2" in html
+    assert "outcome-validation" in html
     assert "/api/admin/forecast-outcomes" in js
     assert "días a cumplir" in js
     index = Path("retail/web/static/index.html").read_text(encoding="utf-8")

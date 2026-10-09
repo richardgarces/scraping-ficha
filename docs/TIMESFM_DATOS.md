@@ -84,7 +84,30 @@ revisa cada día los snapshots `pending` contra el `price_history` real:
 - **Pendiente:** aún quedan días; la ETA estima cuándo debería cumplirse.
 
 La página admin `/pronosticos` lista todos los snapshots, muestra cumplimiento,
-ETA/días a cumplir y estadísticas (hit rate, mediana de días, desglose por modelo).
+ETA/días a cumplir, precios reales recientes vs rango esperado y estadísticas:
+
+- **Hit rate TimesFM** (cabecera): solo modelo `timesfm`, excluye
+  `last_value_baseline` / `inference_fallback` y aciertos por estabilidad ±2%.
+- **Hit rate calidad**: mismos criterios sobre todos los modelos excepto
+  `simulated` y fallbacks de inferencia.
+- Desglose por **modo** (`daily`, `cyber_event`, `cyber_future`) y por modelo.
+- Bloque **Validación TimesFM** (`app_settings.timesfm_validation`): series,
+  mejora % vs baseline, dirección, fecha y último error si el cron falló.
+
+**Validación (holdout MAE) ≠ cumplimiento (outcomes):** la validación reserva los
+últimos días y compara error medio contra repetir el último precio; los outcomes
+miden si el precio real entró al rango o movió ≥2% en la dirección pronosticada
+durante el horizonte en producción. Son métricas complementarias.
+
+Reglas de cumplimiento actualizadas:
+
+- **Miss:** hubo precios en el horizonte pero no hubo hit.
+- **Expired:** terminó el horizonte sin ninguna observación de precio.
+- **Stable:** ya no cuenta como hit quedarse dentro de ±2% del baseline; solo
+  aplica el criterio de rango (cuantiles o banda explícita).
+
+Los snapshots de `last_value_baseline` llevan `inference_fallback: true` cuando
+TimesFM falló en la generación.
 
 ## Alertas predictivas y validación
 
@@ -106,7 +129,9 @@ active la opción, no se envía ninguna alerta mientras la validación esté cer
 ## Señal complementaria en ofertas reales
 
 Las páginas de ofertas reales y superofertas pueden mostrar una señal experimental
-cuando existe un pronóstico TimesFM validado y generado durante las últimas 48 horas:
+cuando la validación está abierta y existe un pronóstico TimesFM (o Cyber del
+evento / patrón futuro si no hay TimesFM utilizable para ese producto) generado
+durante las últimas 48 horas:
 
 - **Caída excepcional:** el precio quedó bajo el límite inferior esperado.
 - **Precio sobre lo esperado:** el precio quedó sobre el límite superior esperado.
@@ -150,7 +175,9 @@ permite desactivar la optimización temporalmente.
 
 La generación diaria toma hasta 50 series por defecto (`FORECAST_SAMPLE`) y el
 plan admite seis horas de margen para que pequeñas variaciones en la duración del
-cron no conviertan una frecuencia diaria en una revisión cada dos días.
+cron no conviertan una frecuencia diaria en una revisión cada dos días. Si queda
+cupo, prioriza productos en **Siguiendo** (`watches` / `price_alerts`) y claves
+con pronóstico de más de **48 h** antes del barrido genérico del catálogo.
 
 Los patrones detectados se guardan por producto en `price_patterns` y vencen si
 no se renuevan. Incluyen promociones por día de semana, meses históricamente bajos,

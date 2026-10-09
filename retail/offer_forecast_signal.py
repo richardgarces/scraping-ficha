@@ -8,6 +8,9 @@ from typing import Any
 from retail.forecast_presentation import forecast_summary
 
 MAX_FORECAST_AGE = timedelta(hours=48)
+CYBER_FORECAST_MODELS = frozenset(
+    {"cyber_event_dense", "cyber_event_trend", "cyber_future_transfer"}
+)
 
 
 def _date(value: Any) -> datetime | None:
@@ -23,22 +26,7 @@ def _date(value: Any) -> datetime | None:
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
 
 
-def offer_forecast_signal(
-    forecast: dict[str, Any],
-    current_price: Any,
-    *,
-    now: datetime | None = None,
-) -> dict[str, Any] | None:
-    """Compara la oferta actual con el rango TimesFM sin reclasificarla."""
-    if str(forecast.get("model") or "").lower() != "timesfm":
-        return None
-    generated = _date(forecast.get("generated_at") or forecast.get("created_at"))
-    current_time = now or datetime.now(timezone.utc)
-    if generated is None or generated > current_time + timedelta(minutes=10):
-        return None
-    if current_time - generated > MAX_FORECAST_AGE:
-        return None
-
+def _trim_forecast_item(forecast: dict[str, Any]) -> dict[str, Any]:
     item = dict(forecast)
     item["horizon"] = min(7, max(1, int(forecast.get("horizon") or 7)))
     item["point_forecast"] = list(forecast.get("point_forecast") or [])[:7]
@@ -48,8 +36,31 @@ def offer_forecast_signal(
             key: list(values)[:7] if isinstance(values, (list, tuple)) else values
             for key, values in quantiles.items()
         }
+    return item
+
+
+def offer_forecast_signal(
+    forecast: dict[str, Any],
+    current_price: Any,
+    *,
+    now: datetime | None = None,
+) -> dict[str, Any] | None:
+    """Compara la oferta actual con el rango del pronóstico sin reclasificarla."""
+    model = str(forecast.get("model") or "").lower()
+    if model != "timesfm" and model not in CYBER_FORECAST_MODELS:
+        return None
+    generated = _date(forecast.get("generated_at") or forecast.get("created_at"))
+    current_time = now or datetime.now(timezone.utc)
+    if generated is None or generated > current_time + timedelta(minutes=10):
+        return None
+    if current_time - generated > MAX_FORECAST_AGE:
+        return None
+
+    item = _trim_forecast_item(forecast)
     summary = forecast_summary(item, current_price)
-    if not summary or not summary["range_has_uncertainty"]:
+    if not summary:
+        return None
+    if model == "timesfm" and not summary["range_has_uncertainty"]:
         return None
     try:
         current = float(current_price)
@@ -62,25 +73,26 @@ def offer_forecast_signal(
         return None
 
     difference = round((current - expected) * 100 / expected, 1)
+    source_label = summary.get("mode_label") or ("TimesFM" if model == "timesfm" else "Pronóstico Cyber")
     if current < low:
         status = "exceptional"
         label = "Caída excepcional"
         explanation = (
-            "El precio actual está incluso por debajo del rango que TimesFM esperaba. "
+            f"El precio actual está incluso por debajo del rango que {source_label} esperaba. "
             "Es una señal adicional de que la oferta podría ser especialmente conveniente."
         )
     elif current > high:
         status = "above_expected"
         label = "Precio sobre lo esperado"
         explanation = (
-            "Aunque aparece como oferta, el precio actual sigue sobre el rango esperado por TimesFM. "
+            f"Aunque aparece como oferta, el precio actual sigue sobre el rango esperado por {source_label}. "
             "Conviene revisar el historial y las otras tiendas antes de comprar."
         )
     else:
         status = "within_expected"
         label = "Dentro del rango esperado"
         explanation = (
-            "El precio actual está dentro de lo que TimesFM considera esperable. "
+            f"El precio actual está dentro de lo que {source_label} considera esperable. "
             "La oferta se sostiene por el análisis histórico y entre tiendas, sin una señal excepcional del modelo."
         )
     return {
@@ -95,6 +107,8 @@ def offer_forecast_signal(
         "confidence": summary["confidence"],
         "generated_at": summary["generated_at"],
         "experimental": True,
+        "forecast_model": model,
+        "mode_label": summary.get("mode_label"),
     }
 
 
@@ -105,22 +119,40 @@ def attach_offer_forecast_signals(
     now: datetime | None = None,
 ) -> int:
     """Adjunta la última señal disponible y deja intacto el análisis original."""
-    latest: dict[str, dict[str, Any]] = {}
+    prefer = (
+        "timesfm",
+        "cyber_event_dense",
+        "cyber_event_trend",
+        "cyber_future_transfer",
+    )
+    by_key: dict[str, list[dict[str, Any]]] = {}
     for forecast in forecasts:
         key = str(forecast.get("forecast_key") or "")
         if not key:
             continue
-        current = latest.get(key)
-        if current is None or (_date(forecast.get("generated_at")) or datetime.min.replace(tzinfo=timezone.utc)) > (
-            _date(current.get("generated_at")) or datetime.min.replace(tzinfo=timezone.utc)
-        ):
-            latest[key] = forecast
+        by_key.setdefault(key, []).append(forecast)
 
     attached = 0
     for card in cards:
         key = f"{str(card.get('store') or '').strip().lower()}:{str(card.get('product_id') or '').strip()}"
-        forecast = latest.get(key)
-        signal = offer_forecast_signal(forecast, card.get("price"), now=now) if forecast else None
+        candidates = by_key.get(key) or []
+        if not candidates:
+            continue
+        candidates.sort(
+            key=lambda row: (
+                prefer.index(str(row.get("model") or ""))
+                if str(row.get("model") or "") in prefer
+                else 99,
+                -(
+                    _date(row.get("generated_at")) or datetime.min.replace(tzinfo=timezone.utc)
+                ).timestamp(),
+            ),
+        )
+        signal = None
+        for forecast in candidates:
+            signal = offer_forecast_signal(forecast, card.get("price"), now=now)
+            if signal:
+                break
         if signal:
             card["timesfm_signal"] = signal
             attached += 1

@@ -4,9 +4,15 @@ Criterio de cumplimiento (por defecto):
 - Hit si, dentro del horizonte, algún precio diario observado cae dentro del
   rango pronosticado [range_low, range_high] (banda ±2% si el rango colapsa).
 - Alternativa direccional: trend down/up con movimiento ≥2% en esa dirección.
-- Miss cuando el horizonte termina sin hit.
+- Serie ``stable``: no cuenta un precio dentro de ±2% del baseline como hit;
+  solo aplica el criterio de rango (cuantiles o banda explícita).
+- Miss cuando el horizonte termina con observaciones pero sin hit.
+- Expired cuando el horizonte termina sin ningún precio en el periodo.
 - ETA mientras pending: día del horizonte donde el point_forecast primero
   alcanza la zona favorable (o días restantes del horizonte).
+
+Las métricas de hit rate para decisiones excluyen ``simulated``,
+``last_value_baseline`` / ``inference_fallback`` y hits por estabilidad ±2%.
 """
 
 from __future__ import annotations
@@ -27,6 +33,42 @@ STATUS_EXPIRED = "expired"
 
 _OPEN = {STATUS_PENDING}
 _TREND_PCT = 0.02
+
+MODELS_EXCLUDED_FROM_QUALITY = frozenset({"simulated", "last_value_baseline"})
+CYBER_EVENT_MODELS = frozenset({"cyber_event_dense", "cyber_event_trend"})
+CYBER_FUTURE_MODELS = frozenset({"cyber_future_transfer"})
+
+HIT_REASON_LABELS = {
+    "range": "En rango",
+    "direction_down": "Bajó como se esperaba",
+    "direction_up": "Subió como se esperaba",
+    "stable": "Precio estable (±2%)",
+}
+
+
+def mode_group(*, mode: str | None = None, model: str | None = None) -> str:
+    resolved_mode = str(mode or "").strip().lower()
+    resolved_model = str(model or "").strip().lower()
+    if resolved_mode == "cyber_future" or resolved_model in CYBER_FUTURE_MODELS:
+        return "cyber_future"
+    if resolved_mode == "cyber_event" or resolved_model in CYBER_EVENT_MODELS:
+        return "cyber_event"
+    return "daily"
+
+
+def counts_for_quality_metrics(outcome: dict[str, Any]) -> bool:
+    """True si el snapshot debe entrar al hit rate usado para decisiones."""
+    status = str(outcome.get("status") or "")
+    if status not in {STATUS_HIT, STATUS_MISS}:
+        return False
+    model = str(outcome.get("model") or "").lower()
+    if model in MODELS_EXCLUDED_FROM_QUALITY:
+        return False
+    if outcome.get("inference_fallback"):
+        return False
+    if str(outcome.get("hit_reason") or "") == "stable":
+        return False
+    return True
 
 
 def _now() -> datetime:
@@ -111,6 +153,11 @@ def build_outcome_snapshot(
         horizon=ident["horizon"],
     )
 
+    metadata = forecast_doc.get("metadata") if isinstance(forecast_doc.get("metadata"), dict) else {}
+    inference_fallback = ident["model"] == "last_value_baseline" or bool(
+        metadata.get("inference_fallback") or metadata.get("timesfm_failed")
+    )
+
     return {
         "forecast_key": ident["forecast_key"],
         "store": str(forecast_doc.get("store") or "").strip().lower(),
@@ -125,10 +172,13 @@ def build_outcome_snapshot(
         "expected_price": summary.get("expected_price"),
         "range_low": round(low) if low is not None else None,
         "range_high": round(high) if high is not None else None,
+        "range_has_uncertainty": bool(summary.get("range_has_uncertainty")),
         "trend": summary.get("trend"),
         "mode": summary.get("mode"),
         "mode_label": summary.get("mode_label"),
+        "mode_group": mode_group(mode=summary.get("mode"), model=ident["model"]),
         "buy_advice": summary.get("buy_advice"),
+        "inference_fallback": inference_fallback,
         "status": STATUS_PENDING,
         "checked_at": None,
         "days_elapsed": 0,
@@ -216,8 +266,6 @@ def _price_hits(
         return True, "direction_down"
     if baseline and trend == "up" and price >= baseline * (1 + _TREND_PCT):
         return True, "direction_up"
-    if baseline and trend == "stable" and abs(price - baseline) / baseline <= _TREND_PCT:
-        return True, "stable"
     return False, ""
 
 
@@ -271,7 +319,10 @@ def evaluate_outcome_document(
         status = STATUS_HIT
         days_to_hit = hit_day
     elif days_elapsed >= horizon:
-        status = STATUS_MISS
+        if actual:
+            status = STATUS_MISS
+        else:
+            status = STATUS_EXPIRED
         days_to_hit = None
     else:
         status = STATUS_PENDING
@@ -397,17 +448,17 @@ def backfill_outcomes_from_forecasts(repo: Any, *, limit: int = 5000) -> dict[st
     return {"scanned": len(docs), "inserted": snapshot_forecast_docs(repo, docs)}
 
 
-def evaluate_open_outcomes(repo: Any, *, limit: int = 2000, now: datetime | None = None) -> dict[str, int]:
+def evaluate_open_outcomes(repo: Any, *, limit: int = 5000, now: datetime | None = None) -> dict[str, int]:
     """Evalúa outcomes pending (y rechequea hits recientes no cerrados no aplica)."""
     coll = outcomes_collection(repo)
     if coll is None:
-        return {"checked": 0, "hit": 0, "miss": 0, "pending": 0}
+        return {"checked": 0, "hit": 0, "miss": 0, "pending": 0, "expired": 0}
     ensure_forecast_outcome_indexes(coll)
     moment = now or _now()
     cursor = coll.find({"status": STATUS_PENDING}).sort("generated_at", 1).limit(limit)
     rows = list(cursor)
     if not rows:
-        return {"checked": 0, "hit": 0, "miss": 0, "pending": 0}
+        return {"checked": 0, "hit": 0, "miss": 0, "pending": 0, "expired": 0}
 
     keys: list[tuple[str, str]] = []
     for row in rows:
@@ -417,7 +468,7 @@ def evaluate_open_outcomes(repo: Any, *, limit: int = 2000, now: datetime | None
             keys.append((store, product_id))
     histories = repo.histories(keys, limit=120) if hasattr(repo, "histories") else {}
 
-    stats = {"checked": 0, "hit": 0, "miss": 0, "pending": 0}
+    stats = {"checked": 0, "hit": 0, "miss": 0, "pending": 0, "expired": 0}
     for row in rows:
         store = str(row.get("store") or "")
         product_id = str(row.get("product_id") or "")
@@ -483,15 +534,46 @@ def list_outcomes(
     return {"items": items, "total": total, "page": page, "size": size}
 
 
+def _validation_bridge(repo: Any) -> dict[str, Any]:
+    from retail.predictive_alerts import VALIDATION_KEY, predictive_validation_status
+
+    raw = repo.get_app_setting(VALIDATION_KEY) if hasattr(repo, "get_app_setting") else None
+    data = raw if isinstance(raw, dict) else {}
+    status = predictive_validation_status(repo) if hasattr(repo, "get_app_setting") else {
+        "enabled": False,
+        "reason": "Sin repositorio",
+        "evaluated_series": 0,
+        "improvement_vs_baseline_percent": 0,
+        "direction_accuracy": 0,
+        "validated_at": None,
+    }
+    return {
+        "open": bool(status.get("enabled")),
+        "reason": status.get("reason"),
+        "evaluated_series": status.get("evaluated_series"),
+        "improvement_vs_baseline_percent": status.get("improvement_vs_baseline_percent"),
+        "direction_accuracy": status.get("direction_accuracy"),
+        "validated_at": status.get("validated_at") or data.get("validated_at"),
+        "last_error": data.get("last_error") or data.get("error"),
+        "model_mae": data.get("model_mae"),
+        "baseline_mae": data.get("baseline_mae"),
+    }
+
+
 def outcome_stats(repo: Any) -> dict[str, Any]:
     coll = outcomes_collection(repo)
     empty = {
         "total": 0,
         "by_status": {},
         "hit_rate": None,
+        "quality_hit_rate": None,
+        "timesfm_hit_rate": None,
         "by_model": [],
+        "by_mode_group": [],
         "median_days_to_hit": None,
+        "median_error_pct": None,
         "pending_eta_median": None,
+        "timesfm_validation": _validation_bridge(repo) if repo is not None else {},
     }
     if coll is None:
         return empty
@@ -511,6 +593,7 @@ def outcome_stats(repo: Any) -> dict[str, Any]:
                 "total": {"$sum": 1},
                 "hit": {"$sum": {"$cond": [{"$eq": ["$status", STATUS_HIT]}, 1, 0]}},
                 "miss": {"$sum": {"$cond": [{"$eq": ["$status", STATUS_MISS]}, 1, 0]}},
+                "expired": {"$sum": {"$cond": [{"$eq": ["$status", STATUS_EXPIRED]}, 1, 0]}},
                 "pending": {"$sum": {"$cond": [{"$eq": ["$status", STATUS_PENDING]}, 1, 0]}},
                 "days": {"$push": "$days_to_hit"},
             }},
@@ -525,34 +608,100 @@ def outcome_stats(repo: Any) -> dict[str, Any]:
                 "total": int(row.get("total") or 0),
                 "hit": int(row.get("hit") or 0),
                 "miss": int(row.get("miss") or 0),
+                "expired": int(row.get("expired") or 0),
                 "pending": int(row.get("pending") or 0),
                 "hit_rate": round(int(row.get("hit") or 0) * 100 / model_decided, 1) if model_decided else None,
                 "median_days_to_hit": round(median(days), 1) if days else None,
             }
         )
 
-    hit_days = []
-    for row in coll.find({"status": STATUS_HIT, "days_to_hit": {"$ne": None}}, {"days_to_hit": 1}):
-        try:
-            hit_days.append(int(row["days_to_hit"]))
-        except (TypeError, ValueError, KeyError):
-            pass
-    pending_etas = []
-    for row in coll.find({"status": STATUS_PENDING}, {"eta_days": 1}):
-        try:
-            if row.get("eta_days") is not None:
+    mode_buckets: dict[str, dict[str, Any]] = {}
+    quality_hit = quality_miss = 0
+    timesfm_hit = timesfm_miss = 0
+    hit_days: list[int] = []
+    error_pcts: list[float] = []
+    pending_etas: list[int] = []
+
+    projection = {
+        "status": 1,
+        "model": 1,
+        "mode": 1,
+        "mode_group": 1,
+        "hit_reason": 1,
+        "inference_fallback": 1,
+        "days_to_hit": 1,
+        "eta_days": 1,
+        "error_pct": 1,
+    }
+    for row in coll.find({}, projection):
+        group = str(row.get("mode_group") or mode_group(mode=row.get("mode"), model=row.get("model")))
+        bucket = mode_buckets.setdefault(
+            group,
+            {"mode_group": group, "total": 0, "hit": 0, "miss": 0, "expired": 0, "pending": 0, "days": []},
+        )
+        bucket["total"] += 1
+        status = str(row.get("status") or "")
+        if status in bucket:
+            bucket[status] += 1
+        if status == STATUS_HIT and row.get("days_to_hit") is not None:
+            try:
+                hit_days.append(int(row["days_to_hit"]))
+                bucket["days"].append(int(row["days_to_hit"]))
+            except (TypeError, ValueError):
+                pass
+        if status == STATUS_PENDING and row.get("eta_days") is not None:
+            try:
                 pending_etas.append(int(row["eta_days"]))
-        except (TypeError, ValueError):
-            pass
+            except (TypeError, ValueError):
+                pass
+        if row.get("error_pct") is not None:
+            try:
+                error_pcts.append(float(row["error_pct"]))
+            except (TypeError, ValueError):
+                pass
+        if not counts_for_quality_metrics(row):
+            continue
+        if status == STATUS_HIT:
+            quality_hit += 1
+            if str(row.get("model") or "").lower() == "timesfm":
+                timesfm_hit += 1
+        elif status == STATUS_MISS:
+            quality_miss += 1
+            if str(row.get("model") or "").lower() == "timesfm":
+                timesfm_miss += 1
+
+    by_mode_group = []
+    for group in ("daily", "cyber_event", "cyber_future"):
+        bucket = mode_buckets.get(group)
+        if not bucket:
+            continue
+        group_decided = int(bucket["hit"]) + int(bucket["miss"])
+        days = [int(d) for d in bucket.get("days") or []]
+        by_mode_group.append(
+            {
+                **bucket,
+                "hit_rate": round(bucket["hit"] * 100 / group_decided, 1) if group_decided else None,
+                "median_days_to_hit": round(median(days), 1) if days else None,
+            }
+        )
+
+    quality_decided = quality_hit + quality_miss
+    timesfm_decided = timesfm_hit + timesfm_miss
 
     return {
         "total": total,
         "by_status": by_status,
         "hit_rate": hit_rate,
+        "quality_hit_rate": round(quality_hit * 100 / quality_decided, 1) if quality_decided else None,
+        "timesfm_hit_rate": round(timesfm_hit * 100 / timesfm_decided, 1) if timesfm_decided else None,
         "by_model": by_model,
+        "by_mode_group": by_mode_group,
         "median_days_to_hit": round(median(hit_days), 1) if hit_days else None,
+        "median_error_pct": round(median(error_pcts), 1) if error_pcts else None,
         "pending_eta_median": round(median(pending_etas), 1) if pending_etas else None,
         "decided": decided,
+        "quality_decided": quality_decided,
+        "timesfm_validation": _validation_bridge(repo),
     }
 
 

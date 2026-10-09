@@ -65,6 +65,24 @@
         <button type="button" class="secondary" id="refresh-outcomes">Actualizar evaluación</button>
       </div>
       <div id="outcome-stats" class="outcome-stats" aria-live="polite"></div>
+      <div id="outcome-validation" class="outcome-validation summary" hidden aria-live="polite"></div>
+      <div id="outcome-mode-stats" class="table-wrap" hidden>
+        <table class="drops-table">
+          <thead>
+            <tr>
+              <th>Modo</th>
+              <th>Total</th>
+              <th>Cumplió</th>
+              <th>No</th>
+              <th>Vencido</th>
+              <th>Pendiente</th>
+              <th>Hit rate</th>
+              <th>Mediana días</th>
+            </tr>
+          </thead>
+          <tbody id="outcome-mode-body"></tbody>
+        </table>
+      </div>
       <div id="outcome-model-stats" class="table-wrap" hidden>
         <table class="drops-table">
           <thead>
@@ -100,6 +118,7 @@
             <option value="pending">Pendiente</option>
             <option value="hit">Cumplió</option>
             <option value="miss">No cumplió</option>
+            <option value="expired">Vencido (sin datos)</option>
           </select>
         </label>
         <label>Modelo
@@ -128,10 +147,11 @@
               <th>Cumplimiento</th>
               <th>ETA / días</th>
               <th>Rango</th>
+              <th>Precios reales</th>
             </tr>
           </thead>
           <tbody id="outcomes-body">
-            <tr><td colspan="7" class="muted">Cargando…</td></tr>
+            <tr><td colspan="8" class="muted">Cargando…</td></tr>
           </tbody>
         </table>
       </div>
@@ -145,6 +165,6 @@
   </main>
   <script src="/static/prices.js?v=36"></script>
   <script src="/static/pagination.js?v=1"></script>
-  <script src="/static/pronosticos.js?v=1"></script>
+  <script src="/static/pronosticos.js?v=2"></script>
 </body>
 </html>

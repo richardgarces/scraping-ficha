@@ -193,6 +193,51 @@ def read_products_from_mongo(uri, dbname, collection_name, limit, min_history_da
                     break
     except Exception:
         pass
+    # Siguiendo (watches / price_alerts) y pronósticos vencidos (>48 h) antes del barrido genérico.
+    try:
+        stale_cutoff = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=48)
+        stale_keys: list[tuple[str, str]] = []
+        for row in db["forecasts"].find(
+            {"model": {"$nin": ["simulated"]}, "generated_at": {"$lt": stale_cutoff}},
+            {"store": 1, "product_id": 1, "forecast_key": 1},
+        ).sort("generated_at", 1).limit(max(limit * 3, 150)):
+            store = str(row.get("store") or "").strip().lower()
+            product_id = str(row.get("product_id") or "").strip()
+            if not store or not product_id:
+                key = str(row.get("forecast_key") or "")
+                if ":" in key:
+                    store, product_id = key.split(":", 1)
+                    store, product_id = store.strip().lower(), product_id.strip()
+            if store and product_id:
+                stale_keys.append((store, product_id))
+        watch_keys: list[tuple[str, str]] = []
+        for watch in db["watches"].find(
+            {"active": {"$ne": False}},
+            {"store": 1, "product_id": 1},
+        ).limit(500):
+            store = str(watch.get("store") or "").strip().lower()
+            product_id = str(watch.get("product_id") or "").strip()
+            if store and product_id:
+                watch_keys.append((store, product_id))
+        for alert in db["price_alerts"].find({"active": True}, {"store": 1, "product_id": 1}).limit(500):
+            store = str(alert.get("store") or "").strip().lower()
+            product_id = str(alert.get("product_id") or "").strip()
+            if store and product_id:
+                watch_keys.append((store, product_id))
+        priority_keys = stale_keys + watch_keys
+        for store, product_id in priority_keys:
+            key = (store, product_id)
+            if key in seen_keys:
+                continue
+            item = col.find_one({**query, "store": store, "product_id": product_id}, projection)
+            if not item:
+                continue
+            seen_keys.add(key)
+            docs.append(item)
+            if len(docs) >= candidate_cap:
+                break
+    except Exception as exc:
+        print("watch/stale forecast priority skipped:", exc)
     if len(docs) < candidate_cap:
         for item in col.find(query, projection).limit(candidate_cap):
             key = (
@@ -465,6 +510,7 @@ def generate_forecasts(*, mongo_uri: str | None = None, mongo_db: str = "scrapin
     else:
         forecasts = simulate_forecast(series_list, horizon)
 
+    inference_fallback = model_used == "last_value_baseline"
     now = datetime.datetime.utcnow()
     docs: list[dict] = []
     for i, product in enumerate(products):
@@ -479,6 +525,9 @@ def generate_forecasts(*, mongo_uri: str | None = None, mongo_db: str = "scrapin
             "minimum_history_days": min_history_days,
             "one_observation_per_day": True,
         }
+        if inference_fallback:
+            metadata["inference_fallback"] = True
+            metadata["timesfm_failed"] = True
         if product.get("cyber_observation_count"):
             metadata["cyber_observation_count"] = product["cyber_observation_count"]
             metadata["cyber_list_ids"] = product.get("cyber_list_ids") or []

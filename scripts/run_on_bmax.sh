@@ -79,8 +79,14 @@ fi
 
 if [ "${FORECAST_SIMULATE:-0}" != "1" ]; then
   echo "Validating TimesFM against the last-price baseline…"
+  set +e
   PYTHONPATH="$ROOT_DIR" MONGODB_URI="$MONGODB_URI" MONGODB_DB="$MONGODB_DB" \
-    "$VENV_DIR/bin/python3" "$ROOT_DIR/scripts/validate_timesfm.py" || true
+    "$VENV_DIR/bin/python3" "$ROOT_DIR/scripts/validate_timesfm.py"
+  VALIDATION_EXIT=$?
+  set -e
+  if [ "$VALIDATION_EXIT" -ne 0 ]; then
+    echo "WARN: TimesFM validation failed (exit ${VALIDATION_EXIT}); last_error saved in app_settings.timesfm_validation. Continuing with forecast generation." >&2
+  fi
 fi
 
 # El modo real escribe directo en Mongo. Solo la simulación produce un JSON.

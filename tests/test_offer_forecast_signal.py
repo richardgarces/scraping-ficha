@@ -44,6 +44,27 @@ def test_stale_or_non_timesfm_forecast_is_not_used():
     assert offer_forecast_signal(forecast(quantiles={}), 80, now=NOW) is None
 
 
+def test_cyber_forecast_can_signal_when_timesfm_missing():
+    cyber = forecast(
+        model="cyber_event_dense",
+        metadata={"observation_count": 25, "mode": "cyber_event", "dense": True},
+        quantiles={},
+    )
+    signal = offer_forecast_signal(cyber, 80, now=NOW)
+    assert signal is not None
+    assert signal["forecast_model"] == "cyber_event_dense"
+
+
+def test_attach_prefers_timesfm_then_cyber():
+    card = {"store": "lider", "product_id": "SKU-1", "price": 80}
+    forecasts = [
+        forecast(),
+        forecast(model="cyber_event_dense", metadata={"observation_count": 20, "mode": "cyber_event"}),
+    ]
+    attach_offer_forecast_signals([card], forecasts, now=NOW)
+    assert card["timesfm_signal"]["forecast_model"] == "timesfm"
+
+
 def test_attaching_signal_preserves_existing_offer_analysis():
     card = {
         "store": "lider", "product_id": "SKU-1", "price": 80,

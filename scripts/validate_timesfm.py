@@ -32,15 +32,20 @@ def main() -> None:
         actuals.append(product["series"][-holdout:])
         if len(contexts) >= sample:
             break
-    result = {"model": "timesfm", "evaluated_series": 0, "error": None}
+    result = {"model": "timesfm", "evaluated_series": 0, "error": None, "last_error": None}
     if contexts:
         try:
             predictions, _quantiles = forecast_with_timesfm3(contexts, holdout)
             result = validation_metrics(predictions, actuals, contexts)
+            result["last_error"] = None
         except Exception as exc:
-            result["error"] = str(exc)[:500]
+            message = str(exc)[:500]
+            result["error"] = message
+            result["last_error"] = message
     else:
-        result["error"] = "No hay productos con historial suficiente para validar."
+        message = "No hay productos con historial suficiente para validar."
+        result["error"] = message
+        result["last_error"] = message
     repo = ProductRepository()
     try:
         if not repo.ping():
@@ -49,6 +54,8 @@ def main() -> None:
     finally:
         repo.close()
     print(json.dumps(result, ensure_ascii=False, default=str))
+    if result.get("last_error"):
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":
