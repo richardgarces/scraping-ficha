@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#258fdf">
+  <title>Pronósticos</title>
+  <script>(function(){var m=localStorage.getItem("retail-theme");if(m==="day"||m==="night"){document.documentElement.dataset.theme=m;return;}var h=new Date().getHours();document.documentElement.dataset.theme=(h>=7&&h<19)?"day":"night";})();</script>
+  <link rel="stylesheet" href="/static/styles.css?v=96-outcomes">
+</head>
+<body>
+  <header class="top">
+    <div>
+      <p class="eyebrow">Retail Chile</p>
+      <h1>Pronósticos</h1>
+    </div>
+    <form class="desktop-quick-search" action="/catalogo" method="get" role="search">
+      <label class="desktop-search-field"><span class="sr-only">Buscar un producto</span><input name="q" type="search" placeholder="Busca un producto…"></label>
+      <label class="quick-search-toggle" title="Buscar solo en la base de datos"><input name="quick" type="checkbox" value="1" checked><span class="quick-search-long">Búsqueda rápida</span><span class="quick-search-short">Rápida</span></label>
+      <button type="submit" aria-label="Buscar">Buscar</button>
+    </form>
+    <nav class="nav">
+      <a href="/">Explorar</a>
+      <a href="/catalogo">Catálogo</a>
+      <a href="/hoy">Ofertas de hoy</a>
+      <a href="/reales">Ofertas reales</a>
+      <a href="/tiendas">Tiendas</a>
+      <details class="nav-menu" data-login>
+        <summary>Cuenta</summary>
+        <div class="nav-menu-list">
+          <a href="/entrar" data-login-mode="entrar">Entrar</a>
+          <a href="/entrar?modo=inscribir" data-login-mode="inscribir">Inscribirse</a>
+        </div>
+      </details>
+      <details class="nav-menu" data-auth hidden>
+        <summary class="current" data-user-label>Cuenta</summary>
+        <div class="nav-menu-list">
+          <a href="/siguiendo">Siguiendo</a>
+          <a href="/cron" data-admin hidden>Cron / lotes</a>
+          <a href="/analisis-producto" data-admin hidden>Análisis de producto</a>
+          <a href="/estadisticas" data-admin hidden>Estadísticas</a>
+          <a href="/pronosticos" class="current" data-admin hidden>Pronósticos</a>
+          <a href="/usuarios" data-admin hidden>Usuarios</a>
+          <a href="/ofertas" data-admin hidden>Configurar</a>
+          <a href="#" data-logout>Salir</a>
+        </div>
+      </details>
+    </nav>
+    <div class="theme-toggle" role="group" aria-label="Apariencia">
+      <button type="button" class="secondary" data-theme-set="auto" title="Según la hora y tu ubicación">Auto</button>
+      <button type="button" class="secondary" data-theme-set="day">Día</button>
+      <button type="button" class="secondary" data-theme-set="night">Noche</button>
+    </div>
+  </header>
+
+  <main class="settings">
+    <p id="flash" class="summary" hidden></p>
+
+    <section class="panel">
+      <div class="cron-head">
+        <div>
+          <h2>Cumplimiento experimental</h2>
+          <p class="muted">Cada generación queda en un snapshot. Cada día se compara el precio real con el rango o la dirección pronosticada.</p>
+        </div>
+        <button type="button" class="secondary" id="refresh-outcomes">Actualizar evaluación</button>
+      </div>
+      <div id="outcome-stats" class="outcome-stats" aria-live="polite"></div>
+      <div id="outcome-model-stats" class="table-wrap" hidden>
+        <table class="drops-table">
+          <thead>
+            <tr>
+              <th>Modelo</th>
+              <th>Total</th>
+              <th>Cumplió</th>
+              <th>No</th>
+              <th>Pendiente</th>
+              <th>Hit rate</th>
+              <th>Mediana días</th>
+            </tr>
+          </thead>
+          <tbody id="outcome-model-body"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="cron-head">
+        <div>
+          <h2>Pronósticos registrados</h2>
+          <p id="outcomes-meta" class="muted">Cargando…</p>
+        </div>
+      </div>
+      <form id="outcome-filters" class="form-grid outcome-filters" role="search">
+        <label>Buscar
+          <input id="filter-q" type="search" placeholder="Producto, tienda o id">
+        </label>
+        <label>Estado
+          <select id="filter-status">
+            <option value="">Todos</option>
+            <option value="pending">Pendiente</option>
+            <option value="hit">Cumplió</option>
+            <option value="miss">No cumplió</option>
+          </select>
+        </label>
+        <label>Modelo
+          <select id="filter-model">
+            <option value="">Todos</option>
+            <option value="timesfm">timesfm</option>
+            <option value="last_value_baseline">last_value_baseline</option>
+            <option value="cyber_event_dense">cyber_event_dense</option>
+            <option value="cyber_event_trend">cyber_event_trend</option>
+            <option value="cyber_future_transfer">cyber_future_transfer</option>
+          </select>
+        </label>
+        <div class="outcome-filter-actions">
+          <button type="submit">Filtrar</button>
+          <button type="button" class="secondary" id="filter-reset">Limpiar</button>
+        </div>
+      </form>
+      <div class="table-wrap">
+        <table class="drops-table" id="outcomes-table">
+          <thead>
+            <tr>
+              <th>Producto</th>
+              <th>Modelo</th>
+              <th>Generado</th>
+              <th>Horizonte</th>
+              <th>Cumplimiento</th>
+              <th>ETA / días</th>
+              <th>Rango</th>
+            </tr>
+          </thead>
+          <tbody id="outcomes-body">
+            <tr><td colspan="7" class="muted">Cargando…</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <section class="panel pager simple-pager" aria-label="Paginación de pronósticos">
+        <button type="button" id="prev" class="secondary" aria-label="Ir a la página anterior">Anterior</button>
+        <span id="page-label" class="muted"></span>
+        <button type="button" id="next" class="secondary" aria-label="Ir a la página siguiente">Siguiente</button>
+      </section>
+    </section>
+    <p class="forecast-disclaimer">Estimaciones experimentales: no garantizan el futuro ni recomiendan comprar. El cumplimiento usa el rango esperado o un movimiento ≥2% en la dirección pronosticada.</p>
+  </main>
+  <script src="/static/prices.js?v=36"></script>
+  <script src="/static/pagination.js?v=1"></script>
+  <script src="/static/pronosticos.js?v=1"></script>
+</body>
+</html>

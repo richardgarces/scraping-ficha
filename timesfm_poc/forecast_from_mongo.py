@@ -342,6 +342,17 @@ def write_forecasts_to_mongo(uri, dbname, collection_name, forecasts_docs):
             doc,
             upsert=True,
         )
+    try:
+        from retail.forecast_outcomes import snapshot_forecast_docs
+        from retail.mongo import ProductRepository
+
+        repo = ProductRepository(uri, database=dbname)
+        try:
+            snapshot_forecast_docs(repo, forecasts_docs)
+        finally:
+            repo.close()
+    except Exception as exc:
+        print(f"forecast outcomes snapshot skipped: {exc}")
     client.close()
 
 

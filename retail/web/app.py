@@ -246,6 +246,14 @@ def estadisticas(request: Request):
     return FileResponse(STATIC / "estadisticas.html")
 
 
+@app.get("/pronosticos")
+def pronosticos(request: Request):
+    gate = require_admin_html(request, next_path="/pronosticos")
+    if gate is not None:
+        return gate
+    return FileResponse(STATIC / "pronosticos.html")
+
+
 @app.get("/analisis-producto")
 def analisis_producto(request: Request):
     gate = require_login_html(request, next_path="/analisis-producto")

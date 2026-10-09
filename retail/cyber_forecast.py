@@ -985,6 +985,12 @@ def write_forecast_docs(repo: Any, docs: list[dict[str, Any]]) -> int:
             upsert=True,
         )
         written += 1
+    try:
+        from retail.forecast_outcomes import snapshot_forecast_docs
+
+        snapshot_forecast_docs(repo, docs)
+    except Exception as exc:
+        print(f"forecast outcomes snapshot skipped: {exc}", flush=True)
     return written
 
 

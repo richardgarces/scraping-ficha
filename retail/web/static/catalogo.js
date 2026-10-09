@@ -82,7 +82,13 @@ function updateFilterSummary() {
     : "Sin filtros";
 }
 
-async function load() {
+function scrollToProducts() {
+  const target = $("summary") || $("grid");
+  if (!target) return;
+  target.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+async function load({ scrollToTop = false } = {}) {
   if (typeof setQuickSearchBusy === "function") setQuickSearchBusy(true);
   try {
   const response = await fetch(`/api/catalog?${params()}`);
@@ -105,6 +111,7 @@ async function load() {
   const pager = RetailPager.render(data.page, totalPages);
   page = pager.page;
   updateFilterSummary();
+  if (scrollToTop) scrollToProducts();
   } finally {
     if (typeof setQuickSearchBusy === "function") setQuickSearchBusy(false);
   }
@@ -151,13 +158,13 @@ catalogSearchInput?.addEventListener("search", reload);
 $("prev").addEventListener("click", () => {
   if (page > 1) {
     page -= 1;
-    load().catch((error) => flash(error.message));
+    load({ scrollToTop: true }).catch((error) => flash(error.message));
   }
 });
 $("next").addEventListener("click", () => {
   if (page < totalPages) {
     page += 1;
-    load().catch((error) => flash(error.message));
+    load({ scrollToTop: true }).catch((error) => flash(error.message));
   }
 });
 

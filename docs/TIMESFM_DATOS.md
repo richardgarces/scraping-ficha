@@ -71,6 +71,21 @@ Si no existe un pronóstico utilizable, la ficha explica que todavía se necesit
 es únicamente informativa: ningún módulo de alertas, scraping, ofertas o recomendación de compra
 consume el pronóstico.
 
+## Cumplimiento experimental (`/pronosticos`)
+
+Al generar un pronóstico se guarda un snapshot inmutable en `forecast_outcomes`
+(la colección `forecasts` sigue sobrescribiendo la versión vigente). El cron
+BMAX (`scripts/evaluate_forecast_outcomes.py`, enganchado en `run_on_bmax.sh`)
+revisa cada día los snapshots `pending` contra el `price_history` real:
+
+- **Cumplió:** algún precio diario del horizonte cae en el rango esperado, o
+  hay un movimiento ≥2% en la dirección pronosticada;
+- **No cumplió:** el horizonte termina sin hit;
+- **Pendiente:** aún quedan días; la ETA estima cuándo debería cumplirse.
+
+La página admin `/pronosticos` lista todos los snapshots, muestra cumplimiento,
+ETA/días a cumplir y estadísticas (hit rate, mediana de días, desglose por modelo).
+
 ## Alertas predictivas y validación
 
 Cada cuenta puede seleccionar `Alertas predictivas experimentales` junto con sus canales de correo

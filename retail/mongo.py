@@ -198,6 +198,7 @@ class ProductRepository:
         self.user_notification_sends = self.db["user_notification_sends"]
         self.predictive_alert_sends = self.db["predictive_alert_sends"]
         self.forecasts = self.db["forecasts"]
+        self.forecast_outcomes = self.db["forecast_outcomes"]
         self.scrape_priorities = self.db["scrape_priorities"]
         self.price_patterns = self.db["price_patterns"]
         self.users = self.db["users"]
@@ -430,6 +431,27 @@ class ProductRepository:
             self.forecasts.create_index(
                 [("forecast_key", ASCENDING), ("model", ASCENDING), ("generated_at", DESCENDING)],
                 name="forecast_offer_signal",
+            )
+        except OperationFailure:
+            pass
+        try:
+            self.forecast_outcomes.create_index(
+                [
+                    ("forecast_key", ASCENDING),
+                    ("model", ASCENDING),
+                    ("horizon", ASCENDING),
+                    ("generated_at", ASCENDING),
+                ],
+                unique=True,
+                name="forecast_outcome_identity",
+            )
+            self.forecast_outcomes.create_index(
+                [("status", ASCENDING), ("generated_at", DESCENDING)],
+                name="forecast_outcome_status",
+            )
+            self.forecast_outcomes.create_index(
+                [("model", ASCENDING), ("generated_at", DESCENDING)],
+                name="forecast_outcome_model",
             )
         except OperationFailure:
             pass

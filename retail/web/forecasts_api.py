@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
+from retail.forecast_outcomes import list_outcomes, outcome_stats, run_daily_outcome_pass
 from retail.forecast_presentation import forecast_summary
 from retail.search import connect_repo
 from retail.web.deps import current_user
@@ -89,5 +90,51 @@ def get_forecasts(request: Request, product_id: str, store: str | None = Query(d
             "forecasts": rows,
             "patterns": patterns,
         }
+    finally:
+        repo.close()
+
+
+@router.get("/api/admin/forecast-outcomes")
+def admin_forecast_outcomes(
+    request: Request,
+    page: int = Query(default=1, ge=1),
+    size: int = Query(default=40, ge=1, le=100),
+    status: str | None = Query(default=None),
+    model: str | None = Query(default=None),
+    q: str | None = Query(default=None),
+):
+    """Lista snapshots de pronósticos con estado de cumplimiento. Solo admin."""
+    current_user(request, admin=True)
+    repo = connect_repo()
+    if repo is None:
+        raise HTTPException(status_code=503, detail="Database unavailable")
+    try:
+        return list_outcomes(repo, page=page, size=size, status=status, model=model, q=q)
+    finally:
+        repo.close()
+
+
+@router.get("/api/admin/forecast-outcomes/stats")
+def admin_forecast_outcome_stats(request: Request):
+    """Estadísticas agregadas de cumplimiento. Solo admin."""
+    current_user(request, admin=True)
+    repo = connect_repo()
+    if repo is None:
+        raise HTTPException(status_code=503, detail="Database unavailable")
+    try:
+        return outcome_stats(repo)
+    finally:
+        repo.close()
+
+
+@router.post("/api/admin/forecast-outcomes/refresh")
+def admin_forecast_outcomes_refresh(request: Request):
+    """Backfill + evaluación on-demand (admin)."""
+    current_user(request, admin=True)
+    repo = connect_repo()
+    if repo is None:
+        raise HTTPException(status_code=503, detail="Database unavailable")
+    try:
+        return run_daily_outcome_pass(repo)
     finally:
         repo.close()

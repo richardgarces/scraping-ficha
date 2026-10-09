@@ -118,6 +118,9 @@ PY
   echo "Backfilling missing product thumbnails…"
   PYTHONPATH="$ROOT_DIR" MONGODB_URI="$MONGODB_URI" MONGODB_DB="$MONGODB_DB" \
     "$VENV_DIR/bin/python3" "$ROOT_DIR/scripts/backfill_thumbnails.py"
+  echo "Evaluating experimental forecast outcomes (cumplimiento diario)…"
+  PYTHONPATH="$ROOT_DIR" MONGODB_URI="$MONGODB_URI" MONGODB_DB="$MONGODB_DB" \
+    "$VENV_DIR/bin/python3" "$ROOT_DIR/scripts/evaluate_forecast_outcomes.py"
   echo "Evaluating predictive notifications (validation gate applies)…"
   PYTHONPATH="$ROOT_DIR" MONGODB_URI="$MONGODB_URI" MONGODB_DB="$MONGODB_DB" \
     "$VENV_DIR/bin/python3" "$ROOT_DIR/scripts/send_predictive_alerts.py"
