@@ -22,11 +22,30 @@ DNS: el mismo Cloudflare Tunnel que `rent.meincart.com` (Proxied). Añade el Pub
 | `prod-menu.sh` | En BMAX: env, caddy, deploy, logs, cron host, oneshot |
 | `docker-compose.prod.yml` | `web` + mongo + qdrant + redis, **sin** puertos al host |
 | `docker-compose.prod.platform.yml` | Une `precios-web` a `platform-net` |
-| `deploy/caddy/Caddyfile.platform-edge` | Bloque `precios.meincart.com` + `handle_errors` 502/503/504 |
-| `deploy/caddy/maintenance.html` | Página «Pronto estaremos funcionando» (actualización) |
+| `deploy/caddy/Caddyfile.platform-edge` | Bloque `precios.meincart.com`, flag `@maint` y `handle_errors` 502/503/504 |
+| `deploy/caddy/maintenance.html` | Página «Estamos actualizando la página» (marca Precios) |
 | `scripts/link-platform-caddy.sh` | **Fusiona** ese bloque; copia el HTML a `platform-caddy/errors/`; no pisa `rent.meincart.com` |
+| `scripts/precios-maintenance.sh` | `on` / `off` / `status` — flag `precios-maintenance.enabled` + reload Caddy |
 
-Si `precios-web` está caído o en redeploy, platform-caddy sirve `maintenance.html` en vez del 502 crudo. Tráfico sano no cambia.
+### Mantenimiento en deploy
+
+`scripts/deploy-prod.sh` (EDGE=platform) hace:
+
+1. **Antes** del build/`up`: `./scripts/precios-maintenance.sh on` → Caddy responde **503** con el HTML estático (sin tocar `precios-web` todavía).
+2. Tras `up` + health (`/api/health` en el contenedor y vía Caddy).
+3. **Éxito**: `precios-maintenance.sh off` → routing normal.
+4. **Fallo**: deja el mantenimiento **ON** (mensaje claro; no 502 genérico de Cloudflare si el borde está bien).
+
+Respaldo si el contenedor cae sin aviso: `handle_errors` sirve la misma página en 502/503/504.
+
+**Una vez** tras actualizar el repo (bloque `@maint` nuevo): `./prod-menu.sh` → opción **3** (`link-platform-caddy`) para fusionar el Caddyfile y montar `./errors:/srv/errors` en platform-caddy.
+
+Manual:
+
+```bash
+./scripts/precios-maintenance.sh on   # antes de cambios manuales
+./scripts/precios-maintenance.sh off
+```
 
 ## Mac → servidor
 

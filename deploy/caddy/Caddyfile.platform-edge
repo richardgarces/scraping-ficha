@@ -2,8 +2,10 @@
 # Se fusiona con el existente (rent.meincart.com y el resto se conservan).
 # Instalar: ./scripts/link-platform-caddy.sh
 #
-# Página de mantenimiento (502/503/504 si precios-web no responde):
+# Página de mantenimiento:
 #   deploy/caddy/maintenance.html → /srv/errors/precios-maintenance.html
+# Deploy activa mantenimiento con touch …/precios-maintenance.enabled (503 + HTML).
+# Si precios-web cae sin aviso, handle_errors cubre 502/503/504.
 
 # --- BEGIN precios.meincart.com ---
 # http:// porque TLS termina en Cloudflare Tunnel (igual que rent.meincart.com)
@@ -16,6 +18,11 @@ http://precios.meincart.com, http://precios.meincart.cl {
 		X-Frame-Options DENY
 		Referrer-Policy strict-origin-when-cross-origin
 		-Server
+	}
+
+	@maint file /srv/errors/precios-maintenance.enabled
+	handle @maint {
+		error "precios maintenance" 503
 	}
 
 	handle /api/search/stream* {
