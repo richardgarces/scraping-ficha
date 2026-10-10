@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Publica CPU/RAM/disco/temp del host a Mongo (app_settings cyber_day_host_stats:{ip}).
+# Publica CPU/RAM/disco/temp/potencia del host a Mongo (app_settings cyber_day_host_stats:{ip}).
 # BMAX: docker exec precios-web (o venv). soyo: venv o imagen worker.
 # Uso: HOST_STATS_HOST_IP=192.168.1.198 bash scripts/host-stats-report.sh
 set -euo pipefail
@@ -231,9 +231,187 @@ host_temp_env() {
   fi
 }
 
+# Potencia del host (W). RAPL energy_uj suele ser root-only; el wrapper:
+# 1) lee energy_uj si es legible, 2) si no, docker nsenter al mount del host,
+# 3) fallback hwmon power*_input (µW). Estado en logs/ para delta entre crons.
+host_power_env() {
+  unset HOST_STATS_POWER_W HOST_STATS_POWER_SOURCE || true
+  local state_file="${ROOT}/logs/host-stats-power.state"
+  local zone energy max_range zone_name src now prev_e prev_t dt delta watts e2 prio
+  local hw chip input_file label_file label raw_uw
+  local best_prio=999 best_w="" best_src=""
+
+  _host_power_consider() {
+    # $1=prio $2=watts (float/int) $3=source
+    local p="$1" val="$2" src_name="$3"
+    [[ -n "${val}" ]] || return 0
+    # Aceptar enteros o decimales simples.
+    [[ "${val}" =~ ^[0-9]+([.][0-9]+)?$ ]] || return 0
+    # Rango sano ~0.05–500 W (comparar como enteros truncados).
+    local as_int="${val%%.*}"
+    (( as_int > 500 )) && return 0
+    if (( p < best_prio )); then
+      best_prio="${p}"
+      best_w="${val}"
+      best_src="${src_name}"
+    fi
+  }
+
+  _host_rapl_energy_uj() {
+    # $1=zone dir → stdout energy_uj o vacío
+    local z="$1" e=""
+    if [[ -r "${z}/energy_uj" ]]; then
+      e="$(tr -d '\n' <"${z}/energy_uj" 2>/dev/null || true)"
+      printf '%s' "${e}"
+      return 0
+    fi
+    # energy_uj root-only: leer vía nsenter en el namespace del host (docker group).
+    if command -v docker >/dev/null 2>&1; then
+      e="$(
+        docker run --rm --privileged --pid=host alpine:latest \
+          nsenter -t 1 -m -- cat "${z}/energy_uj" 2>/dev/null || true
+      )"
+      e="$(printf '%s' "${e}" | tr -d '\n')"
+      printf '%s' "${e}"
+      return 0
+    fi
+    return 1
+  }
+
+  _host_rapl_max_range() {
+    local z="$1" m=""
+    if [[ -r "${z}/max_energy_range_uj" ]]; then
+      m="$(tr -d '\n' <"${z}/max_energy_range_uj" 2>/dev/null || true)"
+      printf '%s' "${m}"
+      return 0
+    fi
+    if command -v docker >/dev/null 2>&1; then
+      m="$(
+        docker run --rm --privileged --pid=host alpine:latest \
+          nsenter -t 1 -m -- cat "${z}/max_energy_range_uj" 2>/dev/null || true
+      )"
+      printf '%s' "$(printf '%s' "${m}" | tr -d '\n')"
+      return 0
+    fi
+    return 1
+  }
+
+  now="$(date +%s)"
+  # Preferir package-0 (intel-rapl:0); ignorar mmio duplicado.
+  shopt -s nullglob
+  for zone in /sys/class/powercap/intel-rapl:0 /sys/class/powercap/intel-rapl:*; do
+    [[ -d "${zone}" ]] || continue
+    [[ "${zone}" == *mmio* ]] && continue
+    zone_name="$(tr -d '\n' <"${zone}/name" 2>/dev/null || true)"
+    [[ -n "${zone_name}" ]] || zone_name="$(basename "${zone}")"
+    # Solo dominio package (o el :0 raíz) para el anillo principal.
+    case "${zone_name,,}" in
+      package*|psys|platform) ;;
+      *)
+        # Permitir intel-rapl:0 aunque el name falle.
+        [[ "$(basename "${zone}")" == "intel-rapl:0" ]] || continue
+        ;;
+    esac
+    energy="$(_host_rapl_energy_uj "${zone}" || true)"
+    [[ -n "${energy}" && "${energy}" =~ ^[0-9]+$ ]] || continue
+    src="rapl:${zone_name}"
+    max_range="$(_host_rapl_max_range "${zone}" || true)"
+    prev_e="" prev_t=""
+    if [[ -r "${state_file}" ]]; then
+      # Formato: source energy_uj epoch
+      while read -r s e t _; do
+        [[ "${s}" == "${src}" ]] || continue
+        prev_e="${e}"
+        prev_t="${t}"
+        break
+      done <"${state_file}"
+    fi
+    # Persistir muestra actual (aunque aún no haya watts).
+    {
+      echo "${src} ${energy} ${now}"
+      if [[ -r "${state_file}" ]]; then
+        while read -r s e t _; do
+          [[ "${s}" == "${src}" ]] && continue
+          [[ -n "${s}" ]] && echo "${s} ${e} ${t}"
+        done <"${state_file}"
+      fi
+    } >"${state_file}.tmp" 2>/dev/null || true
+    mv -f "${state_file}.tmp" "${state_file}" 2>/dev/null || true
+
+    if [[ -n "${prev_e}" && -n "${prev_t}" && "${prev_e}" =~ ^[0-9]+$ && "${prev_t}" =~ ^[0-9]+$ ]]; then
+      dt=$(( now - prev_t ))
+      if (( dt >= 5 && dt <= 7200 )); then
+        if (( energy >= prev_e )); then
+          delta=$(( energy - prev_e ))
+        elif [[ -n "${max_range}" && "${max_range}" =~ ^[0-9]+$ ]] && (( max_range > 0 )); then
+          delta=$(( max_range - prev_e + energy ))
+        else
+          delta=-1
+        fi
+        if (( delta >= 0 )); then
+          # watts = (µJ delta / 1e6) / dt  → awk con C locale (evitar coma decimal).
+          watts="$(LC_ALL=C awk -v d="${delta}" -v t="${dt}" 'BEGIN{ printf "%.2f", (d/1000000.0)/t }' 2>/dev/null || true)"
+          _host_power_consider 0 "${watts}" "${src}"
+        fi
+      fi
+    elif [[ -z "${prev_e}" ]]; then
+      # Primera corrida: muestreo corto para no esperar al próximo cron.
+      sleep 0.8
+      e2="$(_host_rapl_energy_uj "${zone}" || true)"
+      if [[ -n "${e2}" && "${e2}" =~ ^[0-9]+$ ]]; then
+        watts="$(LC_ALL=C awk -v a="${energy}" -v b="${e2}" 'BEGIN{ printf "%.2f", (b-a)/1000000.0/0.8 }' 2>/dev/null || true)"
+        _host_power_consider 0 "${watts}" "${src}"
+        {
+          echo "${src} ${e2} $(date +%s)"
+        } >"${state_file}" 2>/dev/null || true
+      fi
+    fi
+    # Con package-0 basta.
+    break
+  done
+
+  # Fallback: hwmon power*_input (microwatts), p.ej. amdgpu PPT en BMAX.
+  if [[ -z "${best_w}" ]]; then
+    for hw in /sys/class/hwmon/hwmon*; do
+      [[ -d "${hw}" ]] || continue
+      chip="$(tr -d '\n' <"${hw}/name" 2>/dev/null || true)"
+      [[ -n "${chip}" ]] || chip="hwmon"
+      for input_file in "${hw}"/power*_input; do
+        [[ -r "${input_file}" ]] || continue
+        label_file="${input_file%_input}_label"
+        label=""
+        if [[ -r "${label_file}" ]]; then
+          label="$(tr -d '\n' <"${label_file}" 2>/dev/null || true)"
+        fi
+        raw_uw="$(tr -d '\n' <"${input_file}" 2>/dev/null || true)"
+        [[ -n "${raw_uw}" && "${raw_uw}" =~ ^[0-9]+$ ]] || continue
+        watts="$(LC_ALL=C awk -v u="${raw_uw}" 'BEGIN{ printf "%.2f", u/1000000.0 }' 2>/dev/null || true)"
+        src="${chip}"
+        [[ -n "${label}" ]] && src="${chip}:${label}"
+        case "${label,,}:${chip,,}" in
+          ppt:*|package*:*|*:amdgpu) prio=1 ;;
+          *) prio=20 ;;
+        esac
+        case "${chip,,}" in
+          *nvme*|*wifi*) prio=80 ;;
+        esac
+        _host_power_consider "${prio}" "${watts}" "${src}"
+      done
+    done
+  fi
+  shopt -u nullglob
+
+  if [[ -n "${best_w}" ]]; then
+    HOST_STATS_POWER_W="${best_w}"
+    HOST_STATS_POWER_SOURCE="${best_src}"
+    export HOST_STATS_POWER_W HOST_STATS_POWER_SOURCE
+  fi
+}
+
 run_once() {
   docker_df_env
   host_temp_env
+  host_power_env
   host_facts_env
   # Preferir contenedor con red a Mongo (BMAX: precios-web). El .venv del host
   # suele tener MONGODB_URI=mongodb://mongo:27017 y falla fuera de Docker.
@@ -245,6 +423,8 @@ run_once() {
       -e HOST_STATS_DOCKER_DF_B64="${HOST_STATS_DOCKER_DF_B64:-}" \
       -e HOST_STATS_TEMP_C="${HOST_STATS_TEMP_C:-}" \
       -e HOST_STATS_TEMP_SOURCE="${HOST_STATS_TEMP_SOURCE:-}" \
+      -e HOST_STATS_POWER_W="${HOST_STATS_POWER_W:-}" \
+      -e HOST_STATS_POWER_SOURCE="${HOST_STATS_POWER_SOURCE:-}" \
       -e HOST_STATS_FACTS_B64="${HOST_STATS_FACTS_B64:-}" \
       precios-web python -m retail.host_stats --once
     return
@@ -252,6 +432,10 @@ run_once() {
   if [[ -f "${ROOT}/.venv/bin/activate" ]]; then
     # shellcheck disable=SC1091
     source "${ROOT}/.venv/bin/activate"
+    # Si el wrapper ya midió potencia, exportarla; si no, Python puede leer sysfs.
+    export HOST_STATS_POWER_W="${HOST_STATS_POWER_W:-}"
+    export HOST_STATS_POWER_SOURCE="${HOST_STATS_POWER_SOURCE:-}"
+    export HOST_STATS_RAPL_STATE_FILE="${ROOT}/logs/host-stats-rapl-py.state"
     python -m retail.host_stats --once
     return
   fi
@@ -262,6 +446,8 @@ run_once() {
       -e HOST_STATS_DOCKER_DF_B64="${HOST_STATS_DOCKER_DF_B64:-}" \
       -e HOST_STATS_TEMP_C="${HOST_STATS_TEMP_C:-}" \
       -e HOST_STATS_TEMP_SOURCE="${HOST_STATS_TEMP_SOURCE:-}" \
+      -e HOST_STATS_POWER_W="${HOST_STATS_POWER_W:-}" \
+      -e HOST_STATS_POWER_SOURCE="${HOST_STATS_POWER_SOURCE:-}" \
       -e HOST_STATS_FACTS_B64="${HOST_STATS_FACTS_B64:-}" \
       worker python -m retail.host_stats --once
     return

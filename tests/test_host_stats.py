@@ -7,15 +7,18 @@ import pytest
 from fastapi.testclient import TestClient
 
 from retail.host_stats import (
+    HOST_NOTIFY_ALERT_CODES,
     _milli_celsius_to_c,
     _normalize_facts,
     _parse_docker_size,
     admin_hosts_payload,
     collect_host_facts,
+    collect_power,
     collect_temperature,
     display_label,
     host_alerts,
     merge_host_history,
+    notify_host_alerts,
     report_host_stats,
 )
 from retail.web.app import app
@@ -79,6 +82,45 @@ def test_collect_temperature_none_when_unavailable(monkeypatch):
     monkeypatch.setattr("retail.host_stats._read_thermal_zones", lambda: [])
     monkeypatch.setattr("retail.host_stats._read_hwmon_temps", lambda: [])
     assert collect_temperature() is None
+
+
+def test_collect_power_from_env(monkeypatch):
+    monkeypatch.setenv("HOST_STATS_POWER_W", "21.5")
+    monkeypatch.setenv("HOST_STATS_POWER_SOURCE", "rapl:package-0")
+    monkeypatch.setattr("retail.host_stats._collect_rapl_watts", lambda: None)
+    monkeypatch.setattr("retail.host_stats._read_hwmon_power_watts", lambda: [])
+    assert collect_power() == {"watts": 21.5, "source": "rapl:package-0"}
+
+
+def test_collect_power_prefers_rapl_over_hwmon(monkeypatch):
+    monkeypatch.delenv("HOST_STATS_POWER_W", raising=False)
+    monkeypatch.delenv("HOST_STATS_POWER_SOURCE", raising=False)
+    monkeypatch.setattr(
+        "retail.host_stats._collect_rapl_watts",
+        lambda: {"watts": 18.2, "source": "rapl:package-0"},
+    )
+    monkeypatch.setattr(
+        "retail.host_stats._read_hwmon_power_watts",
+        lambda: [(1, "amdgpu:PPT", 27.0)],
+    )
+    assert collect_power() == {"watts": 18.2, "source": "rapl:package-0"}
+
+
+def test_collect_power_hwmon_fallback(monkeypatch):
+    monkeypatch.delenv("HOST_STATS_POWER_W", raising=False)
+    monkeypatch.setattr("retail.host_stats._collect_rapl_watts", lambda: None)
+    monkeypatch.setattr(
+        "retail.host_stats._read_hwmon_power_watts",
+        lambda: [(1, "amdgpu:PPT", 13.0), (20, "hwmon", 5.0)],
+    )
+    assert collect_power() == {"watts": 13.0, "source": "amdgpu:PPT"}
+
+
+def test_collect_power_none_when_unavailable(monkeypatch):
+    monkeypatch.delenv("HOST_STATS_POWER_W", raising=False)
+    monkeypatch.setattr("retail.host_stats._collect_rapl_watts", lambda: None)
+    monkeypatch.setattr("retail.host_stats._read_hwmon_power_watts", lambda: [])
+    assert collect_power() is None
 
 
 def test_normalize_facts_graceful_nulls():
@@ -156,11 +198,13 @@ def test_merge_host_history_appends_and_caps():
         "ram": {"percent": 40.0},
         "disk": {"percent": 50.0},
         "temperature": {"celsius": 45.0, "source": "cpu-thermal"},
+        "power": {"watts": 12.5, "source": "rapl:package-0"},
         "docker": {"reclaimable_bytes": 1_000_000},
     }
     first = merge_host_history(None, base, max_points=3, max_age_seconds=86400)
     assert len(first) == 1
     assert first[0]["temp"] == 45.0
+    assert first[0]["pwr"] == 12.5
     assert first[0]["cpu"] == 10.0
     assert first[0]["dkr"] == 1_000_000
 
@@ -170,10 +214,12 @@ def test_merge_host_history_appends_and_caps():
         "reported_at": "2026-10-10T12:01:00+00:00",
         "cpu": {"percent": 20.0},
         "temperature": {"celsius": 50.0, "source": "cpu-thermal"},
+        "power": {"watts": 18.0, "source": "rapl:package-0"},
     }
     second = merge_host_history(prev, second_stats, max_points=3, max_age_seconds=86400)
     assert len(second) == 2
     assert second[-1]["temp"] == 50.0
+    assert second[-1]["pwr"] == 18.0
     assert second[-1]["cpu"] == 20.0
 
     # Cap: keep last 3
@@ -234,6 +280,9 @@ def test_report_host_stats_builds_history(repo, monkeypatch):
     monkeypatch.setattr("retail.host_stats.CYBER_DAY_HOST_IP", "192.168.1.90")
     monkeypatch.setattr("retail.host_stats._LAST_HOST_REPORT_AT", 0.0)
     monkeypatch.setenv("HOST_STATS_TEMP_C", "46.0")
+    monkeypatch.delenv("HOST_STATS_POWER_W", raising=False)
+    monkeypatch.setattr("retail.host_stats._collect_rapl_watts", lambda: None)
+    monkeypatch.setattr("retail.host_stats._read_hwmon_power_watts", lambda: [])
     monkeypatch.setenv(
         "HOST_STATS_FACTS",
         '{"hostname":"precios-cyber-pi","cpu_model":"Cortex-A76","cpu_cores":8,'
@@ -245,16 +294,22 @@ def test_report_host_stats_builds_history(repo, monkeypatch):
     assert isinstance(first.get("history"), list)
     assert len(first["history"]) == 1
     assert first["history"][0]["temp"] == 46.0
+    assert first["history"][0]["pwr"] is None
+    assert first.get("power") is None
     assert first["facts"]["cpu_model"] == "Cortex-A76"
     assert first["facts"]["os_pretty_name"] == "Ubuntu 22.04.5 LTS"
     assert first["hostname"] == "precios-cyber-pi"
 
     monkeypatch.setattr("retail.host_stats._LAST_HOST_REPORT_AT", 0.0)
     monkeypatch.setenv("HOST_STATS_TEMP_C", "47.5")
+    monkeypatch.setenv("HOST_STATS_POWER_W", "9.25")
+    monkeypatch.setenv("HOST_STATS_POWER_SOURCE", "rapl:package-0")
     second = report_host_stats(repo, force=True)
     assert second is not None
     assert len(second["history"]) == 2
     assert second["history"][-1]["temp"] == 47.5
+    assert second["history"][-1]["pwr"] == 9.25
+    assert second["power"] == {"watts": 9.25, "source": "rapl:package-0"}
 
     payload = admin_hosts_payload(repo)
     by_id = {h["id"]: h for h in payload["hosts"]}
@@ -305,6 +360,7 @@ def test_admin_hosts_payload_fixed_three_and_stale(repo):
         "ram": {"used_bytes": 1, "free_bytes": 2, "total_bytes": 3, "percent": 33.0},
         "disk": {"path": "/", "used_bytes": 1, "free_bytes": 2, "total_bytes": 3, "percent": 10.0},
         "temperature": {"celsius": 48.5, "source": "cpu-thermal"},
+        "power": None,
         "docker": {
             "images_bytes": 1_000_000_000,
             "images_reclaimable_bytes": 100_000_000,
@@ -323,8 +379,8 @@ def test_admin_hosts_payload_fixed_three_and_stale(repo):
             "machine_model": "Orange Pi 5",
         },
         "history": [
-            {"t": "2026-10-10T11:58:00+00:00", "cpu": 10.0, "ram": 30.0, "disk": 10.0, "temp": 46.0, "dkr": None},
-            {"t": now_iso, "cpu": 12.0, "ram": 33.0, "disk": 10.0, "temp": 48.5, "dkr": 100_000_000},
+            {"t": "2026-10-10T11:58:00+00:00", "cpu": 10.0, "ram": 30.0, "disk": 10.0, "temp": 46.0, "pwr": None, "dkr": None},
+            {"t": now_iso, "cpu": 12.0, "ram": 33.0, "disk": 10.0, "temp": 48.5, "pwr": None, "dkr": 100_000_000},
         ],
     }
     stale = {
@@ -360,6 +416,7 @@ def test_admin_hosts_payload_fixed_three_and_stale(repo):
     assert by_id["orange_pi"]["cpu"]["percent"] == 12.0
     assert by_id["orange_pi"]["temperature"]["celsius"] == 48.5
     assert by_id["orange_pi"]["temperature"]["source"] == "cpu-thermal"
+    assert by_id["orange_pi"]["power"] is None
     assert by_id["orange_pi"]["docker"]["images_bytes"] == 1_000_000_000
     assert by_id["orange_pi"]["role"] == "Cyber Day scrape"
     assert by_id["orange_pi"]["facts"]["cpu_model"] == "Cortex-A76"
@@ -367,7 +424,9 @@ def test_admin_hosts_payload_fixed_three_and_stale(repo):
     assert by_id["orange_pi"]["facts"]["machine_model"] == "Orange Pi 5"
     assert len(by_id["orange_pi"]["history"]) == 2
     assert by_id["orange_pi"]["history"][-1]["temp"] == 48.5
+    assert by_id["orange_pi"]["history"][-1].get("pwr") is None
     assert by_id["soyo"]["temperature"] is None
+    assert by_id["soyo"]["power"] is None
     assert by_id["soyo"]["facts"] is None
     assert by_id["soyo"]["history"] == []
     assert any(a["host_id"] == "bmax" for a in payload["alerts"])
@@ -404,18 +463,22 @@ def test_hosts_static_assets():
     assert "BMAX" in html and "soyo" in html and "Orange Pi" in html
     assert "gaugeSvg" in js
     assert "tempGaugePercent" in js
+    assert "powerGaugePercent" in js
     assert 'metricBlock("temp"' in js or "kind === \"temp\"" in js
+    assert 'metricBlock("power"' in js or "kind === \"power\"" in js
     assert "host.temperature" in js
+    assert "host.power" in js
     assert "temp_warn" in js and "temp_hot" in js
-    # Anillo Temp siempre en la tarjeta (junto a RAM), incluso sin sensor.
+    # Anillos Temp/Watts siempre en la tarjeta, incluso sin sensor.
     assert "sin sensor" in js
     assert "empty: true" in js
     ram_pos = js.find('metricBlock("ram"')
     temp_pos = js.find('metricBlock("temp"')
+    power_pos = js.find('metricBlock("power"')
     disk_pos = js.find('metricBlock("disk"')
-    assert 0 <= ram_pos < temp_pos < disk_pos, "orden esperado: RAM → Temp → Disco"
-    assert "hosts.js?v=10-ram-charts" in html
-    assert "styles.css?v=104-hosts-temp" in html
+    assert 0 <= ram_pos < temp_pos < power_pos < disk_pos, "orden esperado: RAM → Temp → Watts → Disco"
+    assert "hosts.js?v=11-power" in html
+    assert "styles.css?v=105-hosts-power" in html
     assert "hosts-card" in js
     assert "hosts-disk-free" in js
     assert "data-ssh" in js
@@ -431,14 +494,18 @@ def test_hosts_static_assets():
     assert "hosts-photo" in js
     assert "host.image" in js
     assert "temperatura" in html.lower()
+    assert "potencia" in html.lower() or "watts" in html.lower()
     assert "sparklineSvg" in js
     assert "multiHostChart" in js
     assert "renderTrends" in js
     assert "hostSparklines" in js
     assert 'historySeries(history, "ram")' in js
+    assert 'historySeries(history, "pwr")' in js
     assert 'hosts-spark-label">RAM</span>' in js
+    assert 'hosts-spark-label">Watts</span>' in js
     assert 'title: "RAM"' in js
-    assert "temperatura, CPU y RAM" in js
+    assert 'title: "Potencia"' in js
+    assert "temperatura, potencia, CPU y RAM" in js
     assert "historySeries" in js
     assert "openHostDetail" in js
     assert "FACT_ROWS" in js
@@ -458,12 +525,201 @@ def test_hosts_static_assets():
     report_sh = Path("scripts/host-stats-report.sh").read_text(encoding="utf-8")
     assert "host_temp_env" in report_sh
     assert "HOST_STATS_TEMP_C" in report_sh
+    assert "host_power_env" in report_sh
+    assert "HOST_STATS_POWER_W" in report_sh
+    assert "intel-rapl" in report_sh
+    assert "energy_uj" in report_sh
+    assert "power*_input" in report_sh
     assert "/sys/class/hwmon" in report_sh
     assert "temp*_input" in report_sh
     assert "host_facts_env" in report_sh
     assert "HOST_STATS_FACTS_B64" in report_sh
     assert "cyber-gauge-empty" in css
-    assert "repeat(4," in css
+    assert "repeat(5," in css
+    assert "cyber-host-metric-power" in css
     prices = (root / "prices.js").read_text(encoding="utf-8")
     assert 'href="/hosts"' in prices or '"/hosts"' in prices
     assert "Hosts" in prices
+
+
+def _fresh_host_doc(**overrides):
+    from datetime import datetime, timezone
+
+    base = {
+        "hostname": "precios-cyber-pi",
+        "ip": "192.168.1.90",
+        "reported_at": datetime.now(timezone.utc).isoformat(),
+        "uptime_seconds": 3600,
+        "cpu": {"percent": 12.0, "cores": 4},
+        "ram": {"percent": 33.0, "used_bytes": 1, "free_bytes": 2, "total_bytes": 3},
+        "disk": {
+            "path": "/",
+            "percent": 10.0,
+            "used_bytes": 1,
+            "free_bytes": 2,
+            "total_bytes": 3,
+        },
+        "temperature": {"celsius": 48.5, "source": "cpu-thermal"},
+        "docker": {"reclaimable_bytes": 1_000_000},
+        "facts": {"hostname": "precios-cyber-pi"},
+        "history": [],
+    }
+    base.update(overrides)
+    return base
+
+
+def test_notify_alert_codes_are_errors_only():
+    assert HOST_NOTIFY_ALERT_CODES == {"stale", "no_data", "disk_hot", "temp_hot"}
+    warn_only = {
+        "online": True,
+        "disk": {"percent": 82},
+        "ram": {"percent": 91},
+        "temperature": {"celsius": 72},
+        "docker": {"reclaimable_bytes": 25 * 1000**3},
+    }
+    codes = {a["code"] for a in host_alerts(warn_only)}
+    assert codes.isdisjoint(HOST_NOTIFY_ALERT_CODES)
+
+
+def test_notify_host_alerts_telegram_dedupe_and_worsen(repo, monkeypatch):
+    sends: list[str] = []
+
+    monkeypatch.setattr(
+        "retail.host_stats._admin_alert_channels_ready", lambda: True
+    )
+    monkeypatch.setattr(
+        "retail.batch.alerts._secret",
+        lambda env, local="": {
+            "TELEGRAM_BOT_TOKEN": "token",
+            "telegram_bot_token": "token",
+            "ALERT_EMAIL_TO": "",
+            "alert_email_to": "",
+            "SMTP_HOST": "",
+            "smtp_host": "",
+        }.get(env) or {"TELEGRAM_BOT_TOKEN": "token", "telegram_bot_token": "token"}.get(local, ""),
+    )
+    monkeypatch.setattr("retail.batch.alerts.destination_chats", lambda: ["-100"])
+    monkeypatch.setattr(
+        "retail.batch.alerts._telegram_text",
+        lambda text, image_url=None: sends.append(text) or True,
+    )
+
+    # soyo sin datos → no_data; orange ok; bmax stale
+    repo.save_app_setting(
+        "cyber_day_host_stats:192.168.1.90",
+        _fresh_host_doc(
+            disk={"path": "/", "percent": 95.0, "free_bytes": 5 * 1024**3,
+                  "used_bytes": 95, "total_bytes": 100},
+            temperature={"celsius": 90.0, "source": "x86_pkg_temp"},
+        ),
+    )
+    repo.save_app_setting(
+        "cyber_day_host_stats:192.168.1.198",
+        {
+            "hostname": "bmax",
+            "ip": "192.168.1.198",
+            "reported_at": "2000-01-01T00:00:00+00:00",
+            "disk": {"percent": 10},
+        },
+    )
+
+    first = notify_host_alerts(repo)
+    assert first >= 1
+    assert any("disk_hot" in s or "Disco" in s for s in sends)
+    assert any("stale" in s or "heartbeat" in s for s in sends)
+    assert any("no_data" in s or "Sin datos" in s for s in sends)
+    before = len(sends)
+
+    # Misma severidad: no reenvía
+    assert notify_host_alerts(repo) == 0
+    assert len(sends) == before
+
+    # Empeora disco 95 → 99: reenvía disk_hot
+    repo.save_app_setting(
+        "cyber_day_host_stats:192.168.1.90",
+        _fresh_host_doc(
+            disk={"path": "/", "percent": 99.0, "free_bytes": 1 * 1024**3,
+                  "used_bytes": 99, "total_bytes": 100},
+            temperature={"celsius": 90.0, "source": "x86_pkg_temp"},
+        ),
+    )
+    assert notify_host_alerts(repo) >= 1
+    assert len(sends) > before
+    assert any("99" in s for s in sends[before:])
+
+
+def test_notify_host_alerts_rearm_after_clear(repo, monkeypatch):
+    sends: list[str] = []
+    monkeypatch.setattr("retail.host_stats._admin_alert_channels_ready", lambda: True)
+    monkeypatch.setattr(
+        "retail.batch.alerts._secret",
+        lambda env, local="": "token" if "TELEGRAM" in env or "telegram" in local else "",
+    )
+    monkeypatch.setattr("retail.batch.alerts.destination_chats", lambda: ["-100"])
+    monkeypatch.setattr(
+        "retail.batch.alerts._telegram_text",
+        lambda text, image_url=None: sends.append(text) or True,
+    )
+
+    from datetime import datetime, timezone
+
+    now = datetime.now(timezone.utc).isoformat()
+    # Los tres hosts online y sanos → nada
+    for ip, host in (
+        ("192.168.1.198", "bmax"),
+        ("192.168.1.197", "soyo"),
+        ("192.168.1.90", "precios-cyber-pi"),
+    ):
+        repo.save_app_setting(
+            f"cyber_day_host_stats:{ip}",
+            _fresh_host_doc(ip=ip, hostname=host, reported_at=now),
+        )
+    assert notify_host_alerts(repo) == 0
+
+    # BMAX stale
+    repo.save_app_setting(
+        "cyber_day_host_stats:192.168.1.198",
+        _fresh_host_doc(
+            ip="192.168.1.198",
+            hostname="bmax",
+            reported_at="2000-01-01T00:00:00+00:00",
+        ),
+    )
+    assert notify_host_alerts(repo) >= 1
+    n = len(sends)
+
+    # Recupera
+    repo.save_app_setting(
+        "cyber_day_host_stats:192.168.1.198",
+        _fresh_host_doc(ip="192.168.1.198", hostname="bmax", reported_at=now),
+    )
+    assert notify_host_alerts(repo) == 0
+    assert len(sends) == n
+
+    # Vuelve a caer → nuevo episodio
+    repo.save_app_setting(
+        "cyber_day_host_stats:192.168.1.198",
+        _fresh_host_doc(
+            ip="192.168.1.198",
+            hostname="bmax",
+            reported_at="2000-01-01T00:00:00+00:00",
+        ),
+    )
+    assert notify_host_alerts(repo) >= 1
+    assert len(sends) > n
+
+
+def test_report_host_stats_invokes_notify(repo, monkeypatch):
+    called = {"n": 0}
+
+    def fake_notify(r, *, payload=None):
+        called["n"] += 1
+        return 0
+
+    monkeypatch.setattr("retail.host_stats.HOST_IP", "192.168.1.90")
+    monkeypatch.setattr("retail.host_stats.CYBER_DAY_HOST_IP", "192.168.1.90")
+    monkeypatch.setattr("retail.host_stats._LAST_HOST_REPORT_AT", 0.0)
+    monkeypatch.setattr("retail.host_stats.notify_host_alerts", fake_notify)
+    monkeypatch.setenv("HOST_STATS_TEMP_C", "46.0")
+    assert report_host_stats(repo, force=True) is not None
+    assert called["n"] == 1

@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#258fdf">
   <title>Hosts</title>
   <script>(function(){var m=localStorage.getItem("retail-theme");if(m==="day"||m==="night"){document.documentElement.dataset.theme=m;return;}var h=new Date().getHours();document.documentElement.dataset.theme=(h>=7&&h<19)?"day":"night";})();</script>
-  <link rel="stylesheet" href="/static/styles.css?v=104-hosts-temp">
+  <link rel="stylesheet" href="/static/styles.css?v=105-hosts-power">
 </head>
 <body>
   <header class="top">
@@ -61,7 +61,7 @@
       <div class="cron-head">
         <div>
           <h2>Recursos de hosts</h2>
-          <p class="muted">CPU, RAM, disco, temperatura y Docker reclaimable de BMAX, soyo y Orange Pi. Clic en una tarjeta para ver características (CPU, memoria, OS…). Historial acotado (hasta ~24 h) para temperatura y CPU. Alertas si disco ≥80 %, RAM ≥90 %, temp ≥70 °C o heartbeat <em>stale</em>. En cada host: mantenimiento (updates, firewall, Docker…). <a href="/cron">Cron</a> · <a href="/cyber-day">Cyber</a>.</p>
+          <p class="muted">CPU, RAM, disco, temperatura, potencia (W) y Docker reclaimable de BMAX, soyo y Orange Pi. Clic en una tarjeta para ver características (CPU, memoria, OS…). Historial acotado (hasta ~24 h) para temperatura, watts y CPU. Alertas si disco ≥80 %, RAM ≥90 %, temp ≥70 °C o heartbeat <em>stale</em>. En cada host: mantenimiento (updates, firewall, Docker…). <a href="/cron">Cron</a> · <a href="/cyber-day">Cyber</a>.</p>
         </div>
         <div class="cron-controls">
           <button type="button" id="hosts-refresh" class="secondary">Actualizar</button>
@@ -80,6 +80,6 @@
     </div>
   </div>
   <script src="/static/prices.js?v=84"></script>
-  <script src="/static/hosts.js?v=10-ram-charts"></script>
+  <script src="/static/hosts.js?v=11-power"></script>
 </body>
 </html>

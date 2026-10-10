@@ -575,8 +575,251 @@ def collect_temperature() -> dict[str, Any] | None:
     return {"celsius": celsius, "source": source}
 
 
+# Estado RAPL entre lecturas (proceso largo o tests). El cron usa archivo vía bash.
+_RAPL_SAMPLE: dict[str, tuple[int, float]] = {}
+_RAPL_STATE_ENV = "HOST_STATS_RAPL_STATE_FILE"
+
+
+def _power_watts_sane(watts: float) -> bool:
+    return 0.05 <= watts <= 500.0
+
+
+def _hwmon_power_rank(chip_name: str, label: str) -> int:
+    chip = (chip_name or "").strip().lower()
+    lab = (label or "").strip().lower()
+    key = f"{lab}:{chip}"
+    if lab in {"ppt", "package", "pkg"} or "package" in lab:
+        return 0
+    if chip in {"amdgpu", "coretemp", "k10temp"} and lab in {"", "ppt"}:
+        return 1 if chip == "amdgpu" else 5
+    if "gpu" in chip or "gpu" in lab:
+        return 10
+    if "nvme" in chip or "wifi" in chip:
+        return 80
+    if key:
+        return 20
+    return 50
+
+
+def _read_hwmon_power_watts() -> list[tuple[int, str, float]]:
+    """Lista (rank, source, W) desde hwmon power*_input (microwatts)."""
+    root = "/sys/class/hwmon"
+    rows: list[tuple[int, str, float]] = []
+    try:
+        chips = sorted(os.listdir(root))
+    except OSError:
+        return rows
+    for chip in chips:
+        base = os.path.join(root, chip)
+        try:
+            with open(os.path.join(base, "name"), encoding="utf-8") as fh:
+                chip_name = fh.read().strip() or chip
+        except OSError:
+            chip_name = chip
+        try:
+            entries = os.listdir(base)
+        except OSError:
+            continue
+        for entry in sorted(entries):
+            if not (entry.startswith("power") and entry.endswith("_input")):
+                continue
+            label_path = os.path.join(base, entry.replace("_input", "_label"))
+            label = ""
+            try:
+                with open(label_path, encoding="utf-8") as fh:
+                    label = fh.read().strip()
+            except OSError:
+                pass
+            try:
+                with open(os.path.join(base, entry), encoding="utf-8") as fh:
+                    raw_uw = int(fh.read().strip())
+            except (OSError, ValueError):
+                continue
+            # sysfs power*_input: microwatts.
+            watts = raw_uw / 1_000_000.0
+            if not _power_watts_sane(watts):
+                continue
+            source = f"{chip_name}:{label}" if label else chip_name
+            rows.append((_hwmon_power_rank(chip_name, label), source, round(watts, 2)))
+    return rows
+
+
+def _rapl_zone_paths() -> list[tuple[int, str, str]]:
+    """Zonas RAPL preferidas: (rank, source, dir_path) con energy_uj."""
+    root = "/sys/class/powercap"
+    zones: list[tuple[int, str, str]] = []
+    try:
+        names = sorted(os.listdir(root))
+    except OSError:
+        return zones
+    for name in names:
+        if not name.startswith("intel-rapl:"):
+            continue
+        # Evitar duplicar el árbol mmio (misma energía que intel-rapl:0).
+        if name.startswith("intel-rapl-mmio"):
+            continue
+        base = os.path.join(root, name)
+        energy = os.path.join(base, "energy_uj")
+        if not os.path.exists(energy):
+            continue
+        try:
+            with open(os.path.join(base, "name"), encoding="utf-8") as fh:
+                zone_name = fh.read().strip() or name
+        except OSError:
+            zone_name = name
+        zone_l = zone_name.lower()
+        if zone_l.startswith("package") or zone_l in {"psys", "platform"}:
+            rank = 0
+        elif zone_l == "core":
+            rank = 5
+        elif zone_l == "uncore":
+            rank = 8
+        elif zone_l.startswith("dram"):
+            rank = 12
+        else:
+            rank = 20
+        # Preferir dominio de primer nivel (intel-rapl:0) sobre subdominios.
+        depth = name.count(":")
+        rank += max(0, depth - 1)
+        zones.append((rank, f"rapl:{zone_name}", base))
+    zones.sort(key=lambda row: (row[0], row[1]))
+    return zones
+
+
+def _read_rapl_energy_uj(zone_dir: str) -> tuple[int | None, int | None]:
+    """Lee energy_uj y max_energy_range_uj de una zona RAPL."""
+    energy = None
+    max_range = None
+    try:
+        with open(os.path.join(zone_dir, "energy_uj"), encoding="utf-8") as fh:
+            energy = int(fh.read().strip())
+    except (OSError, ValueError):
+        return None, None
+    try:
+        with open(os.path.join(zone_dir, "max_energy_range_uj"), encoding="utf-8") as fh:
+            max_range = int(fh.read().strip())
+    except (OSError, ValueError):
+        max_range = None
+    return energy, max_range
+
+
+def _rapl_delta_watts(
+    energy_uj: int,
+    prev_energy: int,
+    dt_s: float,
+    max_range: int | None,
+) -> float | None:
+    if dt_s < 0.2:
+        return None
+    delta = energy_uj - prev_energy
+    if delta < 0 and max_range and max_range > 0:
+        delta = (max_range - prev_energy) + energy_uj
+    if delta < 0:
+        return None
+    watts = (delta / 1_000_000.0) / dt_s
+    if not _power_watts_sane(watts):
+        return None
+    return round(watts, 2)
+
+
+def _rapl_state_path() -> str | None:
+    raw = (os.environ.get(_RAPL_STATE_ENV) or "").strip()
+    return raw or None
+
+
+def _load_rapl_file_state(path: str) -> dict[str, tuple[int, float]]:
+    out: dict[str, tuple[int, float]] = {}
+    try:
+        with open(path, encoding="utf-8") as fh:
+            for line in fh:
+                parts = line.strip().split()
+                if len(parts) < 3:
+                    continue
+                source, energy_s, ts_s = parts[0], parts[1], parts[2]
+                out[source] = (int(energy_s), float(ts_s))
+    except (OSError, ValueError):
+        return {}
+    return out
+
+
+def _save_rapl_file_state(path: str, samples: dict[str, tuple[int, float]]) -> None:
+    try:
+        parent = os.path.dirname(path)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        with open(path, "w", encoding="utf-8") as fh:
+            for source, (energy, ts) in samples.items():
+                fh.write(f"{source} {energy} {ts}\n")
+    except OSError:
+        pass
+
+
+def _collect_rapl_watts() -> dict[str, Any] | None:
+    """Potencia (W) desde RAPL energy_uj (delta entre lecturas)."""
+    global _RAPL_SAMPLE
+    zones = _rapl_zone_paths()
+    if not zones:
+        return None
+    state_path = _rapl_state_path()
+    file_state = _load_rapl_file_state(state_path) if state_path else {}
+    now = time.time()
+    best: dict[str, Any] | None = None
+    updated: dict[str, tuple[int, float]] = dict(file_state)
+
+    for rank, source, zone_dir in zones:
+        energy, max_range = _read_rapl_energy_uj(zone_dir)
+        if energy is None:
+            continue
+        prev = _RAPL_SAMPLE.get(source) or file_state.get(source)
+        _RAPL_SAMPLE[source] = (energy, now)
+        updated[source] = (energy, now)
+        if prev is None:
+            # Primera muestra: guardar y esperar el siguiente ciclo (cron ~1 min).
+            continue
+        prev_e, prev_t = prev
+        watts = _rapl_delta_watts(energy, prev_e, now - prev_t, max_range)
+        if watts is None:
+            continue
+        if best is None or rank == 0:
+            best = {"watts": watts, "source": source}
+            if rank == 0:
+                break
+
+    if state_path and updated:
+        _save_rapl_file_state(state_path, updated)
+    return best
+
+
+def collect_power() -> dict[str, Any] | None:
+    """Potencia del host (W) desde env, RAPL o hwmon.
+
+    En contenedores sin powercap legible, ``scripts/host-stats-report.sh``
+    inyecta ``HOST_STATS_POWER_W`` (y opcionalmente ``HOST_STATS_POWER_SOURCE``).
+    """
+    injected = (os.environ.get("HOST_STATS_POWER_W") or "").strip()
+    if injected:
+        try:
+            watts = round(float(injected), 2)
+        except ValueError:
+            watts = None
+        if watts is not None and _power_watts_sane(watts):
+            source = (os.environ.get("HOST_STATS_POWER_SOURCE") or "injected").strip() or "injected"
+            return {"watts": watts, "source": source}
+
+    rapl = _collect_rapl_watts()
+    if rapl is not None:
+        return rapl
+
+    candidates = _read_hwmon_power_watts()
+    if not candidates:
+        return None
+    candidates.sort(key=lambda row: (row[0], row[2]))
+    _rank, source, watts = candidates[0]
+    return {"watts": watts, "source": source}
+
+
 def collect_host_stats() -> dict[str, Any]:
-    """Métricas del host donde corre el proceso (CPU / RAM / disco / temp / Docker)."""
+    """Métricas del host donde corre el proceso (CPU / RAM / disco / temp / potencia / Docker)."""
     cores = os.cpu_count() or 1
     load1 = load5 = load15 = None
     try:
@@ -633,6 +876,7 @@ def collect_host_stats() -> dict[str, Any]:
     hostname = socket.gethostname()
     docker = collect_docker_df()
     temperature = collect_temperature()
+    power = collect_power()
     uptime = _uptime_seconds()
     facts = collect_host_facts()
     # Preferir hostname/uptime de facts inyectados (host real vs contenedor).
@@ -666,6 +910,7 @@ def collect_host_stats() -> dict[str, Any]:
             "percent": disk_pct,
         },
         "temperature": temperature,
+        "power": power,
         "docker": docker,
         "facts": facts,
     }
@@ -859,72 +1104,101 @@ def _save_notify_state(repo: Any, state: dict[str, Any]) -> None:
         pass
 
 
-def _send_host_alert_channels(text: str, *, entity_key: str, price: int, repo: Any) -> int:
-    """Telegram chat admin (+ email ALERT_EMAIL_TO). Solo ops, no broadcast a usuarios."""
-    delivered = 0
+def _admin_alert_channels_ready() -> bool:
     try:
-        from retail.batch.alerts import _secret, _telegram_text, send_email
+        from retail.batch.alerts import _secret, destination_chats
     except Exception:
-        return 0
+        return False
+    has_tg = bool(
+        _secret("TELEGRAM_BOT_TOKEN", "telegram_bot_token").strip() and destination_chats()
+    )
+    has_em = bool(
+        _secret("ALERT_EMAIL_TO", "alert_email_to").strip()
+        and _secret("SMTP_HOST", "smtp_host").strip()
+    )
+    return has_tg or has_em
 
-    # Telegram: TELEGRAM_CHAT_ID / canales.local (destination_chats vía _telegram_text).
-    claimed_tg = True
-    if hasattr(repo, "claim_user_notification_send"):
-        claimed_tg = repo.claim_user_notification_send(
+
+def _claim_host_alert(repo: Any, channel: str, entity_key: str, price: int) -> bool:
+    if not hasattr(repo, "claim_user_notification_send"):
+        return True
+    return bool(
+        repo.claim_user_notification_send(
             HOST_ALERT_NOTIFY_USER,
-            "telegram",
+            channel,
             entity_key,
             price,
             cooldown_days=HOST_ALERT_NOTIFY_COOLDOWN_DAYS,
         )
-    if claimed_tg:
-        try:
-            if _telegram_text(text):
-                delivered += 1
-            elif hasattr(repo, "release_user_notification_send"):
-                repo.release_user_notification_send(
-                    HOST_ALERT_NOTIFY_USER, "telegram", entity_key, price
-                )
-        except Exception as exc:
-            print(f"host-stats: telegram alerta: {exc}", flush=True)
-            if hasattr(repo, "release_user_notification_send"):
-                try:
-                    repo.release_user_notification_send(
-                        HOST_ALERT_NOTIFY_USER, "telegram", entity_key, price
-                    )
-                except Exception:
-                    pass
+    )
+
+
+def _release_host_alert(repo: Any, channel: str, entity_key: str, price: int) -> None:
+    if not hasattr(repo, "release_user_notification_send"):
+        return
+    try:
+        repo.release_user_notification_send(
+            HOST_ALERT_NOTIFY_USER, channel, entity_key, price
+        )
+    except Exception:
+        pass
+
+
+def _send_host_alert_channels(
+    text: str, *, entity_key: str, price: int, repo: Any
+) -> tuple[int, bool]:
+    """Telegram admin (+ email opcional).
+
+    Returns ``(delivered, done)``: ``done`` True si no conviene reintentar
+    (enviado o dedupe activo). False si falló el envío y hay que reintentar.
+    """
+    delivered = 0
+    tried = False
+    blocked = False
+    try:
+        from retail.batch.alerts import (
+            _secret,
+            _telegram_text,
+            destination_chats,
+            send_email,
+        )
+    except Exception:
+        return 0, False
+
+    # Telegram: TELEGRAM_CHAT_ID / canales.local.json
+    if _secret("TELEGRAM_BOT_TOKEN", "telegram_bot_token").strip() and destination_chats():
+        tried = True
+        if not _claim_host_alert(repo, "telegram", entity_key, price):
+            blocked = True
+        else:
+            try:
+                if _telegram_text(text):
+                    delivered += 1
+                else:
+                    _release_host_alert(repo, "telegram", entity_key, price)
+            except Exception as exc:
+                print(f"host-stats: telegram alerta: {exc}", flush=True)
+                _release_host_alert(repo, "telegram", entity_key, price)
 
     to_addr = _secret("ALERT_EMAIL_TO", "alert_email_to").strip()
     if to_addr and _secret("SMTP_HOST", "smtp_host").strip():
-        claimed_em = True
-        if hasattr(repo, "claim_user_notification_send"):
-            claimed_em = repo.claim_user_notification_send(
-                HOST_ALERT_NOTIFY_USER,
-                "email",
-                entity_key,
-                price,
-                cooldown_days=HOST_ALERT_NOTIFY_COOLDOWN_DAYS,
-            )
-        if claimed_em:
+        tried = True
+        if not _claim_host_alert(repo, "email", entity_key, price):
+            blocked = True
+        else:
             subject = text.split("\n", 1)[0][:120] or "Hosts · alerta"
             try:
                 if send_email(to_addr, subject, text):
                     delivered += 1
-                elif hasattr(repo, "release_user_notification_send"):
-                    repo.release_user_notification_send(
-                        HOST_ALERT_NOTIFY_USER, "email", entity_key, price
-                    )
+                else:
+                    _release_host_alert(repo, "email", entity_key, price)
             except Exception as exc:
                 print(f"host-stats: email alerta: {exc}", flush=True)
-                if hasattr(repo, "release_user_notification_send"):
-                    try:
-                        repo.release_user_notification_send(
-                            HOST_ALERT_NOTIFY_USER, "email", entity_key, price
-                        )
-                    except Exception:
-                        pass
-    return delivered
+                _release_host_alert(repo, "email", entity_key, price)
+
+    if not tried:
+        return 0, False
+    return delivered, (delivered > 0 or blocked)
 
 
 def notify_host_alerts(repo: Any, *, payload: dict[str, Any] | None = None) -> int:
@@ -972,6 +1246,17 @@ def notify_host_alerts(repo: Any, *, payload: dict[str, Any] | None = None) -> i
             generations[key] = int(generations.get(key) or 0) + 1
             notified.pop(key, None)
 
+    if pending and not _admin_alert_channels_ready():
+        _save_notify_state(
+            repo,
+            {
+                "active": current_active,
+                "notified": notified,
+                "generations": generations,
+            },
+        )
+        return 0
+
     delivered = 0
     for host, alert, key, score in pending:
         code = str(alert.get("code") or "")
@@ -979,11 +1264,11 @@ def notify_host_alerts(repo: Any, *, payload: dict[str, Any] | None = None) -> i
         entity_key = f"host:{key}:g{gen}"
         price = _alert_metric_price(code, host)
         text = _format_host_alert_text(host, alert)
-        sent = _send_host_alert_channels(
+        sent, done = _send_host_alert_channels(
             text, entity_key=entity_key, price=price, repo=repo
         )
         delivered += sent
-        if sent:
+        if done:
             notified[key] = score
 
     _save_notify_state(
@@ -1011,6 +1296,7 @@ def _history_point(stats: dict[str, Any]) -> dict[str, Any]:
     ram = stats.get("ram") if isinstance(stats.get("ram"), dict) else {}
     disk = stats.get("disk") if isinstance(stats.get("disk"), dict) else {}
     temp = stats.get("temperature") if isinstance(stats.get("temperature"), dict) else {}
+    power = stats.get("power") if isinstance(stats.get("power"), dict) else {}
     docker = stats.get("docker") if isinstance(stats.get("docker"), dict) else {}
     return {
         "t": stats.get("reported_at"),
@@ -1018,6 +1304,7 @@ def _history_point(stats: dict[str, Any]) -> dict[str, Any]:
         "ram": ram.get("percent"),
         "disk": disk.get("percent"),
         "temp": temp.get("celsius"),
+        "pwr": power.get("watts"),
         "dkr": docker.get("reclaimable_bytes"),
     }
 
@@ -1077,6 +1364,7 @@ def merge_host_history(
                 "ram": row.get("ram"),
                 "disk": row.get("disk"),
                 "temp": row.get("temp"),
+                "pwr": row.get("pwr"),
                 "dkr": row.get("dkr"),
             }
         )
@@ -1213,6 +1501,7 @@ def admin_hosts_payload(repo: Any) -> dict[str, Any]:
                 "ram": None,
                 "disk": None,
                 "temperature": None,
+                "power": None,
                 "docker": None,
                 "facts": None,
                 "history": [],
@@ -1242,6 +1531,7 @@ def admin_hosts_payload(repo: Any) -> dict[str, Any]:
             "ram": raw.get("ram"),
             "disk": raw.get("disk"),
             "temperature": raw.get("temperature"),
+            "power": raw.get("power"),
             "docker": raw.get("docker"),
             "facts": raw.get("facts") if isinstance(raw.get("facts"), dict) else None,
             "history": history,
@@ -1287,7 +1577,7 @@ def admin_hosts_payload(repo: Any) -> dict[str, Any]:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Reporta CPU/RAM/disco/temp del host a Mongo.")
+    parser = argparse.ArgumentParser(description="Reporta CPU/RAM/disco/temp/potencia del host a Mongo.")
     parser.add_argument("--once", action="store_true", help="Una sola publicación (default)")
     parser.add_argument("--loop", action="store_true", help="Publicar en bucle")
     parser.add_argument(
@@ -1319,10 +1609,12 @@ def main() -> None:
                     if stats:
                         temp = (stats.get("temperature") or {}).get("celsius")
                         temp_txt = f" temp={temp}°C" if temp is not None else ""
+                        pwr = (stats.get("power") or {}).get("watts")
+                        pwr_txt = f" pwr={pwr}W" if pwr is not None else ""
                         print(
                             f"host-stats: {display_label(stats)} "
                             f"{stats.get('ip')} cpu={stats.get('cpu', {}).get('percent')}%"
-                            f"{temp_txt}",
+                            f"{temp_txt}{pwr_txt}",
                             flush=True,
                         )
                 except Exception as exc:

@@ -94,7 +94,28 @@ cd ~/precios
 
 Cada pin solo toca su cursor/heartbeat. El secuencial no pelea con los pines gracias a `CYBER_DAY_EXCLUDE_LIST_IDS`.
 
-Los workers reportan CPU/RAM/disco del host a Mongo (`cyber_day_host_stats:{ip}` vía `retail.host_stats`); `GET /api/admin/cyber-day` expone `worker_hosts` (dedupe por IP, etiqueta **Orange Pi**) y `/cyber-day` muestra el panel **Host scrape**. Vista de los tres hosts (BMAX / soyo / Orange Pi): `/hosts` y `GET /api/admin/hosts`. En BMAX/soyo: `bash scripts/install-host-stats-cron.sh` (cron cada minuto → `python -m retail.host_stats --once`).
+Los workers reportan CPU/RAM/disco/temp/potencia del host a Mongo (`cyber_day_host_stats:{ip}` vía `retail.host_stats`); `GET /api/admin/cyber-day` expone `worker_hosts` (dedupe por IP, etiqueta **Orange Pi**) y `/cyber-day` muestra el panel **Host scrape**. Vista de los tres hosts (BMAX / soyo / Orange Pi): `/hosts` y `GET /api/admin/hosts`. En BMAX/soyo: `bash scripts/install-host-stats-cron.sh` (cron cada minuto → `python -m retail.host_stats --once`).
+
+**Potencia (W) en `/hosts`:** el wrapper `scripts/host-stats-report.sh` inyecta `HOST_STATS_POWER_W` (historial `pwr`). Fuentes por host:
+
+| Host | Sensor | Notas |
+|------|--------|--------|
+| **soyo** (N150) | Intel RAPL `package-0` | `energy_uj` es root-only; el cron usa `docker … nsenter` al sysfs del host (usuario en grupo `docker`). Opcional: hacer legible RAPL (más rápido, sin contenedor). |
+| **BMAX** (Ryzen 5825U) | RAPL `package-0` (preferido); fallback `amdgpu` `power1_input` (PPT, µW) | Mismo esquema nsenter; `amdgpu` ya es world-readable. |
+| **Orange Pi** | — | Suele no exponer RAPL/hwmon power; la UI muestra **sin sensor**. |
+
+Opcional (una vez, con sudo) para leer RAPL sin Docker:
+
+```bash
+# Persistente vía tmpfiles (ajusta rutas si hay más zonas)
+sudo tee /etc/tmpfiles.d/host-stats-rapl.conf <<'EOF'
+z /sys/class/powercap/intel-rapl:0/energy_uj 0444 root root -
+z /sys/class/powercap/intel-rapl:0:0/energy_uj 0444 root root -
+EOF
+sudo systemd-tmpfiles --create /etc/tmpfiles.d/host-stats-rapl.conf
+```
+
+**Alertas de error (admins):** tras cada reporte (o `python -m retail.host_stats --check-alerts`) se evalúan los tres hosts. Si aparece o empeora `stale` / `no_data` / `disk_hot` / `temp_hot`, se notifica solo al canal admin de Telegram (`TELEGRAM_CHAT_ID` / `canales.local.json`) y, si está configurado, a `ALERT_EMAIL_TO`. No se envía a usuarios finales. Dedupe: estado en Mongo + `claim_user_notification_send` por host+código (cooldown `HOST_STATS_ALERT_COOLDOWN_DAYS`, default 1 día; reenvía si empeora o si el error vuelve tras limpiarse). Warns (`disk_warn`, `temp_warn`, `ram_warn`, `docker_reclaim`) quedan en la UI `/hosts` sin Telegram.
 
 Local / manual:
 

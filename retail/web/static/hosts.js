@@ -93,6 +93,18 @@
     return Math.min(100, 85 + over * 15);
   }
 
+  /** Mapea W → % del anillo (escala típica mini-PC / APU ~0–60 W). */
+  function powerGaugePercent(watts) {
+    const w = Number(watts);
+    if (!Number.isFinite(w) || w <= 0) return 0;
+    const soft = 30;
+    const hard = 60;
+    if (w < soft) return Math.min(64, (w / soft) * 65);
+    if (w < hard) return 65 + ((w - soft) / (hard - soft)) * 20;
+    const over = Math.min(1, (w - hard) / 40);
+    return Math.min(100, 85 + over * 15);
+  }
+
   function metricBlock(kind, data, thresholds) {
     const cpu = data || {};
     if (kind === "cpu") {
@@ -127,6 +139,22 @@
         cpu.source ? String(cpu.source) : null,
       ].filter(Boolean).join(" · ");
       return `<div class="cyber-host-metric cyber-host-metric-temp">${gaugeSvg(fill, "Temp", { display: `${rounded}°` })}`
+        + `<p class="muted">${escapeHtml(detail)}</p></div>`;
+    }
+    if (kind === "power") {
+      const w = cpu.watts;
+      if (w == null || !Number.isFinite(Number(w))) {
+        return `<div class="cyber-host-metric cyber-host-metric-power">${gaugeSvg(0, "Watts", { display: "—", empty: true })}`
+          + `<p class="muted">sin sensor</p></div>`;
+      }
+      const n = Number(w);
+      const rounded = n >= 10 ? Math.round(n) : Math.round(n * 10) / 10;
+      const fill = powerGaugePercent(n);
+      const detail = [
+        `${n.toFixed(1)} W`,
+        cpu.source ? String(cpu.source) : null,
+      ].filter(Boolean).join(" · ");
+      return `<div class="cyber-host-metric cyber-host-metric-power">${gaugeSvg(fill, "Watts", { display: `${rounded}` })}`
         + `<p class="muted">${escapeHtml(detail)}</p></div>`;
     }
     const freeLine = cpu.free_bytes != null
@@ -236,9 +264,10 @@
   function hostSparklines(host, thresholds) {
     const history = Array.isArray(host?.history) ? host.history : [];
     const temps = historySeries(history, "temp");
+    const pwrs = historySeries(history, "pwr");
     const cpus = historySeries(history, "cpu");
     const rams = historySeries(history, "ram");
-    if (temps.length < 2 && cpus.length < 2 && rams.length < 2) return "";
+    if (temps.length < 2 && pwrs.length < 2 && cpus.length < 2 && rams.length < 2) return "";
     const range = historyTimeRangeLabel(history);
     const color = HOST_CHART_COLORS[host.id] || "var(--accent)";
     const warn = Number(thresholds?.temp_warn);
@@ -254,6 +283,17 @@
           stroke: color,
           guide: tempGuide,
           ariaLabel: `Temperatura ${host.label || host.id}`,
+        })
+        + `</div>`
+      );
+    }
+    if (pwrs.length >= 2) {
+      bits.push(
+        `<div class="hosts-spark-block">`
+        + `<span class="hosts-spark-label">Watts</span>`
+        + sparklineSvg(pwrs, {
+          stroke: color,
+          ariaLabel: `Potencia ${host.label || host.id}`,
         })
         + `</div>`
       );
@@ -407,6 +447,12 @@
       yMin: null,
       yMax: null,
     });
+    const pwrChart = multiHostChart(hosts, "pwr", {
+      title: "Potencia",
+      unit: "W",
+      yMin: 0,
+      yMax: null,
+    });
     const cpuChart = multiHostChart(hosts, "cpu", {
       title: "CPU",
       unit: "%",
@@ -420,17 +466,21 @@
       yMin: 0,
       yMax: 100,
     });
-    if (!tempChart && !cpuChart && !ramChart) {
+    if (!tempChart && !pwrChart && !cpuChart && !ramChart) {
       const hasLiveTemp = hosts.some((h) => {
         const c = Number(h?.temperature?.celsius);
         return Number.isFinite(c);
       });
+      const hasLivePwr = hosts.some((h) => {
+        const w = Number(h?.power?.watts);
+        return Number.isFinite(w);
+      });
       const hasPartialHist = hosts.some((h) => Array.isArray(h?.history) && h.history.length >= 1);
-      if (hasLiveTemp || hasPartialHist) {
+      if (hasLiveTemp || hasLivePwr || hasPartialHist) {
         box.hidden = false;
         box.innerHTML = `<div class="hosts-trends-head">`
           + `<h3>Tendencias</h3>`
-          + `<p class="muted">Acumulando historial (≥2 muestras) para graficar temperatura, CPU y RAM. El anillo Temp de cada tarjeta ya muestra el valor actual.</p>`
+          + `<p class="muted">Acumulando historial (≥2 muestras) para graficar temperatura, potencia, CPU y RAM. Los anillos Temp/Watts de cada tarjeta ya muestran el valor actual.</p>`
           + `</div>`;
         return;
       }
@@ -443,7 +493,7 @@
       + `<h3>Tendencias</h3>`
       + `<p class="muted">Historial publicado por cada host (retención acotada).</p>`
       + `</div>`
-      + `<div class="hosts-trends-grid">${tempChart}${cpuChart}${ramChart}</div>`;
+      + `<div class="hosts-trends-grid">${tempChart}${pwrChart}${cpuChart}${ramChart}</div>`;
   }
 
   /** Comandos seguros sugeridos según código de alerta (copiar → pegar en el host). */
@@ -814,12 +864,13 @@
       const tone = cardTone(host);
       const sub = [host.ip, host.hostname].filter(Boolean).join(" · ");
       const thresholds = payload?.thresholds || {};
-      // Orden: CPU · RAM · Temp · Disco — Temp junto a RAM (mismo estilo de anillo).
-      const gauges = host.cpu || host.ram || host.disk || host.temperature
+      // Orden: CPU · RAM · Temp · Watts · Disco — Temp/Watts con el mismo estilo de anillo.
+      const gauges = host.cpu || host.ram || host.disk || host.temperature || host.power
         ? [
             metricBlock("cpu", host.cpu, thresholds),
             metricBlock("ram", host.ram, thresholds),
             metricBlock("temp", host.temperature, thresholds),
+            metricBlock("power", host.power, thresholds),
             metricBlock("disk", host.disk, thresholds),
           ].join("")
         : `<p class="muted">Aún no hay métricas publicadas para este host.</p>`;
