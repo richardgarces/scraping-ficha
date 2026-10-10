@@ -29,45 +29,89 @@ def release_refresh(store: str, product_id: str) -> None:
         _inflight.discard((store, product_id))
 
 
-def refresh_product_price(repo: Any, store: str, product_id: str) -> dict[str, Any]:
-    """Scrape de la ficha en tienda + upsert + cola de oferta real."""
-    document = repo.product_detail(store, product_id)
-    if document is None:
-        return {"ok": False, "detail": "Producto no encontrado."}
-    try:
-        from retail.registry import get_client
+def _destination_refresh_target(store: str, product_id: str, document: dict[str, Any]) -> tuple[str, str] | None:
+    """Para agregadores (knasta), el precio real vive en la tienda de destino."""
+    if str(store or "").lower() != "knasta":
+        return None
+    retail, sep, sku = str(product_id or "").partition("#")
+    if sep and retail and sku:
+        return retail.lower(), sku
+    url = str(document.get("url") or "")
+    if "falabella.com" in url and "/product/" in url:
+        parts = [part for part in url.split("/") if part]
+        try:
+            return "falabella", parts[parts.index("product") + 1]
+        except (ValueError, IndexError):
+            return None
+    return None
 
-        client = get_client(store, delay=0, timeout=12, retries=1)
-    except Exception as exc:
-        return {"ok": False, "detail": f"Tienda no disponible: {exc}"}
+
+def _scrape_product(store: str, product_id: str, raw_url: str | None) -> Any | None:
+    from retail.registry import get_client
+
+    client = get_client(store, delay=0, timeout=12, retries=1)
     try:
         products = client.scrape(
-            Target(kind="product", product_id=product_id, raw_url=document.get("url")),
+            Target(kind="product", product_id=product_id, raw_url=raw_url),
             max_pages=1,
             max_items=1,
         )
-    except Exception as exc:
-        logger.info("Refresh precio falló %s/%s: %s", store, product_id, exc)
-        return {"ok": False, "detail": "No se pudo consultar el precio ahora."}
     finally:
         try:
             client.close()
         except Exception:
             pass
-    product = next(
+    if not products:
+        return None
+    return next(
         (
-            item for item in products or []
+            item for item in products
             if str(getattr(item, "product_id", "") or "") == str(product_id)
             or str(getattr(item, "sku_id", "") or "") == str(product_id)
         ),
-        None,
+        products[0],
     )
-    if product is None and products:
-        product = products[0]
+
+
+def refresh_product_price(repo: Any, store: str, product_id: str) -> dict[str, Any]:
+    """Scrape de la ficha en tienda + upsert + cola de oferta real."""
+    document = repo.product_detail(store, product_id)
+    if document is None:
+        return {"ok": False, "detail": "Producto no encontrado."}
+
+    product = None
+    try:
+        product = _scrape_product(store, product_id, document.get("url"))
+    except Exception as exc:
+        logger.info("Refresh precio falló %s/%s: %s", store, product_id, exc)
+
+    # Knasta a menudo cae por Cloudflare; el aviso apunta a Falabella/Paris/etc.
     if product is None:
-        return {"ok": False, "detail": "La tienda no devolvió el producto."}
+        destination = _destination_refresh_target(store, product_id, document)
+        if destination:
+            dest_store, dest_id = destination
+            try:
+                product = _scrape_product(dest_store, dest_id, document.get("url"))
+            except Exception as exc:
+                logger.info(
+                    "Refresh destino falló %s/%s via %s/%s: %s",
+                    store, product_id, dest_store, dest_id, exc,
+                )
+            if product is not None:
+                # Conservar la clave del aviso agregado; solo traer precios frescos.
+                product.store = store
+                product.product_id = product_id
+                if not product.sku_id:
+                    product.sku_id = dest_id
+
+    if product is None:
+        return {"ok": False, "detail": "No se pudo consultar el precio ahora."}
+
     saved = repo.upsert_many([product], extra={"source": "ficha_refresh"})
     offer = product.to_dict(flatten_specs=False) if hasattr(product, "to_dict") else {}
+    # La oferta real/historial deben quedar bajo la clave de la ficha abierta.
+    offer["store"] = store
+    offer["product_id"] = product_id
     queue = {"candidates": 0, "enqueued": 0}
     try:
         if offer.get("price") and offer.get("price_normal"):
