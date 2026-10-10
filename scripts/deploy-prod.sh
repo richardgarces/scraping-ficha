@@ -96,13 +96,39 @@ restore_precios_routing() {
     || echo "[!] No se pudo desactivar mantenimiento"
 }
 
+# «Continuar» / Iniciar ahora corren en threads de precios-web. Si recreamos el
+# contenedor a mitad, el ThreadPoolExecutor muere con
+# «cannot schedule new futures after shutdown». Cierra esas corridas con cursor
+# de reanudación *antes* del recreate.
+if docker ps --format '{{.Names}}' 2>/dev/null | grep -qx precios-web; then
+  echo "==> Cerrando corridas batch en web antes del recreate (evita futures-after-shutdown)"
+  docker exec precios-web python -c '
+from retail.search import connect_repo
+repo = connect_repo()
+if repo is None:
+    raise SystemExit(0)
+try:
+    n = repo.fail_stale_batch_runs(hours=1.0 / 60.0)
+    print(f"corridas cerradas para reanudar: {n}")
+finally:
+    repo.close()
+' 2>/dev/null || echo "[!] No se pudieron cerrar corridas web (se sigue con el deploy)"
+fi
+
 IFS='|' read -r -a build_cmd <<<"${SPEC}"
+# cyber-worker vive en Orange Pi / soyo — no levantarlo en BMAX.
 if "${build_cmd[@]}" build \
-  && compose_up_safe "$SPEC" precios-web precios-real-offer-worker precios-cyber-worker precios-mongo precios-qdrant precios-redis \
+  && compose_up_safe "$SPEC" precios-web precios-real-offer-worker precios-mongo precios-qdrant precios-redis \
   && wait_precios_health; then
   deploy_ok=true
 else
   echo "[!] Deploy o health check falló"
+fi
+
+if docker ps --format '{{.Names}}' 2>/dev/null | grep -qx precios-cyber-worker; then
+  echo "==> Deteniendo precios-cyber-worker en BMAX (scrape Cyber fuera de este host)"
+  docker update --restart=no precios-cyber-worker >/dev/null 2>&1 || true
+  docker stop precios-cyber-worker >/dev/null 2>&1 || true
 fi
 
 # Caddy conserva durante un tiempo la IP resuelta del contenedor anterior.

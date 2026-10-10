@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import Any
 
 from retail.batch.alerts import _money, product_email_html, send_email
-from retail.offer_screenshot import apply_offer_screenshot, is_local_image
+from retail.offer_screenshot import apply_offer_screenshots, is_local_image
 from retail.short_links import attach_short_url, public_product_url
 
 def _as_int(value: Any) -> int | None:
@@ -132,13 +132,14 @@ def notify_price_changes(repo: Any, changes: list[dict[str, Any]]) -> int:
     by_product: dict[tuple[str, str], list[dict[str, Any]]] = {}
     for alert in alerts:
         by_product.setdefault((alert.get("store") or "", alert.get("product_id") or ""), []).append(alert)
-    sent = 0
+    from retail.store_display import display_store
+
+    prepared: list[dict[str, Any]] = []
+    media: dict[str, dict[str, Any]] = {}
     for change in changes:
         watchers = by_product.get((change["store"], change["product_id"])) or []
         if not watchers:
             continue
-        from retail.store_display import display_store
-
         display_store_id, store_name = display_store(change)
         direction = "Bajó de precio" if int(change["price"]) < int(change["previous_price"]) else "Subió de precio"
         payload = {
@@ -155,8 +156,26 @@ def notify_price_changes(repo: Any, changes: list[dict[str, Any]]) -> int:
             },
         }
         attach_short_url(payload, repo)
-        original_image = payload.get("image_url")
-        apply_offer_screenshot(payload)
+        media_key = f"{change['store']}:{change['product_id']}"
+        media[media_key] = payload
+        prepared.append(
+            {
+                "change": change,
+                "watchers": watchers,
+                "payload": payload,
+                "media_key": media_key,
+                "direction": direction,
+                "original_image": payload.get("image_url"),
+            }
+        )
+    apply_offer_screenshots(media)
+    sent = 0
+    for item in prepared:
+        change = item["change"]
+        watchers = item["watchers"]
+        payload = item["payload"]
+        direction = item["direction"]
+        original_image = item["original_image"]
         image_url = payload.get("image_url") or change.get("image_url")
         change_with_link = {**change, "short_url": payload.get("short_url")}
         subject, body = price_change_message(change_with_link)

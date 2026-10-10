@@ -1,8 +1,9 @@
 """Lista de compra multi-tienda: matriz lista × tiendas desde el catálogo Mongo.
 
-No scrapea en la petición HTTP. Rellena celdas con el mejor match por tienda
-del grupo (identidad ≥80% o, si la línea es corta/genérica, query ⊆ nombre/marca)
-y resume la canasta. Los matches por subconjunto quedan sin confirmar para revisión.
+Cotizar responde desde Mongo (sin scrape síncrono). Rellena celdas con el mejor
+match por tienda (identidad ≥80% o query ⊆ nombre/marca con envase compatible).
+Los misses encolan scrape async (`quote_miss_jobs`). Los matches por subconjunto
+quedan sin confirmar para revisión.
 """
 from __future__ import annotations
 
@@ -13,6 +14,7 @@ import re
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from retail.compare import pack_tokens
 from retail.pricing import buy_or_wait, parse_moment
 from retail.quotes import QuoteLine, candidate_for, column_key, product_from_document
 from retail.quote_units import unit_price_for_quote
@@ -40,22 +42,97 @@ def is_shopping_list(quote: dict) -> bool:
     return str(quote.get("mode") or MODE_QUOTE) == MODE_SHOPPING_LIST
 
 
+def _store_catalog_counts(repo: Any | None, store_ids: list[str]) -> dict[str, int]:
+    """Conteo aproximado de productos por tienda (0 = catálogo vacío)."""
+    if repo is None or not store_ids:
+        return {}
+    counts: dict[str, int] = {store_id: 0 for store_id in store_ids}
+    coll = getattr(repo, "collection", None)
+    if coll is None:
+        return counts
+    try:
+        for row in coll.aggregate(
+            [
+                {"$match": {"store": {"$in": store_ids}}},
+                {"$group": {"_id": "$store", "n": {"$sum": 1}}},
+            ],
+            maxTimeMS=5000,
+        ):
+            key = str(row.get("_id") or "").strip().lower()
+            if key in counts:
+                counts[key] = int(row.get("n") or 0)
+    except Exception:
+        for store_id in store_ids:
+            try:
+                counts[store_id] = int(coll.count_documents({"store": store_id}, limit=1))
+            except Exception:
+                counts[store_id] = 0
+    return counts
+
+
 def available_store_groups(*, repo: Any | None = None) -> list[dict[str, Any]]:
-    """Grupos con sus tiendas conocidas (para el selector de la UI)."""
+    """Grupos con sus tiendas conocidas (para el selector de la UI).
+
+    Cada grupo incluye `store_ids` (compat) y `stores` con título legible + logo
+    estático existente (`/static/logos/...`, o `_store.svg` si falta el asset).
+    """
+    from retail.store_display import public_store_label, store_logo_static_url
+
     rows = []
     for item in list_store_categories(repo=repo):
         stores = stores_for_group(item["id"], repo=repo)
         if not stores:
             continue
+        catalog = _store_catalog_counts(repo, stores)
+        store_rows = [
+            {
+                "id": store_id,
+                "title": public_store_label(store_id),
+                "logo": store_logo_static_url(store_id),
+                "product_count": int(catalog.get(store_id) or 0),
+                "catalog_empty": int(catalog.get(store_id) or 0) <= 0,
+            }
+            for store_id in stores
+        ]
+        empty_n = sum(1 for row in store_rows if row["catalog_empty"])
         rows.append({
             "id": item["id"],
             "title": item["title"],
             "store_ids": stores,
+            "stores": store_rows,
+            "empty_catalog_stores": empty_n,
         })
     return rows
 
 
+def selected_store_groups(quote: dict) -> list[str]:
+    """Categorías elegidas en la UI (multi); fallback a ``store_group`` único."""
+    raw = quote.get("store_groups")
+    groups: list[str] = []
+    if isinstance(raw, list):
+        groups = [str(item).strip().lower() for item in raw if str(item).strip()]
+    if not groups:
+        single = str(quote.get("store_group") or "").strip().lower()
+        if single:
+            groups = [single]
+    return list(dict.fromkeys(groups))
+
+
 def resolve_list_stores(quote: dict, *, repo: Any | None = None) -> list[str]:
+    """Tiendas a cotizar: categorías seleccionadas → todas sus tiendas; o ``store_ids`` legacy."""
+    groups = []
+    raw_groups = quote.get("store_groups")
+    if isinstance(raw_groups, list) and any(str(item).strip() for item in raw_groups):
+        groups = selected_store_groups(quote)
+    if groups:
+        stores: list[str] = []
+        for group in groups:
+            found = stores_for_group(group, repo=repo)
+            if not found:
+                raise ValueError(f"No hay tiendas registradas en el grupo «{group}».")
+            stores.extend(found)
+        return list(dict.fromkeys(stores))
+
     explicit = [str(s).strip().lower() for s in (quote.get("store_ids") or []) if str(s).strip()]
     if explicit:
         return explicit
@@ -76,6 +153,28 @@ def _line_search_query(line: QuoteLine) -> str:
     if line.brand:
         parts.append(rewrite_search_query(line.brand))
     return " ".join(part for part in parts if part).strip()
+
+
+def _declarative_packs(text: str) -> set[str]:
+    """Envase declarado en el texto; ignora el «1un» sintético de pack_tokens."""
+    tokens = set(pack_tokens(text or ""))
+    tokens.discard("1un")
+    return tokens
+
+
+def _pack_compatible(line_query: str, product_name: str, brand: str = "") -> tuple[bool, float]:
+    """Si ambos lados declaran envase y no hay intersección → incompatible.
+
+    Devuelve (ok, rank_boost). Sin envase explícito en un lado no restringe
+    (p. ej. lista «azúcar» puede sugerir 400 g o 1 kg).
+    """
+    left = _declarative_packs(line_query)
+    right = _declarative_packs(f"{product_name or ''} {brand or ''}".strip())
+    if not left or not right:
+        return True, 0.0
+    if left & right:
+        return True, 0.4
+    return False, 0.0
 
 
 def _price_age_hours(observed: datetime | None, now: datetime | None = None) -> float | None:
@@ -102,22 +201,52 @@ def _match_reason(candidate: dict) -> str:
     return "Coincidencia de catálogo"
 
 
-def _search_documents(repo: Any, line: QuoteLine) -> list[dict]:
+def _search_query_variants(line: QuoteLine) -> list[str]:
+    """Hasta 5 consultas: GTIN, nombre+marca, nombre, marca+tipo, tokens."""
     primary = _line_search_query(line)
-    queries = [primary] if primary else []
+    name_only = rewrite_search_query(
+        re.sub(r"\s+", " ", _PACK_NOISE_RE.sub(" ", line.name or "")).strip()
+    )
+    brand = rewrite_search_query(line.brand or "")
+    queries: list[str] = []
     if line.gtin:
-        queries.insert(0, line.gtin)
-    # Tokens sueltos ayudan cuando la frase completa no pega en $text.
-    queries.extend(tokenize(primary)[:3])
+        queries.append(str(line.gtin).strip())
+    if primary:
+        queries.append(primary)
+    if name_only and name_only != primary:
+        queries.append(name_only)
+    # Marca + primera palabra de producto (p. ej. «iansa azúcar»).
+    if brand and name_only:
+        head = next((tok for tok in tokenize(name_only) if tok != fold(brand)), "")
+        if head:
+            queries.append(f"{brand} {head}")
+    queries.extend(tokenize(primary or name_only)[:3])
+    return [q for q in list(dict.fromkeys(queries)) if q][:5]
+
+
+def search_line_documents(repo: Any, line: QuoteLine) -> list[dict]:
+    """Documentos de catálogo candidatos para una línea (GTIN + variantes de texto)."""
     documents: dict[tuple[str, str], dict] = {}
-    for query in list(dict.fromkeys(queries))[:5]:
-        if not query:
-            continue
-        for doc in repo.find_by_query(query, limit=100):
+
+    def take(docs: list[dict]) -> None:
+        for doc in docs:
             key = (str(doc.get("store") or ""), str(doc.get("product_id") or ""))
             if key[0] and key[1]:
                 documents[key] = doc
+
+    gtin = str(line.gtin or "").strip()
+    if gtin and hasattr(repo, "find_by_gtin"):
+        try:
+            take(repo.find_by_gtin(gtin, limit=50))
+        except Exception:
+            pass
+    for query in _search_query_variants(line):
+        take(repo.find_by_query(query, limit=100))
     return list(documents.values())
+
+
+# Alias interno (tests / callers previos).
+_search_documents = search_line_documents
 
 
 def _token_positively_present(token: str, name: str, brand: str) -> bool:
@@ -168,6 +297,14 @@ def _query_subset_candidate(line: QuoteLine, doc: dict, now: datetime | None = N
     query = _line_search_query(line)
     if not query:
         return None
+    # Comparar envase contra el nombre original de la línea (conserva «1.5 kg»).
+    pack_ok, pack_boost = _pack_compatible(
+        f"{line.name or ''} {line.brand or ''}".strip() or query,
+        product.name or "",
+        product.brand or "",
+    )
+    if not pack_ok:
+        return None
     relevance = score_product(query, product)
     if not relevance.accepted:
         return None
@@ -207,7 +344,7 @@ def _query_subset_candidate(line: QuoteLine, doc: dict, now: datetime | None = N
     if product.currency != "CLP":
         issues.append("La moneda del catálogo no es CLP.")
     comparable_price = unit_price if unit_ok and unit_price else int(price)
-    rank = _query_subset_rank(query, product.name or "", product.brand or "")
+    rank = _query_subset_rank(query, product.name or "", product.brand or "") + pack_boost
     confidence = round(
         min(0.79, max(LIST_QUERY_SUBSET_CONFIDENCE, 0.55 + 0.25 * float(relevance.score) + max(0.0, rank) * 0.1)),
         3,
@@ -412,6 +549,7 @@ def _empty_cell(*, reason: str = "no_match", label: str | None = None) -> dict:
     labels = {
         "no_match": "sin match suficiente (prueba EAN o nombre más corto)",
         "no_catalog": "sin producto en catálogo",
+        "searching": "buscando en tienda…",
         "stale_only": "precio fuera de ventana 48 h",
         "unknown": EMPTY_CELL_LABEL,
     }
@@ -470,10 +608,26 @@ def shopping_matrix_report(
 ) -> dict:
     """Matriz fila=producto lista, columnas=tiendas + resumen de canasta."""
     now = now or datetime.now(timezone.utc)
-    stores = list(stores or resolve_list_stores(quote))
+    if stores is None:
+        if isinstance(quote.get("resolved_stores"), list):
+            stores = list(quote.get("resolved_stores") or [])
+        elif quote.get("store_ids") or quote.get("store_group"):
+            stores = resolve_list_stores(quote)
+        else:
+            stores = []
+    else:
+        stores = list(stores)
     rows = []
     store_totals = {
-        store: {"subtotal": 0, "matched_items": 0, "missing_items": 0, "missing_names": []}
+        store: {
+            "subtotal": 0,
+            "catalog_subtotal": 0,
+            "matched_items": 0,
+            "usable_items": 0,
+            "stale_items": 0,
+            "missing_items": 0,
+            "missing_names": [],
+        }
         for store in stores
     }
     best_per_item = []
@@ -502,8 +656,15 @@ def shopping_matrix_report(
                     "usable": cell["usable"],
                     "confidence": cell["confidence"],
                 })
-                store_totals[store]["subtotal"] += cell["subtotal"]
                 store_totals[store]["matched_items"] += 1
+                # Canasta actionable: solo precios usable (frescos / sin issues).
+                if cell["usable"]:
+                    store_totals[store]["usable_items"] += 1
+                    store_totals[store]["subtotal"] += cell["subtotal"]
+                else:
+                    store_totals[store]["catalog_subtotal"] += cell["subtotal"]
+                    if cell.get("stale"):
+                        store_totals[store]["stale_items"] += 1
             else:
                 cell = _empty_cell(
                     reason=str(selected.get("empty_reason") or "unknown"),
@@ -514,8 +675,10 @@ def shopping_matrix_report(
             cells[store] = cell
 
         best_item = None
-        if item_prices:
-            ranked = sorted(item_prices, key=lambda row: (not row["usable"], row["price"], -row["confidence"]))
+        usable_prices = [row for row in item_prices if row["usable"]]
+        ranked_pool = usable_prices or item_prices
+        if ranked_pool:
+            ranked = sorted(ranked_pool, key=lambda row: (not row["usable"], row["price"], -row["confidence"]))
             best_item = ranked[0]
         best_per_item.append({
             "index": index,
@@ -533,20 +696,32 @@ def shopping_matrix_report(
     basket = []
     for store in stores:
         totals = store_totals[store]
+        n_items = len(quote["items"])
+        usable_complete = (
+            totals["missing_items"] == 0
+            and totals["usable_items"] == n_items
+            and totals["matched_items"] == n_items
+        )
         basket.append({
             "store": store,
-            "subtotal": totals["subtotal"] if totals["matched_items"] else None,
+            "subtotal": totals["subtotal"] if totals["usable_items"] else None,
+            "catalog_subtotal": (
+                (totals["subtotal"] + totals["catalog_subtotal"])
+                if totals["matched_items"] else None
+            ),
             "matched_items": totals["matched_items"],
+            "usable_items": totals["usable_items"],
+            "stale_items": totals["stale_items"],
             "missing_items": totals["missing_items"],
             "missing_names": totals["missing_names"],
-            "complete": totals["missing_items"] == 0 and totals["matched_items"] == len(quote["items"]),
+            "complete": usable_complete,
         })
 
     def basket_rank(row: dict):
         if row["subtotal"] is None:
             return (3, 0, 0)
-        # Prefer complete baskets, then more coverage, then lower total.
-        return (0 if row["complete"] else 1, -row["matched_items"], row["subtotal"])
+        # Prefer complete (fresh) baskets, then more usable coverage, then lower total.
+        return (0 if row["complete"] else 1, -row["usable_items"], row["subtotal"])
 
     ranked_basket = sorted(basket, key=basket_rank)
     best_store = next((row for row in ranked_basket if row["subtotal"] is not None), None)
@@ -559,6 +734,10 @@ def shopping_matrix_report(
     stale_cells = sum(
         1 for row in rows for store in stores if row["cells"][store].get("stale")
     )
+    searching_cells = sum(
+        1 for row in rows for store in stores
+        if (row["cells"][store].get("empty_reason") == "searching")
+    )
     summary = {
         "mode": MODE_SHOPPING_LIST,
         "items": len(rows),
@@ -567,6 +746,7 @@ def shopping_matrix_report(
         "matched_cells": matched_cells,
         "confirmed_cells": confirmed_cells,
         "stale_cells": stale_cells,
+        "searching_cells": searching_cells,
         "total_cells": len(rows) * len(stores),
         "price_max_age_hours": PRICE_MAX_AGE_HOURS,
         "best_store": (best_store or {}).get("store"),
@@ -576,16 +756,16 @@ def shopping_matrix_report(
         "basket": ranked_basket,
         "best_per_item": best_per_item,
         "complete": bool(best_store and best_store.get("complete")),
-        "status": "compared" if best_store and best_store.get("matched_items") else "review",
+        "status": "compared" if best_store and best_store.get("usable_items") else "review",
         "status_label": (
             "Comparada" if best_store and best_store.get("complete")
             else ("Revisión" if matched_cells else "Borrador")
         ),
         "note": (
             f"Matriz lista × tiendas con precios del catálogo Mongo "
-            f"(ventana {PRICE_MAX_AGE_HOURS} h). Totales sin despacho. "
-            "Celdas vacías: sin producto en catálogo o sin match suficiente. "
-            "Amarillo = precio fuera de ventana. Usá «Actualizar precios» y regenerá."
+            f"(ventana {PRICE_MAX_AGE_HOURS} h). Totales de canasta solo con precios frescos. "
+            "Celdas vacías: sin producto, sin match o scrape async en curso. "
+            "Amarillo = precio fuera de ventana. «Actualizar precios» regenera la matriz."
         ),
         "shipping_included": False,
         "shipping_note": "Sin despacho: totales solo productos.",
@@ -622,6 +802,9 @@ def matrix_export_csv(report: dict) -> str:
             f"{store} confianza",
             f"{store} fecha precio",
             f"{store} stale",
+            f"{store} usable",
+            f"{store} confirmada",
+            f"{store} estado",
             f"{store} motivo",
             f"{store} ficha",
         ])
@@ -654,17 +837,24 @@ def matrix_export_csv(report: dict) -> str:
                     f"{int(round((cell.get('confidence') or 0) * 100))}%" if cell.get("confidence") is not None else "",
                     cell.get("observed_at") or "",
                     "sí" if cell.get("stale") else "no",
+                    "sí" if cell.get("usable") else "no",
+                    "sí" if cell.get("confirmed") else "no",
+                    "matched",
                     cell.get("match_reason") or "",
                     cell.get("url") or "",
                 ])
             else:
+                empty_reason = cell.get("empty_reason") or "unknown"
                 values.extend([
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                    empty_reason,
                     cell.get("label") or EMPTY_CELL_LABEL,
-                    "",
-                    "",
-                    "",
-                    "",
-                    cell.get("empty_reason") or "",
                     "",
                 ])
         writer.writerow([
@@ -672,13 +862,19 @@ def matrix_export_csv(report: dict) -> str:
             for value in values
         ])
     writer.writerow([])
-    writer.writerow(["Resumen canasta"])
-    writer.writerow(["Tienda", "Subtotal CLP", "Ítems con match", "Faltantes", "Completa"])
+    writer.writerow(["Resumen canasta (solo precios frescos/usable)"])
+    writer.writerow([
+        "Tienda", "Subtotal usable CLP", "Subtotal catálogo CLP",
+        "Ítems usable", "Ítems match", "Stale", "Faltantes", "Completa",
+    ])
     for basket in (report.get("summary") or {}).get("basket") or []:
         writer.writerow([
             basket.get("store"),
             basket.get("subtotal"),
+            basket.get("catalog_subtotal"),
+            basket.get("usable_items"),
             basket.get("matched_items"),
+            basket.get("stale_items"),
             basket.get("missing_items"),
             "sí" if basket.get("complete") else "no",
         ])
@@ -692,6 +888,10 @@ def matrix_export_csv(report: dict) -> str:
     ])
     writer.writerow([])
     writer.writerow(["Nota", best.get("shipping_note") or "Sin despacho: totales solo productos."])
+    writer.writerow(["Generado", report.get("generated_at") or ""])
+    writer.writerow(["Celdas match", best.get("matched_cells") or 0])
     writer.writerow(["Celdas stale", best.get("stale_cells") or 0])
+    writer.writerow(["Celdas buscando", best.get("searching_cells") or 0])
     writer.writerow(["Ventana precio horas", best.get("price_max_age_hours") or PRICE_MAX_AGE_HOURS])
+    writer.writerow(["Completa", "sí" if best.get("complete") else "no"])
     return "\ufeff" + output.getvalue()

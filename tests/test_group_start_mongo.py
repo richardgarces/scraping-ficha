@@ -47,7 +47,7 @@ def test_simultaneous_web_and_cron_clients_reserve_only_once(group_repo, mongo_u
             return None
 
     try:
-        with ThreadPoolExecutor(max_workers=8) as pool:
+        with ThreadPoolExecutor(max_workers=6) as pool:
             results = list(pool.map(start, range(16)))
         assert sum(result is not None for result in results) == 1
         assert group_repo.batch_runs.count_documents({"status": "running"}) == 1

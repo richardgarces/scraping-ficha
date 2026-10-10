@@ -4,6 +4,7 @@ from retail.store_display import (
     clean_store_display_name,
     display_store,
     public_store_label,
+    store_logo_static_url,
 )
 
 
@@ -29,3 +30,11 @@ def test_public_store_label_and_display_store_drop_chile():
     assert display_store({"store": "paris", "store_title": "Paris Chile"}) == ("paris", "Paris")
     # Ids/slugs internos no se renombran.
     assert display_store({"store": "easy", "store_title": "Easy Chile"})[0] == "easy"
+
+
+def test_store_logo_static_url_uses_existing_assets_only():
+    assert store_logo_static_url("falabella") == "/static/logos/falabella.png"
+    assert store_logo_static_url("lider") == "/static/logos/lider.svg"
+    # Sin asset inventado: genérico (la UI muestra inicial).
+    assert store_logo_static_url("elite_professional") == "/static/logos/_store.svg"
+    assert store_logo_static_url("knasta") == "/static/logos/_store.svg"

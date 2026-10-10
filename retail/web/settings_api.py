@@ -497,6 +497,23 @@ def cyber_day_status(request: Request) -> dict:
         repo.close()
 
 
+@router.get("/api/admin/hosts")
+def admin_hosts(request: Request) -> dict:
+    """CPU/RAM/disco de BMAX, soyo y Orange Pi (Mongo host_stats)."""
+    current_user(request, admin=True)
+    repo = connect_repo()
+    if repo is None:
+        raise HTTPException(status_code=503, detail="MongoDB no está disponible.")
+    try:
+        from retail.host_stats import admin_hosts_payload
+
+        return admin_hosts_payload(repo)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Hosts status falló: {exc}") from exc
+    finally:
+        repo.close()
+
+
 @router.get("/api/admin/cyber-day/lists")
 def cyber_day_lists(request: Request) -> dict:
     current_user(request, admin=True)

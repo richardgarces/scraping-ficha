@@ -42,9 +42,10 @@ from retail.search_cache import (
 )
 from retail.search_freq import lookup_top_search, store_top_search_result
 from retail import thumbs
+from retail.concurrency import optional_store_workers, scrape_slot, store_workers
 
 SOURCES = ("scrape", "db", "both")
-STORE_WORKERS = max(1, int(os.environ.get("RETAIL_STORE_WORKERS", "8")))
+STORE_WORKERS = store_workers()
 SEARCH_TIMEOUT = float(os.environ.get("RETAIL_SEARCH_TIMEOUT", "12"))
 READY_STORE_RATIO = 0.80
 READY_OFFER_RATIO = 0.50
@@ -179,19 +180,22 @@ def scrape_store(
         tries = 1
         client_kw["timeout"] = store_timeout
         client_kw["retries"] = 1
-    for attempt in range(1, tries + 1):
-        try:
-            with get_client(store_id, **client_kw) as client:
-                return client.scrape(query, max_pages=1, max_items=max_items), None
-        except Exception as exc:
-            last_error = str(exc)
-            if _is_timeout_exc(exc):
-                last_error = f"timeout ({store_timeout:.0f}s): {last_error}"
-                break
-            if attempt < tries:
-                logger.warning("%s fallo, reintento %s/%s: %s", store_id, attempt + 1, tries, last_error)
-                if delay > 0:
-                    time.sleep(min(3.0, delay * attempt))
+    # Slot global (Redis o in-process): el tamaño del pool no basta si hay
+    # varios Uvicorn / contenedores scrapando a la vez.
+    with scrape_slot():
+        for attempt in range(1, tries + 1):
+            try:
+                with get_client(store_id, **client_kw) as client:
+                    return client.scrape(query, max_pages=1, max_items=max_items), None
+            except Exception as exc:
+                last_error = str(exc)
+                if _is_timeout_exc(exc):
+                    last_error = f"timeout ({store_timeout:.0f}s): {last_error}"
+                    break
+                if attempt < tries:
+                    logger.warning("%s fallo, reintento %s/%s: %s", store_id, attempt + 1, tries, last_error)
+                    if delay > 0:
+                        time.sleep(min(3.0, delay * attempt))
     return [], last_error
 
 
@@ -1381,7 +1385,12 @@ def _run_search_events(
         for key, url in pending:
             if _cancelled(cancel):
                 return
-            thumb_futures[thumb_pool.submit(thumbs.build_thumbnail, url)] = key
+            try:
+                thumb_futures[thumb_pool.submit(thumbs.build_thumbnail, url)] = key
+            except RuntimeError as exc:
+                if "cannot schedule new futures after shutdown" in str(exc):
+                    return
+                raise
 
     def drain_thumbs(*, block: float) -> Iterator[dict[str, Any]]:
         if not thumb_futures:
@@ -1472,7 +1481,7 @@ def _run_search_events(
         yield from emit_progress(db_snapshot)
 
     if optional_ids and not _cancelled(cancel):
-        optional_pool = ThreadPoolExecutor(max_workers=max(1, len(optional_ids)))
+        optional_pool = ThreadPoolExecutor(max_workers=optional_store_workers(len(optional_ids)))
         for store_id in optional_ids:
             optional_futures[
                 optional_pool.submit(
@@ -1510,15 +1519,22 @@ def _run_search_events(
                     started = False
                     while remaining and len(futures) < workers:
                         store_id = remaining.pop(0)
-                        future = pool.submit(
-                            scrape_store,
-                            store_id,
-                            text,
-                            max_items=max_items,
-                            delay=delay,
-                            timeout=timeout,
-                            attempts=attempts,
-                        )
+                        try:
+                            future = pool.submit(
+                                scrape_store,
+                                store_id,
+                                text,
+                                max_items=max_items,
+                                delay=delay,
+                                timeout=timeout,
+                                attempts=attempts,
+                            )
+                        except RuntimeError as exc:
+                            # Interpreter/pool shutting down (deploy SIGTERM / atexit).
+                            if "cannot schedule new futures after shutdown" in str(exc):
+                                remaining.clear()
+                                break
+                            raise
                         futures[future] = store_id
                         by_id[store_id]["state"] = "running"
                         started = True

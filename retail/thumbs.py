@@ -13,7 +13,7 @@ from retail.http import DEFAULT_HEADERS
 MAX_SIDE = int(os.environ.get("RETAIL_THUMB_SIDE", "240"))
 MAX_DOWNLOAD = 4 * 1024 * 1024
 MAX_STORED = 120 * 1024
-WORKERS = 4
+WORKERS = max(1, int(os.environ.get("RETAIL_THUMB_WORKERS", "2") or 2))
 IMAGE_HEADERS = {**DEFAULT_HEADERS, "Accept": "image/avif,image/webp,image/*,*/*;q=0.8"}
 
 

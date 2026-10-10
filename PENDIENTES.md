@@ -11,7 +11,7 @@ Este documento reúne trabajo pendiente o que todavía requiere validación. Una
 - [ ] Revisar los cambios locales aún no versionados en `retail/web/auth_api.py`, `retail/web/static/catalogo.html`, `retail/web/static/settings.js` y `tests/test_pricing.py`.
 - [ ] Ejecutar la suite de pruebas completa y corregir cualquier regresión.
 - [x] Desplegar en BMAX los cambios aprobados y verificar que la versión pública los sirva.
-- [ ] Hacer una prueba funcional de producción después del despliegue: búsqueda, filtros, ficha de producto, autenticación, preferencias de tiendas y alertas.
+- [ ] Hacer una prueba funcional de producción después del despliegue: búsqueda, filtros, ficha de producto, autenticación, preferencias de tiendas y alertas. Checklist: [`docs/SMOKE_PROD.md`](docs/SMOKE_PROD.md).
 - [ ] Retirar o actualizar `precios-web-release`; la recarga de Caddy después del despliegue ya quedó automatizada.
 - [x] Reducir el contexto de construcción Docker de 618,7 MB a 13,9 MB excluyendo datos y artefactos operacionales.
 

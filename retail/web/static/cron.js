@@ -39,6 +39,7 @@ const STATUS_LABEL = {
   partial: "Parcial hoy",
   done: "Listo hoy",
   failed: "Falló hoy",
+  interrupted: "Interrumpido",
 };
 
 function groupIncomplete(group) {
@@ -95,9 +96,9 @@ function groupActionsCell(group, paused) {
       ${starting ? "Iniciando…" : "Iniciar ahora"}
     </button>`);
   }
-  // Falló / detenida / parcial hoy (presupuesto o X<Y): Continuar + Reiniciar.
+  // Falló / interrumpida / detenida / parcial hoy (presupuesto o X<Y): Continuar + Reiniciar.
   // «Listo hoy» completo (X>=Y) no ofrece Continuar.
-  if (["failed", "stopped", "partial"].includes(status) && groupHasStores(group)) {
+  if (["failed", "interrupted", "stopped", "partial"].includes(status) && groupHasStores(group)) {
     const starting = startingGroups.has(group.id);
     const processed = Number(group.last_run?.processed) || 0;
     const canContinue = status === "partial" ? groupIncomplete(group) : processed > 0;
@@ -200,7 +201,7 @@ function storeStatusCell(job) {
       ${stopping ? "Deteniendo…" : "Detener"}
     </button>`);
   }
-  if (["failed", "stopped", "partial"].includes(job.status)) {
+  if (["failed", "interrupted", "stopped", "partial"].includes(job.status)) {
     const starting = startingStores.has(job.id);
     const processed = Number(job.last_run?.processed) || 0;
     const canContinue = job.status === "partial" ? groupIncomplete(job) : processed > 0;
@@ -305,7 +306,7 @@ function formatWhen(iso) {
 function progressCell(group) {
   const progress = group.progress;
   if (!["running", "paused"].includes(group.status) || !progress) {
-    if (group.status === "failed" && group.last_run) {
+    if ((group.status === "failed" || group.status === "interrupted") && group.last_run) {
       const processed = group.last_run.processed || 0;
       const items = group.last_run.items || 0;
       const progressText = items ? `${processed}/${items} productos` : "";
@@ -776,7 +777,7 @@ function basicStatusCell(job) {
       ${stopping ? "Deteniendo…" : "Detener"}
     </button>`);
   }
-  if (["failed", "stopped", "partial"].includes(job.status)) {
+  if (["failed", "interrupted", "stopped", "partial"].includes(job.status)) {
     const starting = startingBasic;
     const processed = Number(job.last_run?.processed) || 0;
     const canContinue = job.status === "partial" ? groupIncomplete(job) : processed > 0;
@@ -820,7 +821,7 @@ function renderBasic(payload) {
   const meta = $("basic-scrape-meta");
   const formActions = $("basic-scrape-actions");
   const running = ["running", "paused"].includes(job.status);
-  const failed = ["failed", "stopped"].includes(job.status);
+  const failed = ["failed", "interrupted", "stopped"].includes(job.status);
   const canContinue =
     (failed && (Number(job.last_run?.processed) || 0) > 0) ||
     (["partial", "done"].includes(job.status) && groupIncomplete(job));
@@ -936,7 +937,7 @@ function syncRunButton() {
   const job = lastStoreJobs.find((item) => item.id === tienda);
   const status = job?.status || "idle";
   const running = ["running", "paused"].includes(status);
-  const failed = ["failed", "stopped"].includes(status);
+  const failed = ["failed", "interrupted", "stopped"].includes(status);
   const processed = Number(job?.last_run?.processed) || 0;
   const canContinue =
     (failed && processed > 0) ||

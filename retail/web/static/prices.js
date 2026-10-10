@@ -753,10 +753,24 @@ function applySession(user) {
       if (location.pathname === "/cambios-precio" || location.pathname === "/cyber-day/cambios") {
         cambios.classList.add("current");
       }
+      let hosts = menu.querySelector('a[href="/hosts"]');
+      if (!hosts) {
+        hosts = document.createElement("a");
+        hosts.href = "/hosts";
+        hosts.textContent = "Hosts";
+        hosts.setAttribute("data-admin", "");
+        cambios.after(hosts);
+      }
+      hosts.hidden = false;
+      if (location.pathname === "/hosts" || location.pathname === "/infra") {
+        hosts.classList.add("current");
+      }
     } else if (cyber) {
       cyber.hidden = true;
       const cambios = menu.querySelector('a[href="/cambios-precio"]');
       if (cambios) cambios.hidden = true;
+      const hosts = menu.querySelector('a[href="/hosts"]');
+      if (hosts) hosts.hidden = true;
     }
   });
   document.documentElement.classList.toggle("is-authed", loggedIn);
@@ -853,6 +867,7 @@ const CLICK_NAV = {
 };
 const CLICK_ADMIN_PAGES = new Set([
   "/cron", "/cyber-day", "/cyber", "/cambios-precio", "/cyber-day/cambios",
+  "/hosts", "/infra",
   "/estadisticas", "/usuarios", "/ofertas", "/cotizaciones",
 ]);
 let fechaClickAt = 0;

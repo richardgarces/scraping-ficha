@@ -10,6 +10,34 @@ from fastapi.responses import RedirectResponse
 from retail.auth import COOKIE, SESSION_DAYS, read_session, safe_next, sign_session
 from retail.search import connect_repo
 
+# Destinos HTML solo-admin. Mantener alineado con retail/web/static/entrar.js (nextPath).
+ADMIN_HTML_PREFIXES: tuple[str, ...] = (
+    "/ofertas",
+    "/cron",
+    "/cyber",
+    "/estadisticas",
+    "/usuarios",
+    "/cotizaciones",
+    "/tiendas",
+    "/pronosticos",
+    "/cambios-precio",
+    "/analisis-producto",
+)
+
+# Páginas que cualquier cuenta aprobada puede abrir (path sin query).
+MEMBER_HTML_PATHS: frozenset[str] = frozenset({"/reales", "/super", "/comparar"})
+
+
+def admin_next_allowed(path: str) -> bool:
+    """True si un admin logueado puede redirigirse desde /entrar a este next."""
+    return any(path.startswith(prefix) for prefix in ADMIN_HTML_PREFIXES)
+
+
+def member_next_allowed(path: str) -> bool:
+    """True si una cuenta aprobada puede redirigirse desde /entrar a este next."""
+    base = path.split("?", 1)[0].rstrip("/") or "/"
+    return base in MEMBER_HTML_PATHS
+
 
 def repo_or_503():
     repo = connect_repo()

@@ -36,6 +36,16 @@ El admin puede apagar o prender las capturas en **Configurar** (`/ofertas`), sec
 - Archivos PNG en `output/offer_screenshots/` (volumen `./output` del compose).
 - Antes de cada captura se borran archivos más viejos que `OFFER_SCREENSHOT_RETENTION_DAYS` (por defecto 7).
 
+## Lotes en alertas
+
+Las corridas de alertas (`dispatch_alerts`, fan-out a usuarios, cambios de precio, predictivas) **deduplican** ofertas y capturan con `capture_offer_screenshots_batch` / `apply_offer_screenshots`:
+
+- Un solo `chromium.launch` por lote (no un browser por alerta).
+- Un slot Chromium compartido (`RETAIL_CHROMIUM_CONCURRENCY`, default 3) vía Redis/in-process (`retail.concurrency`).
+- Hasta esa cantidad de **pages** en paralelo sobre el mismo browser.
+- FlareSolverr, si hace falta, corre **en serie** después de cerrar Playwright.
+- El tope global de scrape (`RETAIL_SCRAPE_CONCURRENCY`) sigue aplicando: la captura toma un slot scrape + uno Chromium.
+
 ## Telegram / correo
 
 - Telegram: `sendPhoto` con archivo local (multipart) o URL de imagen de producto.

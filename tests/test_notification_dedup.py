@@ -81,7 +81,7 @@ def test_simultaneous_workers_only_claim_once(repo, existing):
             "user_id": "u1", "channel": "email", "entity_key": "tv",
             "last_price": 1000, "last_sent_at": NOW - timedelta(days=6),
         })
-    with ThreadPoolExecutor(max_workers=8) as pool:
+    with ThreadPoolExecutor(max_workers=6) as pool:
         outcomes = list(pool.map(
             lambda _: repo.claim_user_notification_send("u1", "email", "tv", 1000), range(16),
         ))

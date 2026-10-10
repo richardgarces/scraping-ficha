@@ -141,6 +141,43 @@ def _document(product: Product, now: datetime, extra: dict[str, Any] | None = No
     return data
 
 
+_ACCENT_GROUPS = (
+    "aáàäâ",
+    "eéèëê",
+    "iíìïî",
+    "oóòöô",
+    "uúùüû",
+    "nñ",
+)
+
+
+def accent_insensitive_pattern(value: str) -> str:
+    """Regex que iguala vocales/ñ con o sin tilde (azucar ↔ azúcar).
+
+    ``tokenize``/``fold`` aplanan acentos antes del match; los nombres en Mongo
+    suelen guardarse acentuados, y ``$regex`` + ``i`` no pliega diacríticos.
+    """
+    parts: list[str] = []
+    for char in str(value or ""):
+        lower = char.lower()
+        family = next((group for group in _ACCENT_GROUPS if lower in group), None)
+        parts.append(f"[{family}]" if family else re.escape(char))
+    return "".join(parts)
+
+
+def _token_text_field_ors(token: str, *, fields: tuple[str, ...] = ("name", "brand", "sku_id", "product_id")) -> list[dict[str, Any]]:
+    """OR por campo para un token y sus alias, con regex sin acentos."""
+    from retail.relevance import equivalent_tokens
+
+    field_ors: list[dict[str, Any]] = []
+    for alt in sorted(equivalent_tokens(token)):
+        pattern = accent_insensitive_pattern(alt)
+        if not pattern:
+            continue
+        field_ors.extend({field: {"$regex": pattern, "$options": "i"}} for field in fields)
+    return field_ors
+
+
 def catalog_browse_filter(category: str | None = None) -> dict[str, Any]:
     """Filtro del catálogo: el calzado exige que el producto realmente sea calzado.
 
@@ -152,15 +189,7 @@ def catalog_browse_filter(category: str | None = None) -> dict[str, Any]:
     clean = str(category or "").strip()
     if not clean:
         return match
-    accent_groups = {
-        "a": "aáàäâ", "e": "eéèëê", "i": "iíìïî",
-        "o": "oóòöô", "u": "uúùüû", "n": "nñ",
-    }
-    pattern_parts = []
-    for char in clean:
-        family = next((values for values in accent_groups.values() if char.lower() in values), None)
-        pattern_parts.append(f"[{family}]" if family else re.escape(char))
-    pattern = "".join(pattern_parts)
+    pattern = accent_insensitive_pattern(clean)
     match["catalog_category"] = {"$regex": f"^{pattern}$", "$options": "i"}
     from retail.relevance import fold
 
@@ -211,6 +240,7 @@ class ProductRepository:
         self.search_results = self.db["search_results"]
         self.real_offer_jobs = self.db["real_offer_jobs"]
         self.daily_real_offers = self.db["daily_real_offers"]
+        self.quote_miss_jobs = self.db["quote_miss_jobs"]
         self.cyber_day_products = self.db["cyber_day_products"]
         self.cyber_day_lists = self.db["cyber_day_lists"]
         self.cyber_day_price_history = self.db["cyber_day_price_history"]
@@ -516,6 +546,21 @@ class ProductRepository:
             quote_events.create_index(
                 [("quote_id", ASCENDING), ("at", ASCENDING)],
                 name="business_quote_event_quote_at",
+            )
+        except OperationFailure:
+            pass
+        try:
+            self.quote_miss_jobs.create_index(
+                [("status", ASCENDING), ("next_at", ASCENDING), ("created_at", ASCENDING)],
+                name="quote_miss_claim",
+            )
+            self.quote_miss_jobs.create_index(
+                [("store", ASCENDING), ("folded_query", ASCENDING), ("status", ASCENDING), ("created_at", DESCENDING)],
+                name="quote_miss_dedupe",
+            )
+            self.quote_miss_jobs.create_index(
+                [("quote_id", ASCENDING), ("line_index", ASCENDING), ("store", ASCENDING)],
+                name="quote_miss_quote_line_store",
             )
         except OperationFailure:
             pass
@@ -1592,11 +1637,15 @@ class ProductRepository:
 
         No usa la hora de inicio: una corrida de muchas horas que sigue
         avanzando no es un abandono.
+
+        ``hours`` puede ser fraccionario (p. ej. ``0.02`` ≈ 72s) para el
+        pre-close de ``deploy-prod.sh`` antes de recrear ``precios-web``.
+        Mínimo ~1 minuto para no cortar un heartbeat lento.
         """
         from datetime import timedelta
 
         now = _now()
-        cutoff = now - timedelta(hours=max(1.0, float(hours)))
+        cutoff = now - timedelta(hours=max(1.0 / 60.0, float(hours)))
         closed = 0
         for doc in self.batch_runs.find({"status": "running", "phase": {"$ne": "paused"}}):
             if not batch_run_is_stale(doc, cutoff=cutoff):
@@ -1615,10 +1664,15 @@ class ProductRepository:
                 {"_id": doc["_id"], "status": "running"},
                 {
                     "$set": {
-                        "status": "failed",
-                        "phase": "failed",
+                        "status": "interrupted",
+                        "phase": "interrupted",
                         "finished_at": now,
-                        "last_error": "Corrida interrumpida o sin actividad; se cerró automáticamente.",
+                        "last_error": (
+                            "Corrida interrumpida (deploy/reinicio o sin actividad). "
+                            "Progreso guardado; reintento automático o la próxima corrida continúa."
+                        ),
+                        "resumable": True,
+                        "interrupt_retries": int(doc.get("interrupt_retries") or 0),
                         "current_query": None,
                         "current_id": None,
                     }
@@ -1634,7 +1688,7 @@ class ProductRepository:
         name/brand/sku_id, ids exactos. El regex multi-campo sin anclar queda
         solo como fallback si no hubo hits (misma semántica antigua).
         """
-        from retail.relevance import equivalent_tokens, fold, text_search_clause, tokenize
+        from retail.relevance import fold, text_search_clause, tokenize
         from retail.search_cache import rewrite_search_query
 
         text = " ".join(str(query or "").split())
@@ -1699,23 +1753,15 @@ class ProductRepository:
             except Exception:
                 pass
 
-        # 4) Fallback: cada token (con alias) en name/brand/sku — case-insensitive.
+        # 4) Fallback: cada token (con alias) en name/brand/sku — case/acentos.
         if not seen:
             tokens = tokenize(rewritten) or tokenize(text) or [fold(text)]
             and_parts: list[dict[str, Any]] = []
             for token in tokens:
-                field_ors: list[dict[str, Any]] = []
-                for alt in sorted(equivalent_tokens(token)):
-                    escaped = re.escape(alt)
-                    field_ors.extend(
-                        [
-                            {"name": {"$regex": escaped, "$options": "i"}},
-                            {"brand": {"$regex": escaped, "$options": "i"}},
-                            {"sku_id": {"$regex": escaped, "$options": "i"}},
-                            {"product_id": {"$regex": escaped, "$options": "i"}},
-                            {"last_search_query": {"$regex": escaped, "$options": "i"}},
-                        ]
-                    )
+                field_ors = _token_text_field_ors(
+                    token,
+                    fields=("name", "brand", "sku_id", "product_id", "last_search_query"),
+                )
                 if field_ors:
                     and_parts.append({"$or": field_ors})
             if and_parts:
@@ -1727,6 +1773,50 @@ class ProductRepository:
         rows = list(seen.values())
         rows.sort(key=lambda row: row.get("updated_at") or "", reverse=True)
         return rows[:limit]
+
+    def find_by_gtin(self, gtin: str, limit: int = 50) -> list[dict[str, Any]]:
+        """Lookup directo por EAN/GTIN en sku/id y specifications etiquetadas."""
+        from retail.compare import normalize_gtin
+
+        digits = re.sub(r"\D", "", str(gtin or ""))
+        normalized = normalize_gtin(digits) or normalize_gtin(gtin)
+        variants = list(dict.fromkeys([
+            v for v in (
+                digits,
+                digits.lstrip("0") if digits else "",
+                normalized,
+                (normalized or "").lstrip("0") if normalized else "",
+                str(gtin or "").strip(),
+            ) if v
+        ]))
+        if not variants:
+            return []
+        limit = max(1, min(int(limit), 200))
+        filt = {
+            "$or": [
+                {"sku_id": {"$in": variants}},
+                {"product_id": {"$in": variants}},
+                {"specifications.ean": {"$in": variants}},
+                {"specifications.EAN": {"$in": variants}},
+                {"specifications.gtin": {"$in": variants}},
+                {"specifications.GTIN": {"$in": variants}},
+                {"specifications.barcode": {"$in": variants}},
+            ]
+        }
+        try:
+            cursor = (
+                self.collection.find(filt, SEARCH_FIND_PROJECTION)
+                .sort([("updated_at", -1)])
+                .limit(limit)
+                .max_time_ms(SEARCH_FIND_MAX_TIME_MS)
+            )
+            rows = []
+            for item in cursor:
+                item.pop("_id", None)
+                rows.append(item)
+            return rows
+        except Exception:
+            return []
 
     @staticmethod
     def _store_product_filter(wanted: list[tuple[str, str]]) -> dict[str, Any]:
@@ -1860,25 +1950,15 @@ class ProductRepository:
         """Catálogo navegable sobre los productos ya guardados."""
         match: dict[str, Any] = catalog_browse_filter(category)
         if text:
-            from retail.relevance import equivalent_tokens, fold, tokenize
+            from retail.relevance import fold, tokenize
             from retail.search_cache import rewrite_search_query
 
             # Cualquier palabra del producto: name/brand/sku, case-insensitive,
-            # con alias de marca (iansa ↔ ianza).
+            # con alias de marca (iansa ↔ ianza) y regex sin acentos (azúcar).
             tokens = tokenize(rewrite_search_query(text)) or tokenize(text) or [fold(text)]
             and_parts: list[dict[str, Any]] = []
             for token in tokens:
-                field_ors: list[dict[str, Any]] = []
-                for alt in sorted(equivalent_tokens(token)):
-                    escaped = re.escape(alt)
-                    field_ors.extend(
-                        [
-                            {"name": {"$regex": escaped, "$options": "i"}},
-                            {"brand": {"$regex": escaped, "$options": "i"}},
-                            {"sku_id": {"$regex": escaped, "$options": "i"}},
-                            {"product_id": {"$regex": escaped, "$options": "i"}},
-                        ]
-                    )
+                field_ors = _token_text_field_ors(token)
                 if field_ors:
                     and_parts.append({"$or": field_ors})
             if and_parts:
@@ -3182,6 +3262,8 @@ class ProductRepository:
             "current_id": item.get("current_id"),
             "current_index": item.get("current_index"),
             "last_error": item.get("last_error"),
+            "resumable": bool(item.get("resumable")),
+            "interrupt_retries": int(item.get("interrupt_retries") or 0),
             "saved_upserted": item.get("saved_upserted") or 0,
             "saved_modified": item.get("saved_modified") or 0,
             "skipped": int(item.get("skipped") or 0),

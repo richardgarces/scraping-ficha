@@ -14,7 +14,11 @@ from retail.batch.alerts import (
     dispatch_alerts,
     dispatch_user_alerts,
 )
-from retail.batch.group_scope import GroupBatchStopped
+from retail.batch.group_scope import (
+    GroupBatchInterrupted,
+    GroupBatchStopped,
+    is_executor_shutdown_error,
+)
 from retail.batch.catalog import (
     active_products,
     catalog_origin_store,
@@ -425,7 +429,9 @@ def run_batch(
     executed_searches = 0
     product_workers = 1
     if group_key:
-        product_workers = max(1, min(4, int(os.environ.get("BATCH_PRODUCT_WORKERS", "2") or 2)))
+        from retail.concurrency import batch_product_workers
+
+        product_workers = batch_product_workers()
     summary["product_workers"] = product_workers
     prepared_searches: dict[int, dict[str, Any]] = {}
     product_executor: ThreadPoolExecutor | None = None
@@ -544,11 +550,23 @@ def run_batch(
                     if product_executor is None:
                         prepared_searches[job_index] = _timed_catalog_search(job_query, kwargs)
                     else:
-                        futures.append(
-                            (job_index, product_executor.submit(_timed_catalog_search, job_query, kwargs))
-                        )
+                        try:
+                            future = product_executor.submit(
+                                _timed_catalog_search, job_query, kwargs
+                            )
+                        except RuntimeError as exc:
+                            # atexit/SIGTERM ya cerró el pool (p. ej. deploy de precios-web).
+                            if is_executor_shutdown_error(exc):
+                                raise GroupBatchInterrupted(str(exc)) from exc
+                            raise
+                        futures.append((job_index, future))
                 for job_index, future in futures:
-                    prepared_searches[job_index] = future.result()
+                    try:
+                        prepared_searches[job_index] = future.result()
+                    except RuntimeError as exc:
+                        if is_executor_shutdown_error(exc):
+                            raise GroupBatchInterrupted(str(exc)) from exc
+                        raise
                 for position, (job_index, *_rest) in enumerate(jobs):
                     prepared_searches[job_index]["wave_last"] = position == len(jobs) - 1
 
@@ -687,19 +705,11 @@ def run_batch(
     except GroupBatchStopped:
         if product_executor is not None:
             product_executor.shutdown(wait=False, cancel_futures=True)
+            product_executor = None
         summary["stopped"] = True
         summary["finished_at"] = datetime.now(timezone.utc).isoformat()
         if repo is not None and run_id:
-            resume_hint = {
-                "current_id": None,
-                "searches": summary.get("searches") or [],
-            }
-            if summary.get("searches"):
-                resume_hint["current_id"] = summary["searches"][-1].get("id")
-            if store_key and hasattr(repo, "remember_store_batch_resume"):
-                repo.remember_store_batch_resume(store_key, resume_hint)
-            elif group_key and hasattr(repo, "remember_group_batch_resume"):
-                repo.remember_group_batch_resume(group_key, resume_hint)
+            _remember_batch_resume(repo, group_key, store_key, summary)
             repo.finish_batch_run(
                 run_id,
                 status="stopped",
@@ -707,20 +717,52 @@ def run_batch(
                 finished_at=summary["finished_at"],
             )
         return summary
+    except GroupBatchInterrupted as exc:
+        if product_executor is not None:
+            try:
+                product_executor.shutdown(wait=False, cancel_futures=True)
+            except Exception:
+                pass
+            product_executor = None
+        summary["interrupted"] = True
+        summary["shutdown_interrupt"] = is_executor_shutdown_error(exc) or "shutdown" in str(exc).lower()
+        summary["finished_at"] = datetime.now(timezone.utc).isoformat()
+        if repo is not None and run_id:
+            _remember_batch_resume(repo, group_key, store_key, summary)
+            repo.finish_batch_run(
+                run_id,
+                status="interrupted",
+                phase="interrupted",
+                finished_at=summary["finished_at"],
+                last_error=str(exc),
+                resumable=True,
+            )
+        return summary
     except Exception as exc:
         if product_executor is not None:
-            product_executor.shutdown(wait=False, cancel_futures=True)
-        if repo is not None and run_id:
-            if store_key and hasattr(repo, "remember_store_batch_resume"):
-                repo.remember_store_batch_resume(
-                    store_key,
-                    {
-                        "current_id": (summary.get("searches") or [{}])[-1].get("id")
-                        if summary.get("searches")
-                        else None,
-                        "searches": summary.get("searches") or [],
-                    },
+            try:
+                product_executor.shutdown(wait=False, cancel_futures=True)
+            except Exception:
+                pass
+            product_executor = None
+        if is_executor_shutdown_error(exc):
+            interrupted = GroupBatchInterrupted(str(exc))
+            summary["interrupted"] = True
+            summary["shutdown_interrupt"] = True
+            summary["finished_at"] = datetime.now(timezone.utc).isoformat()
+            if repo is not None and run_id:
+                _remember_batch_resume(repo, group_key, store_key, summary)
+                repo.finish_batch_run(
+                    run_id,
+                    status="interrupted",
+                    phase="interrupted",
+                    finished_at=summary["finished_at"],
+                    last_error=str(interrupted),
+                    resumable=True,
                 )
+            return summary
+        if repo is not None and run_id:
+            _remember_batch_resume(repo, group_key, store_key, summary)
             repo.finish_batch_run(
                 run_id,
                 status="failed",
@@ -731,6 +773,25 @@ def run_batch(
     finally:
         if repo is not None:
             repo.close()
+
+
+def _remember_batch_resume(
+    repo: Any,
+    group_key: str | None,
+    store_key: str | None,
+    summary: dict[str, Any],
+) -> None:
+    """Guarda cursor para Continuar tras stop/fail/interrupt."""
+    resume_hint = {
+        "current_id": None,
+        "searches": summary.get("searches") or [],
+    }
+    if summary.get("searches"):
+        resume_hint["current_id"] = summary["searches"][-1].get("id")
+    if store_key and hasattr(repo, "remember_store_batch_resume"):
+        repo.remember_store_batch_resume(store_key, resume_hint)
+    elif group_key and hasattr(repo, "remember_group_batch_resume"):
+        repo.remember_group_batch_resume(group_key, resume_hint)
 
 
 def _catalog_search_kwargs(

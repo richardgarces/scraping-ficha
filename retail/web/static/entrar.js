@@ -6,6 +6,20 @@ function offerLoginHint() {
   return "";
 }
 
+/** Prefijos solo-admin; mantener alineado con ADMIN_HTML_PREFIXES en retail/web/deps.py */
+const ADMIN_HTML_PREFIXES = [
+  "/ofertas",
+  "/cron",
+  "/cyber",
+  "/estadisticas",
+  "/usuarios",
+  "/cotizaciones",
+  "/tiendas",
+  "/pronosticos",
+  "/cambios-precio",
+  "/analisis-producto",
+];
+
 function nextPath(user) {
   const raw = new URLSearchParams(location.search).get("next");
   const fallback = user && user.role === "admin" ? "/ofertas" : "/siguiendo";
@@ -14,15 +28,7 @@ function nextPath(user) {
   if (raw.startsWith("/") && !raw.startsWith("//") && !raw.includes("://") && !raw.includes("\\")) {
     dest = raw;
   }
-  if (
-    dest.startsWith("/ofertas")
-    || dest.startsWith("/cron")
-    || dest.startsWith("/cyber")
-    || dest.startsWith("/estadisticas")
-    || dest.startsWith("/usuarios")
-    || dest.startsWith("/cotizaciones")
-    || dest.startsWith("/tiendas")
-  ) {
+  if (ADMIN_HTML_PREFIXES.some((prefix) => dest.startsWith(prefix))) {
     if (!user || user.role !== "admin") {
       return "/siguiendo";
     }

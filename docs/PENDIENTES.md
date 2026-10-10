@@ -14,7 +14,8 @@ El listado histórico más amplio sigue en [`PENDIENTES.md`](../PENDIENTES.md) e
 - [x] Alias API español `/api/cotizaciones` → mismo comportamiento que `/api/quotes`.
 - [x] Acceso solo administrador (UI + API + menú Cuenta), como `/ofertas`.
 - [x] Modo **lista de compra multi-tienda** (matriz lista × tiendas, grupo supermercados, export CSV, sin scrape live en request).
-- [ ] Prueba funcional en producción con cuenta admin: lista multi-tienda + cotización CSV, confirmar match, exportar.
+- [x] UX carrito: búsqueda catálogo → carrito → tiendas por categoría → Guardar / **Cotizar** (Mongo-only).
+- [ ] Prueba funcional en producción con cuenta admin: carrito + Cotizar + cotización CSV, confirmar match, exportar. Checklist: [`docs/SMOKE_PROD.md`](SMOKE_PROD.md).
 - [ ] Smoke de navegador en CI (`tests/browser/purchasing_smoke.py` con Playwright).
 - [x] Job async Docling (conversión PDF fuera de la petición HTTP, cola/worker dedicado).
 - [ ] Export XLSX / informe con marca (post-MVP).
@@ -22,7 +23,8 @@ El listado histórico más amplio sigue en [`PENDIENTES.md`](../PENDIENTES.md) e
 - [x] Unidades kg/l y conversiones de peso/volumen/longitud con reglas explícitas.
 - [ ] Ventana de precio de catálogo configurable (piloto fijo 48 h; evaluar categoría + SLA por vertical).
 - [ ] TimesFM, Scrapling masivo, multi-tenant comercial (fuera de este piloto).
-- [ ] Registrar Jumbo como tienda del grupo supermercados cuando exista scraper/fuente.
+- [x] Jumbo y Santa Isabel registrados en grupo `supermercados` (`retail/sources/jumbo.py`, `santa_isabel.py`, `STORE_GROUP`). Semilla grocery: `scripts/seed-supermercado-miss.py` (hasta salir de 0 en [`docs/tiendas.md`](tiendas.md)).
+- [x] Cotizar: scrape async on-miss (`quote_miss_jobs` + pack gate envase + poll UI).
 Rutas clave:
 
 | Recurso | Ruta |
@@ -36,8 +38,9 @@ Rutas clave:
 - [ ] Revisar cambios locales no versionados en auth, catálogo y pricing.
 - [ ] Ejecutar suite completa de pruebas y corregir regresiones.
 - [x] Desplegar en BMAX cambios aprobados (incl. piloto cotizaciones).
-- [ ] Smoke post-deploy: búsqueda, ficha, auth, preferencias, alertas y `/cotizaciones`.
+- [ ] Smoke post-deploy: búsqueda, ficha, auth, preferencias, alertas y `/cotizaciones` — [`docs/SMOKE_PROD.md`](SMOKE_PROD.md).
 - [ ] Retirar o actualizar `precios-web-release` si aún aplica.
+- [ ] Correr `scripts/seed-supermercado-miss.py` en soyo/BMAX y actualizar conteos en [`docs/tiendas.md`](tiendas.md).
 
 ## Scraping, alertas, UX, seguridad
 

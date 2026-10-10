@@ -58,8 +58,50 @@ Variables útiles: `CYBER_EVENT_DAYS` (default 3), `CYBER_FORECAST_MIN_OBSERVATI
 python -m retail.cyber_day
 ```
 
-Compose: `cyber-worker` → `precios-cyber-worker` (BMAX) o `precios-cyber-worker-soyo`.
+Compose: `cyber-worker` → `precios-cyber-worker` (BMAX), `precios-cyber-worker-soyo` o Orange Pi (`precios-cyber-worker-pi`).
 
+### Multi-lista (secuencial)
+
+Podés dejar **varias listas en `running`**. El worker (default) las atiende **una vuelta completa por vez** (`CYBER_DAY_MULTI_LIST_MODE=sequential`): termina la vuelta de A, pasa a B, luego C, y vuelve a A. El heartbeat se refresca en todas las `running` para que la UI no marque worker muerto.
+
+- Agregar listas: crear en `/cyber-day` → **Iniciar** (o Continuar). No hace falta parar las demás.
+- Parar una lista no afecta al resto.
+- Legado intercalado (1 query por lista): `CYBER_DAY_MULTI_LIST_MODE=round_robin` (alarga cada vuelta × N).
+
+### Paralelo (Orange Pi)
+
+En el Orange Pi (`192.168.1.90`) el scrape Cyber vive en `docker-compose.worker.pi.yml` + `./cyber-pi.sh`. `CYBER_DAY_SEARCH_SOURCE=db`, `mem_limit` ~384 MiB c/u. Mantener BMAX/soyo `precios-cyber-worker*` **parados**.
+
+| Modo | Contenedores | Cuándo |
+|------|--------------|--------|
+| **`--parallel 3`** (default) | 3 pines: junio / oct / cambio | Carga holgada |
+| **`--parallel 2`** | 2 pines (junio+oct) + 1 **secuencial** del resto (`CYBER_DAY_EXCLUDE_LIST_IDS`) | CPU/RAM alta → bajar a 2 |
+
+```bash
+ssh richard@192.168.1.90
+cd ~/precios
+./cyber-pi.sh start --parallel 3    # o: CYBER_DAY_MAX_PARALLEL=3 ./cyber-pi.sh start
+./cyber-pi.sh start --parallel 2    # fallback: 2 pines + secuencial
+./cyber-pi.sh status|logs|stop|restart
+```
+
+| Servicio | Rol |
+|----------|-----|
+| `cyber-junio2026` | pin `cyber_junio2026` |
+| `cyber-oct2026` | pin `cyber_oct2026` |
+| `cyber-cambio-ultimo-jes` | pin `cyber_cambio_ultimo_jes` (solo parallel 3) |
+| `cyber-sequential` | multi-lista secuencial excluyendo junio+oct (solo parallel 2) |
+
+Cada pin solo toca su cursor/heartbeat. El secuencial no pelea con los pines gracias a `CYBER_DAY_EXCLUDE_LIST_IDS`.
+
+Los workers reportan CPU/RAM/disco del host a Mongo (`cyber_day_host_stats:{ip}` vía `retail.host_stats`); `GET /api/admin/cyber-day` expone `worker_hosts` (dedupe por IP, etiqueta **Orange Pi**) y `/cyber-day` muestra el panel **Host scrape**. Vista de los tres hosts (BMAX / soyo / Orange Pi): `/hosts` y `GET /api/admin/hosts`. En BMAX/soyo: `bash scripts/install-host-stats-cron.sh` (cron cada minuto → `python -m retail.host_stats --once`).
+
+Local / manual:
+
+```bash
+CYBER_DAY_LIST_ID=cyber_junio2026 python -m retail.cyber_day
+CYBER_DAY_EXCLUDE_LIST_IDS=cyber_junio2026,cyber_oct2026 python -m retail.cyber_day
+```
 ## Seed
 
 Si `cyber_day_products` está vacío, carga automática del JSON oficial (100 ítems). Reimport opcional desde el panel.

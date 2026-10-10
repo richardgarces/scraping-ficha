@@ -3,6 +3,8 @@
   const FETCH_TIMEOUT_MS = 20000;
   let allItems = [];
   let selected = new Set();
+  /** @type {{ key: string, dir: "asc"|"desc", type: string }} */
+  let sortState = { key: "last_change_at", dir: "desc", type: "date" };
 
   function el(id) {
     return document.getElementById(id);
@@ -53,19 +55,91 @@
     return sources.map((s) => map[s] || s).join(" · ") || "—";
   }
 
+  function storeLabel(row) {
+    return String(row.store_title || row.store || "").trim();
+  }
+
   function filterText() {
     return String(el("filter-q")?.value || "").trim().toLowerCase();
   }
 
+  function sortValue(row, key, type) {
+    if (type === "date") {
+      const raw = row?.[key];
+      if (!raw) return null;
+      const ms = Date.parse(raw);
+      return Number.isFinite(ms) ? ms : null;
+    }
+    if (type === "num") {
+      const n = Number(row?.[key]);
+      return Number.isFinite(n) ? n : null;
+    }
+    if (key === "store") {
+      const text = storeLabel(row);
+      return text ? text.toLocaleLowerCase("es") : null;
+    }
+    if (key === "source") {
+      const text = sourceLabel(row);
+      return text && text !== "—" ? text.toLocaleLowerCase("es") : null;
+    }
+    const text = String(row?.[key] ?? "").trim().toLocaleLowerCase("es");
+    return text || null;
+  }
+
+  function sortRows(rows) {
+    const list = Array.isArray(rows) ? rows.slice() : [];
+    const { key, dir, type } = sortState;
+    const factor = dir === "desc" ? -1 : 1;
+    list.sort((a, b) => {
+      const av = sortValue(a, key, type);
+      const bv = sortValue(b, key, type);
+      const aEmpty = av == null || av === "";
+      const bEmpty = bv == null || bv === "";
+      if (aEmpty && bEmpty) {
+        return (Number(a?.n) || 0) - (Number(b?.n) || 0);
+      }
+      if (aEmpty) return 1;
+      if (bEmpty) return -1;
+      if (typeof av === "number" && typeof bv === "number") {
+        if (av !== bv) return (av - bv) * factor;
+      } else {
+        const cmp = String(av).localeCompare(String(bv), "es", {
+          sensitivity: "base",
+          numeric: true,
+        });
+        if (cmp) return cmp * factor;
+      }
+      return (Number(a?.n) || 0) - (Number(b?.n) || 0);
+    });
+    return list;
+  }
+
+  function syncSortHeaders() {
+    document.querySelectorAll("#price-changes-table .col-sort").forEach((button) => {
+      const active = button.dataset.sort === sortState.key;
+      button.dataset.dir = active ? sortState.dir : "";
+      button.setAttribute(
+        "aria-sort",
+        active ? (sortState.dir === "asc" ? "ascending" : "descending") : "none",
+      );
+      const label = button.textContent.replace(/\s*[↑↓]$/, "").trim();
+      button.textContent = active
+        ? `${label} ${sortState.dir === "asc" ? "↑" : "↓"}`
+        : label;
+    });
+  }
+
   function filteredItems() {
     const q = filterText();
-    if (!q) return allItems.slice();
-    return allItems.filter((row) => {
-      const hay = [row.query, row.category, row.store, row.store_title, sourceLabel(row)]
-        .map((v) => String(v || "").toLowerCase())
-        .join(" ");
-      return hay.includes(q);
-    });
+    const base = !q
+      ? allItems.slice()
+      : allItems.filter((row) => {
+        const hay = [row.query, row.category, storeLabel(row), sourceLabel(row)]
+          .map((v) => String(v || "").toLowerCase())
+          .join(" ");
+        return hay.includes(q);
+      });
+    return sortRows(base);
   }
 
   function rowId(row) {
@@ -119,8 +193,15 @@
   function render() {
     const body = el("body");
     const rows = filteredItems();
-    const payload = { total: allItems.length, stats: window.__priceChangeStats || {}, from_day: window.__priceChangeFrom, to_day: window.__priceChangeTo, timezone: "America/Santiago" };
+    const payload = {
+      total: allItems.length,
+      stats: window.__priceChangeStats || {},
+      from_day: window.__priceChangeFrom,
+      to_day: window.__priceChangeTo,
+      timezone: "America/Santiago",
+    };
     updateMeta(payload);
+    syncSortHeaders();
     if (!body) return;
     if (!rows.length) {
       body.innerHTML = `<tr><td colspan="9" class="muted">${allItems.length ? "Ningún resultado con ese filtro." : "No hay cambios de valor en la ventana."}</td></tr>`;
@@ -136,7 +217,7 @@
         <td>${escapeHtml(row.n)}</td>
         <td>${escapeHtml(row.query)}</td>
         <td>${escapeHtml(row.category || "—")}</td>
-        <td>${escapeHtml(row.store_title || row.store || "—")}</td>
+        <td>${escapeHtml(storeLabel(row) || "—")}</td>
         <td>${escapeHtml(money(row.previous_price))}</td>
         <td>${escapeHtml(money(row.price))}</td>
         <td>${fmtDate(row.last_change_at)}</td>
@@ -256,6 +337,24 @@
   });
   el("export-csv")?.addEventListener("click", () => exportFormat("csv"));
   el("export-json")?.addEventListener("click", () => exportFormat("json"));
+
+  el("price-changes-table")?.addEventListener("click", (event) => {
+    const button = event.target?.closest?.(".col-sort");
+    if (!button) return;
+    const key = button.dataset.sort || "";
+    const type = button.dataset.type || "text";
+    if (!key) return;
+    if (sortState.key === key) {
+      sortState.dir = sortState.dir === "asc" ? "desc" : "asc";
+    } else {
+      sortState = {
+        key,
+        type,
+        dir: type === "num" || type === "date" ? "desc" : "asc",
+      };
+    }
+    render();
+  });
 
   load();
 })();

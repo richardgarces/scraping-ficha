@@ -108,6 +108,39 @@ RETAIL_ADMIN_PASSWORD=...
 
 Usa los `container_name` (`precios-redis`, etc.). El hostname `redis` en `platform-net` apunta al Redis de plataforma (con contraseña) y rompe la caché.
 
+### Concurrencia de scrape
+
+El tope no es solo `max_workers` de cada pool: `retail/concurrency.py` reserva un slot
+global (y otro Chromium) en Redis (`REDIS_URL` → `precios-redis`) para que varios
+procesos Uvicorn u otros contenedores compartan el mismo presupuesto. Sin Redis,
+cae a semáforos in-process.
+
+```
+             precios-web / batch
+                      |
+            Límite global: 8 tareas
+                      |
+             +--------+--------+
+             |                 |
+        HTTP directo       Playwright
+        hasta 8            máximo 3
+             |                 |
+             +--------+--------+
+                      |
+                   MongoDB
+```
+
+| Variable | Default | Rol |
+|----------|---------|-----|
+| `RETAIL_SCRAPE_CONCURRENCY` | `8` | Slots globales de scrape (HTTP + Chromium) |
+| `RETAIL_CHROMIUM_CONCURRENCY` | `3` | Navegadores Playwright simultáneos (también ocupan un slot global) |
+| `RETAIL_STORE_WORKERS` | `8` | Pool HTTP por búsqueda (acotado por el global) |
+| `RETAIL_THUMB_WORKERS` | `2` | Miniaturas en paralelo (fuera del presupuesto scrape) |
+| `RETAIL_OPTIONAL_STORE_WORKERS` | `2` | Pool de tiendas opcionales (movistar/salcobrand) |
+| `BATCH_PRODUCT_WORKERS` | `2` (tope duro `4`) | Productos en paralelo en batch por grupo |
+
+Tras cambiar estas vars: recrear `precios-web` (p. ej. `docker compose ... up -d --force-recreate web`).
+
 El borde es **Cloudflare Tunnel** (`http://precios.meincart.com` en Caddy, `auto_https off`). En Zero Trust, Public Hostname igual que `rent.meincart.com` → `http://platform-caddy:80`.
 
 Mongo/Qdrant/Redis de este compose son **propios** de precios (no los de plataforma). No abrir 27017/6333/6379 al WAN.

@@ -37,13 +37,17 @@ def test_price_changes_static_assets():
     html = (root / "cambios-precio.html").read_text(encoding="utf-8")
     js = (root / "cambios-precio.js").read_text(encoding="utf-8")
     assert "Cambios de precio" in html
-    assert "cambios-precio.js?v=1" in html
+    assert "cambios-precio.js?v=2" in html
     assert "prices.js?v=37" in html
-    assert "styles.css?v=91" in html
+    assert "styles.css?v=102-cambios-sort" in html
     assert "/api/admin/price-changes" in js
     assert "export.${kind}" in js or "price-changes/export" in js
     assert "select-filtered" in html
     assert "Exportar CSV" in html
+    assert 'id="price-changes-table"' in html
+    assert "col-sort" in html
+    assert "sortState" in js
+    assert "sortRows" in js
     cyber = (root / "cyber-day.html").read_text(encoding="utf-8")
     assert 'href="/cambios-precio"' in cyber
     cron = (root / "cron.html").read_text(encoding="utf-8")

@@ -196,7 +196,7 @@ Abre `http://127.0.0.1:8080`. Los resultados se filtran por nombre, marca o cód
 
 Los precios se muestran como los publica la tienda: el precio efectivo arriba, y debajo la escalera con el precio internet y el normal tachado. Cuando el más bajo solo se consigue con la tarjeta de la cadena queda rotulado (`con tarjeta CMR`, `Cencosud`, `Ripley`…), para no comparar un precio con tarjeta contra uno sin ella. El porcentaje es el que anuncia la tienda; `sane_discount` en `retail/models.py` lo descarta cuando es imposible, porque Lider mandaba el ahorro en pesos en ese campo y aparecían descuentos de -10819%.
 
-Páginas: `/` busca, `/catalogo` navega lo ya guardado por categoría y tienda, `/hoy` muestra las ofertas del día con el ahorro real, `/producto` es la ficha con el gráfico de 7/30/90 días, `/siguiendo` administra los productos con precio objetivo y `/ofertas` configura reglas y cron.
+Páginas públicas: `/` busca, `/catalogo` navega lo ya guardado, `/hoy` ofertas del día, `/producto` ficha con historial, `/siguiendo` watches y push. Con login: `/reales` (super vía `?super=1`), `/comparar`. Solo admin: `/ofertas`, `/cron`, `/cyber-day`, `/cambios-precio`, `/estadisticas`, `/pronosticos`, `/usuarios`, `/tiendas`, `/cotizaciones`, `/analisis-producto`. Smoke post-deploy: [`docs/SMOKE_PROD.md`](docs/SMOKE_PROD.md).
 
 ### Qué queda fuera de los resultados
 
@@ -208,7 +208,7 @@ Orígenes:
 - **Solo tiendas**: scraping actual
 - **Solo MongoDB / Qdrant**: histórico, sin pegarle a las tiendas
 
-Si Redis está arriba, el resultado de una búsqueda (por ejemplo «tv») se guarda 24 horas. La siguiente vez sale de Redis; **Forzar tiendas** vuelve a consultar las cadenas.
+Si Redis está arriba, el resultado de una búsqueda (por ejemplo «tv») se guarda en clave diaria Chile (`search:AAAA-MM-DD:…`) con TTL hasta medianoche, acotado por `RETAIL_SEARCH_CACHE_MAX_TTL` (default 4 h). La siguiente vez sale de Redis; **Forzar tiendas** vuelve a consultar las cadenas.
 
 Variables: `MONGODB_URI`, `MONGODB_DB`, `QDRANT_URL`, `REDIS_URL`. Si Mongo, Qdrant o Redis no están arriba, la interfaz igual busca en las tiendas y avisa qué no pudo persistir.
 

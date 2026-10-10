@@ -27,6 +27,7 @@ Notas:
 - «Con descuento» = precio normal declarado mayor al precio actual; no implica oferta real (`/reales`).
 - Actualización 2026-10-08: sondeo automático (`scripts/probe_cyber_stores.py`) scaffoldeó tiendas detectadas como Shopify/VTEX/Magento; detalle en `docs/tiendas_probe_results.json`. Conteos Mongo de las nuevas = 0 hasta el primer scrape.
 - Marcas grandes ausentes del listado oficial CCS (Nike, PC Factory, Decathlon, abc, etc.) no aparecen en esta tabla aunque el repo sí las scrapee.
+- Prioridad cotizaciones: `jumbo` y `santa_isabel` ya están en `STORE_GROUP["supermercados"]` (VTEX); semilla grocery: `python scripts/seed-supermercado-miss.py` (hasta salir de 0 productos). Cotizar también encola scrape on-miss por celda vacía.
 
 ## Tabla
 

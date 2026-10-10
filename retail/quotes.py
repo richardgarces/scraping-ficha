@@ -114,6 +114,7 @@ class QuoteInput(BaseModel):
     source_kind: Literal["manual", "csv", "docling"] = "manual"
     mode: Literal["quote", "shopping_list"] = "quote"
     store_group: str = Field(default="", max_length=80)
+    store_groups: list[str] = Field(default_factory=list, max_length=40)
     store_ids: list[str] = Field(default_factory=list, max_length=50)
     currency: Literal["CLP"] = "CLP"
     tax_included: bool | None = None
@@ -133,6 +134,13 @@ class QuoteInput(BaseModel):
     @classmethod
     def trim_store_group(cls, value):
         return str(value or "").strip().lower()
+
+    @field_validator("store_groups", mode="before")
+    @classmethod
+    def clean_store_groups(cls, value):
+        if not value:
+            return []
+        return list(dict.fromkeys(str(item).strip().lower() for item in value if str(item).strip()))
 
     @field_validator("store_ids", mode="before")
     @classmethod

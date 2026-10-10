@@ -66,7 +66,7 @@ def test_analysis_groups_stores_prices_and_stock():
     assert result["groups"][0]["offers"][1]["quantity_kind"] == "available"
 
 
-def test_product_analysis_page_and_api_require_login(monkeypatch):
+def test_product_analysis_page_and_api_require_admin(monkeypatch):
     monkeypatch.setattr("retail.web.app.connect_repo", lambda: None)
 
     def unavailable():
@@ -185,49 +185,25 @@ def test_product_analysis_api_rejects_unknown_ficha(monkeypatch):
     assert "guardado" in response.json()["detail"]
 
 
-def test_regular_user_can_analyze_saved_data_but_not_query_stores(monkeypatch):
+def test_regular_user_cannot_analyze_products(monkeypatch):
     class Repo:
         def close(self):
             return None
 
-    calls = []
+    def deny_non_admin(*args, **kwargs):
+        if kwargs.get("admin") or kwargs.get("required"):
+            if kwargs.get("admin"):
+                raise HTTPException(status_code=403, detail="Solo el administrador puede hacer eso.")
+            raise HTTPException(status_code=401, detail="Entra con tu cuenta.")
+        return {"id": "2", "role": "user", "status": "approved"}
+
     monkeypatch.setattr("retail.web.admin_analysis_api.repo_or_503", lambda: Repo())
-    monkeypatch.setattr(
-        "retail.web.admin_analysis_api.current_user",
-        lambda *args, **kwargs: {"id": "2", "role": "user", "status": "approved"},
-    )
-    monkeypatch.setattr(
-        "retail.web.admin_analysis_api.search_products",
-        lambda query, **kwargs: calls.append(kwargs) or {
-            "query": query,
-            "groups": [{
-                "name": "Producto",
-                "offers": [{
-                    "store": "lider", "product_id": "1", "price": 9990,
-                    "stock": 3, "shipping_cost": 2990, "entity_confidence": 0.95,
-                }],
-            }],
-        },
-    )
+    monkeypatch.setattr("retail.web.admin_analysis_api.current_user", deny_non_admin)
     client = TestClient(app)
-
-    saved = client.post("/api/product-analysis", json={"query": "Producto", "live": False})
-    assert saved.status_code == 200
-    assert calls[0]["source"] == "db"
-    assert calls[0]["persist"] is False
-    assert calls[0]["fresh"] is False
-    regular_offer = saved.json()["groups"][0]["offers"][0]
-    assert "shipping_cost" not in regular_offer
-    assert "quantity" not in regular_offer
-    assert "availability" not in regular_offer
-    assert "checked_live" not in regular_offer
-    assert "entity_confidence" not in regular_offer
-    assert "exact_quantity_count" not in saved.json()
-
-    live = client.post("/api/product-analysis", json={"query": "Producto", "live": True})
-    assert live.status_code == 403
-    assert "administrador" in live.json()["detail"]
-    assert len(calls) == 1
+    for live in (False, True):
+        response = client.post("/api/product-analysis", json={"query": "Producto", "live": live})
+        assert response.status_code == 403
+        assert "administrador" in response.json()["detail"]
 
 
 def test_admin_can_persist_manual_entity_merge(monkeypatch):

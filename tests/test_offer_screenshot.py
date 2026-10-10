@@ -63,55 +63,90 @@ def test_missing_playwright_falls_back(monkeypatch, tmp_path):
     ) == "https://cdn.example/a.jpg"
 
 
-def _install_fake_playwright(monkeypatch, sync_playwright_factory):
+def _install_fake_async_playwright(monkeypatch, async_playwright_factory):
     import sys
     import types
 
+    async_api = types.ModuleType("playwright.async_api")
+    async_api.async_playwright = async_playwright_factory
     sync_api = types.ModuleType("playwright.sync_api")
-    sync_api.sync_playwright = sync_playwright_factory
     pkg = types.ModuleType("playwright")
     pkg.__path__ = []
+    pkg.async_api = async_api
     pkg.sync_api = sync_api
     monkeypatch.setitem(sys.modules, "playwright", pkg)
+    monkeypatch.setitem(sys.modules, "playwright.async_api", async_api)
     monkeypatch.setitem(sys.modules, "playwright.sync_api", sync_api)
+
+
+def _async_playwright_stack(*, page_factory=None, launch_side_effect=None, launches=None):
+    """Fake async Playwright: un browser, pages async, cuenta launches."""
+
+    class FakePage:
+        def __init__(self):
+            self.url = ""
+
+        async def goto(self, url, wait_until=None, timeout=None):
+            self.url = url
+
+        async def wait_for_timeout(self, ms):
+            pass
+
+        async def title(self):
+            return "Producto | Tienda"
+
+        async def content(self):
+            return "<html><body><h1>Producto</h1></body></html>"
+
+        def locator(self, selector):
+            class Locator:
+                async def inner_text(self, timeout=None):
+                    return "Producto en oferta"
+
+            return Locator()
+
+        async def screenshot(self, path, full_page=False, type="png"):
+            Path(path).write_bytes(b"\x89PNG\r\n\x1a\n" + b"x" * 200)
+
+        async def close(self):
+            pass
+
+    class FakeBrowser:
+        async def new_page(self, viewport=None):
+            if page_factory is not None:
+                return page_factory()
+            return FakePage()
+
+        async def close(self):
+            pass
+
+    class FakeChromium:
+        async def launch(self, headless=True):
+            if launches is not None:
+                launches.append(1)
+            if launch_side_effect is not None:
+                raise launch_side_effect
+            return FakeBrowser()
+
+    class FakePlaywright:
+        chromium = FakeChromium()
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+    return FakePlaywright
 
 
 def test_capture_writes_png_with_mocked_playwright(monkeypatch, tmp_path):
     monkeypatch.setenv("OFFER_SCREENSHOTS", "1")
     monkeypatch.setenv("OFFER_SCREENSHOT_TIMEOUT_MS", "5000")
     monkeypatch.setattr(shots, "storage_dir", lambda: tmp_path)
-
-    class FakePage:
-        def goto(self, url, wait_until=None, timeout=None):
-            self.url = url
-
-        def wait_for_timeout(self, ms):
-            pass
-
-        def screenshot(self, path, full_page=False, type="png"):
-            Path(path).write_bytes(b"\x89PNG\r\n\x1a\n" + b"x" * 200)
-
-    class FakeBrowser:
-        def new_page(self, viewport=None):
-            return FakePage()
-
-        def close(self):
-            pass
-
-    class FakeChromium:
-        def launch(self, headless=True):
-            return FakeBrowser()
-
-    class FakePlaywright:
-        chromium = FakeChromium()
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *args):
-            return False
-
-    _install_fake_playwright(monkeypatch, lambda: FakePlaywright())
+    launches: list[int] = []
+    FakePlaywright = _async_playwright_stack(launches=launches)
+    _install_fake_async_playwright(monkeypatch, lambda: FakePlaywright())
 
     path = shots.capture_offer_screenshot(
         {"store": "lider", "product_id": "p1", "url": "https://tienda.cl/p/1"},
@@ -119,20 +154,49 @@ def test_capture_writes_png_with_mocked_playwright(monkeypatch, tmp_path):
     assert path
     assert Path(path).is_file()
     assert Path(path).read_bytes().startswith(b"\x89PNG")
+    assert len(launches) == 1
+
+
+def test_batch_captures_many_urls_with_single_launch(monkeypatch, tmp_path):
+    monkeypatch.setenv("OFFER_SCREENSHOTS", "1")
+    monkeypatch.setenv("RETAIL_CHROMIUM_CONCURRENCY", "3")
+    monkeypatch.setattr(shots, "storage_dir", lambda: tmp_path)
+    launches: list[int] = []
+    FakePlaywright = _async_playwright_stack(launches=launches)
+    _install_fake_async_playwright(monkeypatch, lambda: FakePlaywright())
+
+    payloads = [
+        {"store": "lider", "product_id": f"p{i}", "url": f"https://tienda.cl/p/{i}"}
+        for i in range(5)
+    ]
+    keys = [f"k{i}" for i in range(5)]
+    paths = shots.capture_offer_screenshots_batch(payloads, keys=keys)
+    assert len(launches) == 1
+    assert set(paths) == set(keys)
+    assert all(paths[key] and Path(paths[key]).is_file() for key in keys)
+
+
+def test_apply_offer_screenshots_updates_payloads(monkeypatch):
+    monkeypatch.setenv("OFFER_SCREENSHOTS", "1")
+    monkeypatch.setattr(
+        shots,
+        "capture_offer_screenshots_batch",
+        lambda payloads, keys=None: {keys[0]: "/tmp/a.png", keys[1]: "/tmp/b.png"},
+    )
+    media = {
+        "a": {"url": "https://tienda.cl/a", "image_url": "https://cdn.example/a.jpg"},
+        "b": {"url": "https://tienda.cl/b", "image_url": "https://cdn.example/b.jpg"},
+    }
+    shots.apply_offer_screenshots(media)
+    assert media["a"]["image_url"] == "/tmp/a.png"
+    assert media["b"]["image_url"] == "/tmp/b.png"
 
 
 def test_capture_failure_falls_back(monkeypatch, tmp_path):
     monkeypatch.setenv("OFFER_SCREENSHOTS", "1")
     monkeypatch.setattr(shots, "storage_dir", lambda: tmp_path)
-
-    class Boom:
-        def __enter__(self):
-            raise RuntimeError("browser down")
-
-        def __exit__(self, *args):
-            return False
-
-    _install_fake_playwright(monkeypatch, lambda: Boom())
+    FakePlaywright = _async_playwright_stack(launch_side_effect=RuntimeError("browser down"))
+    _install_fake_async_playwright(monkeypatch, lambda: FakePlaywright())
 
     assert shots.resolve_alert_image(
         {"url": "https://tienda.cl/p/1", "image_url": "https://cdn.example/a.jpg"},

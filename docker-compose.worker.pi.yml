@@ -1,0 +1,93 @@
+# Orange Pi (192.168.1.90): Cyber Day workers → BMAX Mongo/Redis.
+# Ops: ./cyber-pi.sh start --parallel 3|2
+#   parallel 3 → 3 contenedores pineados (1 lista c/u)
+#   parallel 2 → 2 pineados + 1 secuencial (CYBER_DAY_EXCLUDE_LIST_IDS de los pines)
+# Mantener BMAX/soyo precios-cyber-worker* parados.
+
+x-cyber-common: &cyber-common
+  image: precios-cyber-worker
+  build:
+    context: .
+    dockerfile: Dockerfile
+  env_file:
+    - .env
+  environment: &cyber-env
+    PYTHONDONTWRITEBYTECODE: "1"
+    PYTHONUNBUFFERED: "1"
+    CYBER_DAY_DELAY_SECONDS: ${CYBER_DAY_DELAY_SECONDS:-1.0}
+    CYBER_DAY_TOP_MATCHES: ${CYBER_DAY_TOP_MATCHES:-6}
+    CYBER_DAY_REFRESH_TOP: ${CYBER_DAY_REFRESH_TOP:-2}
+    CYBER_DAY_SEARCH_MAX_ITEMS: ${CYBER_DAY_SEARCH_MAX_ITEMS:-3}
+    CYBER_DAY_SEARCH_SOURCE: ${CYBER_DAY_SEARCH_SOURCE:-db}
+    CYBER_DAY_SEARCH_TIMEOUT: ${CYBER_DAY_SEARCH_TIMEOUT:-6}
+    CYBER_DAY_HOST_IP: ${CYBER_DAY_HOST_IP:-192.168.1.90}
+    CYBER_DAY_HOST_STATS_SECONDS: ${CYBER_DAY_HOST_STATS_SECONDS:-15}
+  volumes:
+    - ./retail/cyber_day.py:/app/retail/cyber_day.py:ro
+    - ./retail/host_stats.py:/app/retail/host_stats.py:ro
+    - ./data/cyber_day_sonic.json:/app/data/cyber_day_sonic.json:ro
+    - ./output:/app/output
+    - ./logs:/app/logs
+  command: ["python", "-m", "retail.cyber_day"]
+  restart: unless-stopped
+  mem_limit: 384m
+
+services:
+  # --- Pines (parallel 3 usa los 3; parallel 2 usa junio+oct) ---
+  cyber-junio2026:
+    <<: *cyber-common
+    hostname: precios-cyber-pi
+    container_name: precios-cyber-worker-pi-junio
+    environment:
+      <<: *cyber-env
+      CYBER_DAY_LIST_ID: cyber_junio2026
+    healthcheck:
+      test: ["CMD", "python", "-m", "retail.cyber_day", "--healthcheck", "--list-id", "cyber_junio2026"]
+      interval: 30s
+      timeout: 12s
+      retries: 4
+      start_period: 40s
+
+  cyber-oct2026:
+    <<: *cyber-common
+    hostname: precios-cyber-pi
+    container_name: precios-cyber-worker-pi-oct
+    environment:
+      <<: *cyber-env
+      CYBER_DAY_LIST_ID: cyber_oct2026
+    healthcheck:
+      test: ["CMD", "python", "-m", "retail.cyber_day", "--healthcheck", "--list-id", "cyber_oct2026"]
+      interval: 30s
+      timeout: 12s
+      retries: 4
+      start_period: 40s
+
+  cyber-cambio-ultimo-jes:
+    <<: *cyber-common
+    hostname: precios-cyber-pi
+    container_name: precios-cyber-worker-pi-cambio
+    environment:
+      <<: *cyber-env
+      CYBER_DAY_LIST_ID: cyber_cambio_ultimo_jes
+    healthcheck:
+      test: ["CMD", "python", "-m", "retail.cyber_day", "--healthcheck", "--list-id", "cyber_cambio_ultimo_jes"]
+      interval: 30s
+      timeout: 12s
+      retries: 4
+      start_period: 40s
+
+  # --- Secuencial del resto (solo parallel 2): excluye los 2 pines dedicados ---
+  cyber-sequential:
+    <<: *cyber-common
+    hostname: precios-cyber-pi
+    container_name: precios-cyber-worker-pi-seq
+    environment:
+      <<: *cyber-env
+      CYBER_DAY_MULTI_LIST_MODE: sequential
+      CYBER_DAY_EXCLUDE_LIST_IDS: cyber_junio2026,cyber_oct2026
+    healthcheck:
+      test: ["CMD", "python", "-m", "retail.cyber_day", "--healthcheck"]
+      interval: 30s
+      timeout: 12s
+      retries: 4
+      start_period: 40s

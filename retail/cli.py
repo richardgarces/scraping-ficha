@@ -341,6 +341,14 @@ def run_catalog_batch(args: argparse.Namespace) -> int:
                 f"Mongo +{saved.get('upserted') or 0} ~{saved.get('modified') or 0} · "
                 f"{row.get('alerts', 0)} alertas"
             )
+    if summary.get("interrupted"):
+        from retail.batch.group_scope import INTERRUPT_EXIT_CODE
+
+        print(
+            "Corrida interrumpida (deploy/SIGTERM); cursor guardado para reintento/continuación.",
+            file=sys.stderr,
+        )
+        return INTERRUPT_EXIT_CODE
     return 0
 
 

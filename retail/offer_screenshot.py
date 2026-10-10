@@ -8,6 +8,7 @@ Si el respaldo falla, se vuelve al `image_url` del producto.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import hashlib
 import io
@@ -309,6 +310,52 @@ def apply_offer_screenshot(payload: dict[str, Any]) -> dict[str, Any]:
     if resolved:
         payload["image_url"] = resolved
     return payload
+
+
+def screenshot_item_key(payload: dict[str, Any], *, explicit: str | None = None) -> str:
+    """Clave estable para deduplicar capturas en un lote."""
+    if explicit:
+        return str(explicit)
+    extra = payload.get("extra") if isinstance(payload.get("extra"), dict) else {}
+    store = str(extra.get("store") or payload.get("store") or "").strip().lower()
+    product_id = str(
+        extra.get("product_id") or payload.get("product_id") or payload.get("id") or ""
+    ).strip()
+    if store and product_id:
+        return f"{store}:{product_id}"
+    target = page_url_for_offer(payload)
+    if target:
+        return "url:" + hashlib.sha1(target.encode("utf-8")).hexdigest()[:20]
+    return "anon:" + hashlib.sha1(repr(sorted(payload.items())).encode("utf-8")).hexdigest()[:16]
+
+
+def apply_offer_screenshots(
+    payloads_by_key: dict[str, dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    """Captura en un solo browser y aplica `image_url` local por clave.
+
+    Pensado para el fan-out de alertas: reunir payloads únicos, llamar una vez,
+    luego enviar. Si la captura falla, conserva la foto del producto (Ripley
+    puede materializar una copia local).
+    """
+    if not payloads_by_key:
+        return payloads_by_key
+    keys = list(payloads_by_key.keys())
+    payloads = [payloads_by_key[key] for key in keys]
+    paths = capture_offer_screenshots_batch(payloads, keys=keys)
+    for key in keys:
+        payload = payloads_by_key[key]
+        if not isinstance(payload, dict):
+            continue
+        fallback = str(payload.get("image_url") or "").strip() or None
+        captured = paths.get(key)
+        if captured:
+            payload["image_url"] = captured
+        else:
+            resolved = _ripley_product_photo(payload, fallback)
+            if resolved:
+                payload["image_url"] = resolved
+    return payloads_by_key
 
 
 # Marcadores del HTML de la intersticial. Un widget Turnstile o el script
@@ -634,6 +681,14 @@ def note_store_bot_check(
                 pass
 
 
+def _bot_check_from_parts(title: str, html: str, text_content: str) -> tuple[bool, str]:
+    if not any(str(value or "").strip() for value in (title, html, text_content)):
+        return False, ""
+    blocked = is_bot_check_page(html, title, text_content)
+    provider = bot_check_provider(html, title, text_content) if blocked else ""
+    return blocked, provider
+
+
 def _page_bot_check_details(page: Any) -> tuple[bool, str]:
     title = ""
     html = ""
@@ -655,11 +710,31 @@ def _page_bot_check_details(page: Any) -> tuple[bool, str]:
             )
         except Exception:
             text_content = ""
-    if not any(str(value or "").strip() for value in (title, html, text_content)):
-        return False, ""
-    blocked = is_bot_check_page(html, title, text_content)
-    provider = bot_check_provider(html, title, text_content) if blocked else ""
-    return blocked, provider
+    return _bot_check_from_parts(title, html, text_content)
+
+
+async def _page_bot_check_details_async(page: Any) -> tuple[bool, str]:
+    title = ""
+    html = ""
+    text_content = ""
+    try:
+        title = await page.title()
+    except Exception:
+        title = ""
+    try:
+        html = await page.content()
+    except Exception:
+        html = ""
+    try:
+        text_content = await page.locator("body").inner_text(timeout=1_000)
+    except Exception:
+        try:
+            text_content = await page.evaluate(
+                "() => document.body ? (document.body.innerText || document.body.textContent || '') : ''"
+            )
+        except Exception:
+            text_content = ""
+    return _bot_check_from_parts(title, html, text_content)
 
 
 def _page_is_bot_check(page: Any) -> bool:
@@ -698,57 +773,172 @@ def _capture_with_solver(target: str, dest: Path) -> bool:
         return False
 
 
-def capture_offer_screenshot(payload: dict[str, Any]) -> str | None:
-    """Captura PNG de la página de oferta. None si está desactivado o falla."""
+def _valid_shot_path(dest: Path) -> str | None:
+    if dest.is_file() and dest.stat().st_size >= 100:
+        return str(dest)
+    return None
+
+
+async def _capture_jobs_async(
+    jobs: list[dict[str, Any]],
+    *,
+    timeout: int,
+    parallel: int,
+) -> tuple[dict[str, str | None], list[dict[str, Any]]]:
+    """Un Chromium; hasta ``parallel`` pages a la vez. FlareSolverr queda fuera."""
+    from playwright.async_api import async_playwright
+
+    results: dict[str, str | None] = {job["key"]: None for job in jobs}
+    solver_jobs: list[dict[str, Any]] = []
+    gate = asyncio.Semaphore(max(1, parallel))
+
+    async with async_playwright() as playwright:
+        browser = await playwright.chromium.launch(headless=True)
+        try:
+
+            async def run_one(job: dict[str, Any]) -> None:
+                async with gate:
+                    page = await browser.new_page(viewport={"width": 1280, "height": 720})
+                    try:
+                        await page.goto(
+                            job["target"],
+                            wait_until="domcontentloaded",
+                            timeout=timeout,
+                        )
+                        await page.wait_for_timeout(min(1_500, timeout // 4))
+                        blocked, provider = await _page_bot_check_details_async(page)
+                        if blocked:
+                            _discard_screenshot(job["dest"])
+                            solver_jobs.append({**job, "provider": provider})
+                            return
+                        await page.screenshot(
+                            path=str(job["dest"]),
+                            full_page=False,
+                            type="png",
+                        )
+                        results[job["key"]] = _valid_shot_path(job["dest"])
+                    except Exception as exc:
+                        print(f"Captura de oferta: falló ({exc}); se usa image_url.")
+                        _discard_screenshot(job["dest"])
+                        results[job["key"]] = None
+                    finally:
+                        await page.close()
+
+            await asyncio.gather(*(run_one(job) for job in jobs))
+        finally:
+            await browser.close()
+    return results, solver_jobs
+
+
+def _finish_solver_fallbacks(
+    results: dict[str, str | None],
+    solver_jobs: list[dict[str, Any]],
+) -> dict[str, str | None]:
+    """Respaldo FlareSolverr en serie tras cerrar Chromium (sin abrir otro frente)."""
+    for job in solver_jobs:
+        dest: Path = job["dest"]
+        target: str = job["target"]
+        payload: dict[str, Any] = job["payload"]
+        provider = job.get("provider") or ""
+        if _capture_with_solver(target, dest):
+            results[job["key"]] = _valid_shot_path(dest)
+            continue
+        store_id = _store_id(payload) or "la tienda"
+        print(
+            f"Captura de oferta: {store_id} mostró una comprobación antibot; "
+            "no se adjunta esa captura."
+        )
+        note_store_bot_check(payload, provider=provider)
+        _discard_screenshot(dest)
+        results[job["key"]] = None
+    return results
+
+
+def capture_offer_screenshots_batch(
+    payloads: list[dict[str, Any]],
+    *,
+    keys: list[str] | None = None,
+) -> dict[str, str | None]:
+    """Captura varias ofertas con un solo ``chromium.launch``.
+
+    Usa un slot Chromium compartido (Redis/in-process) y abre hasta
+    ``RETAIL_CHROMIUM_CONCURRENCY`` pages en paralelo sobre ese browser.
+    Devuelve ``clave → ruta PNG`` (o ``None`` si falló / está desactivado).
+    """
+    if not payloads:
+        return {}
+    if keys is not None and len(keys) != len(payloads):
+        raise ValueError("keys debe tener la misma longitud que payloads")
     if not screenshots_enabled():
-        return None
-    target = page_url_for_offer(payload)
-    if not target:
-        return None
+        out_keys = [
+            keys[index] if keys is not None else screenshot_item_key(payload)
+            for index, payload in enumerate(payloads)
+        ]
+        return {key: None for key in out_keys}
+
     try:
-        from playwright.sync_api import sync_playwright
+        from playwright.async_api import async_playwright  # noqa: F401
     except ImportError:
         print("Captura de oferta: Playwright no instalado; se omite.")
-        return None
+        out_keys = [
+            keys[index] if keys is not None else screenshot_item_key(payload)
+            for index, payload in enumerate(payloads)
+        ]
+        return {key: None for key in out_keys}
+
+    from retail.concurrency import chromium_limit, chromium_slot
 
     cleanup_old_screenshots()
-    dest = _destination_path(payload, target)
-    dest.parent.mkdir(parents=True, exist_ok=True)
     timeout = screenshot_timeout_ms()
+    parallel = chromium_limit()
+    jobs: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    results: dict[str, str | None] = {}
+
+    for index, payload in enumerate(payloads):
+        if not isinstance(payload, dict):
+            continue
+        key = keys[index] if keys is not None else screenshot_item_key(payload)
+        if key in seen:
+            continue
+        seen.add(key)
+        target = page_url_for_offer(payload)
+        if not target:
+            results[key] = None
+            continue
+        dest = _destination_path(payload, target)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        jobs.append(
+            {
+                "key": key,
+                "payload": payload,
+                "target": target,
+                "dest": dest,
+            }
+        )
+
+    if not jobs:
+        return results
+
     try:
-        with sync_playwright() as playwright:
-            browser = playwright.chromium.launch(headless=True)
-            try:
-                page = browser.new_page(viewport={"width": 1280, "height": 720})
-                page.goto(target, wait_until="domcontentloaded", timeout=timeout)
-                page.wait_for_timeout(min(1_500, timeout // 4))
-                blocked, provider = _page_bot_check_details(page)
-                if blocked:
-                    _discard_screenshot(dest)
-                    if _capture_with_solver(target, dest):
-                        return str(dest)
-                    store_id = _store_id(payload) or "la tienda"
-                    print(
-                        f"Captura de oferta: {store_id} mostró una comprobación antibot; "
-                        "no se adjunta esa captura."
-                    )
-                    note_store_bot_check(payload, provider=provider)
-                    _discard_screenshot(dest)
-                    return None
-                page.screenshot(path=str(dest), full_page=False, type="png")
-            finally:
-                browser.close()
+        with chromium_slot():
+            captured, solver_jobs = asyncio.run(
+                _capture_jobs_async(jobs, timeout=timeout, parallel=parallel)
+            )
+        results.update(captured)
+        _finish_solver_fallbacks(results, solver_jobs)
     except Exception as exc:
-        print(f"Captura de oferta: falló ({exc}); se usa image_url.")
-        try:
-            if dest.exists():
-                dest.unlink()
-        except OSError:
-            pass
-        return None
-    if not dest.is_file() or dest.stat().st_size < 100:
-        return None
-    return str(dest)
+        print(f"Captura de oferta: falló el lote ({exc}); se usa image_url.")
+        for job in jobs:
+            _discard_screenshot(job["dest"])
+            results.setdefault(job["key"], None)
+    return results
+
+
+def capture_offer_screenshot(payload: dict[str, Any]) -> str | None:
+    """Captura PNG de la página de oferta. None si está desactivado o falla."""
+    key = screenshot_item_key(payload)
+    return capture_offer_screenshots_batch([payload], keys=[key]).get(key)
 
 
 def cleanup_old_screenshots(*, now: float | None = None) -> int:

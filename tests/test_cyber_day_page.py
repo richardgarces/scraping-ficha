@@ -45,9 +45,13 @@ def test_cyber_day_static_assets_exist():
     assert "Eliminar lista" in html
     assert "Importar / actualizar lista activa" in html
     assert "reemplaza las queries" in html
-    assert "cyber-day.js?v=25" in html
-    assert "styles.css?v=95-forecast-rows" in html
-    js = (root / "cyber-day.js").read_text(encoding="utf-8")
+    assert "cyber-day.js?v=28" in html
+    assert "styles.css?v=97-hosts" in html
+    assert "cyber-host-panel" not in html
+    assert "Host scrape" not in html
+    assert 'href="/hosts"' in html
+    assert "renderHostPanel" not in js
+    assert "worker_hosts" not in js
     assert "cyber-delete-item" in js
     assert "eliminar" in html
     assert 'data-sort="' in html

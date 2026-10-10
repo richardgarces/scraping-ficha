@@ -270,7 +270,7 @@ def dispatch_predictive_alerts(repo: Any) -> dict[str, Any]:
 
     from retail.batch.alerts import _notification_text, product_email_html, send_email, send_to_user
     from retail.batch.rules import load_rules
-    from retail.offer_screenshot import apply_offer_screenshot, is_local_image
+    from retail.offer_screenshot import apply_offer_screenshots, is_local_image
     from retail.short_links import attach_short_url
 
     users = [
@@ -289,6 +289,8 @@ def dispatch_predictive_alerts(repo: Any) -> dict[str, Any]:
     sends = getattr(repo, "predictive_alert_sends", repo.db.get_collection("predictive_alert_sends"))
     sent = 0
     seen_forecasts: set[str] = set()
+    pending: list[dict[str, Any]] = []
+    media: dict[str, dict[str, Any]] = {}
     for forecast in forecasts.find(
         {"model": "timesfm", "forecast_key": {"$type": "string"}}
     ).sort("generated_at", -1):
@@ -317,11 +319,34 @@ def dispatch_predictive_alerts(repo: Any) -> dict[str, Any]:
             "message": message, "url": product.get("url"), "image_url": product.get("image_url"),
         }
         attach_short_url(payload, repo)
-        original_image = payload.get("image_url")
-        apply_offer_screenshot(payload)
+        media_key = forecast_key
+        media[media_key] = payload
+        pending.append(
+            {
+                "forecast": forecast,
+                "product": product,
+                "kind": kind,
+                "generated": generated,
+                "payload": payload,
+                "media_key": media_key,
+                "original_image": payload.get("image_url"),
+                "entity_key": str(
+                    product.get("compare_code")
+                    or f"product:{forecast.get('store')}:{forecast.get('product_id')}"
+                ),
+            }
+        )
+    apply_offer_screenshots(media)
+    for item in pending:
+        forecast = item["forecast"]
+        product = item["product"]
+        kind = item["kind"]
+        generated = item["generated"]
+        payload = item["payload"]
+        original_image = item["original_image"]
+        entity_key = item["entity_key"]
         image_url = payload.get("image_url") or product.get("image_url")
         text = _notification_text(payload)
-        entity_key = str(product.get("compare_code") or f"product:{forecast.get('store')}:{forecast.get('product_id')}")
         for user in users:
             user_id = str(user.get("_id") or user.get("id") or "")
             key = {"user_id": user_id, "forecast_key": forecast["forecast_key"], "kind": kind, "generated_at": generated}

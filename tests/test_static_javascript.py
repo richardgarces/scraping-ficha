@@ -200,10 +200,11 @@ def test_product_forecast_panel_is_admin_only_and_collapsed_by_default() -> None
 
 
 def test_timesfm_offer_summary_is_admin_only() -> None:
-    for page_name, script_name in (("reales.html", "reales.js"), ("super.html", "super.js")):
-        page = Path(f"retail/web/static/{page_name}").read_text(encoding="utf-8")
-        script = Path(f"retail/web/static/{script_name}").read_text(encoding="utf-8")
-        assert 'id="timesfm-summary" class="timesfm-summary muted" data-admin hidden' in page
-        assert 'window.retailUser && window.retailUser.role === "admin"' in script
-        assert "TimesFM aún no se muestra en ofertas:" in script
-        assert "typeof ensureUser === \"function\") await ensureUser()" in script
+    page = Path("retail/web/static/reales.html").read_text(encoding="utf-8")
+    script = Path("retail/web/static/reales.js").read_text(encoding="utf-8")
+    assert 'id="timesfm-summary" class="timesfm-summary muted" data-admin hidden' in page
+    assert 'window.retailUser && window.retailUser.role === "admin"' in script
+    assert "TimesFM aún no se muestra en ofertas:" in script
+    assert "typeof ensureUser === \"function\") await ensureUser()" in script
+    assert not Path("retail/web/static/super.html").exists()
+    assert not Path("retail/web/static/super.js").exists()

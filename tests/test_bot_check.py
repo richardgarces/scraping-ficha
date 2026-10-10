@@ -161,38 +161,80 @@ def test_tiendas_page_shows_the_mark():
     assert "renderBotChecks" in script
 
 
-def _install_fake_playwright(monkeypatch, factory):
+def _install_fake_async_playwright(monkeypatch, factory):
     import sys
     import types
 
+    async_api = types.ModuleType("playwright.async_api")
+    async_api.async_playwright = factory
     sync_api = types.ModuleType("playwright.sync_api")
-    sync_api.sync_playwright = factory
     pkg = types.ModuleType("playwright")
     pkg.__path__ = []
+    pkg.async_api = async_api
     pkg.sync_api = sync_api
     monkeypatch.setitem(sys.modules, "playwright", pkg)
+    monkeypatch.setitem(sys.modules, "playwright.async_api", async_api)
     monkeypatch.setitem(sys.modules, "playwright.sync_api", sync_api)
 
 
-def _browser(page):
-    class Browser:
-        def new_page(self, viewport=None):
-            return page
+def _async_wrap_page(page):
+    class AsyncPage:
+        async def goto(self, *args, **kwargs):
+            return page.goto(*args, **kwargs)
 
-        def close(self):
+        async def wait_for_timeout(self, ms):
+            return page.wait_for_timeout(ms)
+
+        async def title(self):
+            return page.title()
+
+        async def content(self):
+            return page.content()
+
+        def locator(self, selector):
+            loc = page.locator(selector)
+
+            class AsyncLocator:
+                async def inner_text(self, timeout=None):
+                    return loc.inner_text(timeout=timeout)
+
+            return AsyncLocator()
+
+        async def evaluate(self, *args, **kwargs):
+            return page.evaluate(*args, **kwargs)
+
+        async def screenshot(self, **kwargs):
+            return page.screenshot(**kwargs)
+
+        async def close(self):
+            close = getattr(page, "close", None)
+            if close is not None:
+                return close()
+
+    return AsyncPage()
+
+
+def _browser(page):
+    async_page = _async_wrap_page(page)
+
+    class Browser:
+        async def new_page(self, viewport=None):
+            return async_page
+
+        async def close(self):
             pass
 
     class Chromium:
-        def launch(self, headless=True):
+        async def launch(self, headless=True):
             return Browser()
 
     class Playwright:
         chromium = Chromium()
 
-        def __enter__(self):
+        async def __aenter__(self):
             return self
 
-        def __exit__(self, *args):
+        async def __aexit__(self, *args):
             return False
 
     return Playwright()
@@ -240,7 +282,7 @@ def test_challenge_screenshot_is_dropped_and_store_is_marked(monkeypatch, tmp_pa
         def screenshot(self, **kwargs):
             raise AssertionError("no se debe guardar la captura de la comprobación")
 
-    _install_fake_playwright(monkeypatch, lambda: _browser(Page()))
+    _install_fake_async_playwright(monkeypatch, lambda: _browser(Page()))
     assert shots.resolve_alert_image(
         {
             "store": "Lider",
@@ -274,7 +316,7 @@ def test_product_page_still_saves_png(monkeypatch, tmp_path):
         def screenshot(self, path, full_page=False, type="png"):
             Path(path).write_bytes(b"\x89PNG\r\n\x1a\n" + b"x" * 200)
 
-    _install_fake_playwright(monkeypatch, lambda: _browser(Page()))
+    _install_fake_async_playwright(monkeypatch, lambda: _browser(Page()))
     path = shots.capture_offer_screenshot(
         {"store": "lider", "product_id": "p1", "url": "https://tienda.cl/p/1"},
     )

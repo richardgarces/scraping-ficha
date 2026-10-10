@@ -200,12 +200,15 @@ def test_real_and_super_offers_require_login():
         assert client.get(path).status_code == 200
     entrar = client.get("/entrar?next=/reales")
     assert entrar.status_code == 200
-    assert "entrar.js?v=15" in entrar.text
+    assert "entrar.js?v=16" in entrar.text
     js = Path("retail/web/static/entrar.js").read_text()
     assert "Inicia sesión para ver ofertas reales." in js
     assert "Inicia sesión para ver super ofertas." in js
     assert "Solo administradores pueden ver el ranking de tiendas." in js
-    assert 'dest.startsWith("/tiendas")' in js
+    assert '"/tiendas"' in js
+    assert '"/pronosticos"' in js
+    assert '"/cambios-precio"' in js
+    assert '"/analisis-producto"' in js
     assert 'dest.startsWith("/reales")' not in js
 
 
@@ -228,9 +231,9 @@ def test_logged_in_user_can_open_offer_pages(monkeypatch):
     comparar = client.get("/comparar?store=cugat&id=18221")
     assert comparar.status_code == 200
     assert "Comparar productos" in comparar.text
-    analysis = client.get("/analisis-producto")
-    assert analysis.status_code == 200
-    assert "Análisis de producto" in analysis.text
+    analysis = client.get("/analisis-producto", follow_redirects=False)
+    assert analysis.status_code == 303
+    assert analysis.headers["location"] == "/entrar?next=/analisis-producto"
     assert "Super ofertas: descuento superior al 50%" in super_page.text
     tiendas = client.get("/tiendas", follow_redirects=False)
     assert tiendas.status_code == 303
@@ -243,6 +246,42 @@ def test_logged_in_user_can_open_offer_pages(monkeypatch):
     assert '<h2 id="auth-title">Entrar</h2>' in back_stores.text
     cron = client.get("/entrar?next=/cron", follow_redirects=False)
     assert cron.status_code == 200
+    for admin_dest in ("/pronosticos", "/cambios-precio", "/tiendas", "/analisis-producto"):
+        stuck = client.get(f"/entrar?next={admin_dest}", follow_redirects=False)
+        assert stuck.status_code == 200, admin_dest
+        assert '<h2 id="auth-title">Entrar</h2>' in stuck.text
+
+
+def test_logged_in_admin_redirects_from_entrar_to_admin_pages(monkeypatch):
+    class Store:
+        def close(self):
+            return None
+
+    admin = {"id": "9", "role": "admin", "status": "approved"}
+    monkeypatch.setattr("retail.web.deps.connect_repo", lambda: Store())
+    monkeypatch.setattr("retail.web.deps.current_user", lambda *args, **kwargs: admin)
+    monkeypatch.setattr("retail.web.app.connect_repo", lambda: Store())
+    monkeypatch.setattr("retail.web.app.current_user", lambda *args, **kwargs: admin)
+    client = TestClient(app)
+    for dest in (
+        "/pronosticos",
+        "/cambios-precio",
+        "/tiendas",
+        "/analisis-producto",
+        "/cotizaciones",
+        "/cron",
+    ):
+        response = client.get(f"/entrar?next={dest}", follow_redirects=False)
+        assert response.status_code == 303, dest
+        assert response.headers["location"] == dest
+    analysis = client.get("/analisis-producto")
+    assert analysis.status_code == 200
+    assert "Análisis de producto" in analysis.text
+    from retail.web.deps import ADMIN_HTML_PREFIXES
+
+    js = Path("retail/web/static/entrar.js").read_text(encoding="utf-8")
+    for prefix in ADMIN_HTML_PREFIXES:
+        assert f'"{prefix}"' in js
 
 
 def test_watches_require_login():

@@ -98,6 +98,52 @@ def test_explore_categories_include_counts_optional(repo):
     assert all(int(row["count"]) > 0 for row in rows)
 
 
+@pytest.mark.parametrize(
+    "query",
+    [
+        "azúcar granulada iansa",
+        "azucar granulada iansa",
+        "AZÚCAR IANSA",
+        "azúcar ianza",
+    ],
+)
+def test_browse_finds_accented_sugar_queries(repo, query):
+    """Cotizaciones /api/catalog usa browse(); debe hallar Azúcar… como /hoy/$text."""
+    repo.collection.insert_many(
+        [
+            {
+                "store": "alvi",
+                "product_id": "az1",
+                "name": "Azúcar granulada Iansa, 400 g",
+                "brand": "Iansa",
+                "price": 890,
+                "updated_at": "2026-10-01T12:00:00Z",
+            },
+            {
+                "store": "tottus",
+                "product_id": "az2",
+                "name": "Azúcar Granulada Iansa 900 g",
+                "brand": "IANSA",
+                "price": 990,
+                "updated_at": "2026-10-02T12:00:00Z",
+            },
+            {
+                "store": "lider",
+                "product_id": "other",
+                "name": "Café molido Juan Valdez",
+                "brand": "Juan Valdez",
+                "price": 4500,
+                "updated_at": "2026-10-03T12:00:00Z",
+            },
+        ]
+    )
+    found = repo.browse(text=query, size=12, sort="updated")
+    names = {str(item.get("name") or "") for item in found["items"]}
+    assert found["total"] >= 1
+    assert any("Azúcar" in name or "azúcar" in name.casefold() for name in names)
+    assert all("Café" not in name for name in names)
+
+
 def test_explore_categories_endpoint_and_catalog_default(monkeypatch, repo):
     repo.collection.insert_one(
         {"store": "falabella", "product_id": "1", "name": "TV", "catalog_category": "Tecnología", "price": 1000}

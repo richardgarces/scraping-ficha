@@ -9,6 +9,7 @@ from retail.shopping_list import (
     PRICE_MAX_AGE_HOURS,
     _empty_cell,
     _line_search_query,
+    available_store_groups,
     best_match_for_store,
     list_candidate_for,
     matrix_export_csv,
@@ -134,8 +135,13 @@ def test_matrix_three_items_three_stores_and_basket_total():
     assert "Stale mejor" in csv_text
     assert "unimarc fecha precio" in csv_text
     assert "unimarc stale" in csv_text
+    assert "unimarc usable" in csv_text
+    assert "unimarc confirmada" in csv_text
+    assert "unimarc estado" in csv_text
     assert "Sin despacho" in csv_text
     assert "Celdas stale" in csv_text
+    assert "Generado" in csv_text
+    assert "Celdas buscando" in csv_text
     assert str(PRICE_MAX_AGE_HOURS) in csv_text
     assert report["summary"]["shipping_note"]
     assert report["summary"]["price_max_age_hours"] == PRICE_MAX_AGE_HOURS
@@ -163,6 +169,39 @@ def test_quote_line_optional_unit_price_still_validates_name():
     line = QuoteLine(name="Café instantáneo 100 g")
     assert line.unit_price is None
     assert line.quantity == 1
+
+
+def test_query_subset_rejects_incompatible_pack_size():
+    """1.5 kg de la lista no debe matchear un SKU de 1 kg (ni al revés)."""
+    line = QuoteLine(name="Azúcar granulada 1.5 kg", brand="Iansa")
+    one_kg = _doc(
+        "tottus",
+        "az-1kg",
+        "Azúcar Granulada 1 Kg",
+        1490,
+        brand="Iansa",
+        availability="disponible",
+    )
+    one_half = _doc(
+        "cugat",
+        "az-15",
+        "Azúcar Granulada 1.5 Kg",
+        1790,
+        brand="Iansa",
+        availability="disponible",
+    )
+    assert list_candidate_for(line, one_kg, now=NOW) is None
+    hit = list_candidate_for(line, one_half, now=NOW)
+    assert hit is not None
+    assert hit["product_id"] == "az-15"
+    if hit.get("match_method") == "query_subset":
+        assert float(hit.get("rank_boost") or 0) >= 0.4
+    best = best_match_for_store(line, [one_kg, one_half], "cugat", now=NOW)
+    assert best is not None and best["product_id"] == "az-15"
+    # Lista sin envase sigue pudiendo sugerir 400 g.
+    bare = QuoteLine(name="azúcar")
+    sugar400 = _doc("alvi", "az-400", "Azúcar granulada Iansa, 400 g", 890, brand="Iansa", availability="disponible")
+    assert list_candidate_for(bare, sugar400, now=NOW) is not None
 
 
 def test_short_azucar_matches_iansa_sugar_via_query_subset():
@@ -241,8 +280,16 @@ def test_stale_candidate_flags_price_outside_window():
     cell = report["rows"][0]["cells"]["lider"]
     assert cell["matched"] is True
     assert cell["stale"] is True
+    assert cell["usable"] is False
     assert report["summary"]["stale_cells"] == 1
     assert cell["match_reason"]
+    basket = next(row for row in report["summary"]["basket"] if row["store"] == "lider")
+    assert basket["matched_items"] == 1
+    assert basket["usable_items"] == 0
+    assert basket["subtotal"] is None
+    assert basket["complete"] is False
+    assert report["summary"]["best_store"] is None
+    assert report["summary"]["complete"] is False
 
 
 def test_empty_cell_hints_distinguish_no_match_vs_no_catalog():
@@ -309,3 +356,38 @@ def test_refresh_quote_prices_boosts_matched_skus_with_catalog_id():
     assert result["boosted"] == 2
     assert "prioridad" in result["message"].casefold() or "sku" in result["message"].casefold()
     assert len(updates) == 2
+
+
+def test_resolve_list_stores_expands_selected_categories(monkeypatch):
+    from retail.shopping_list import resolve_list_stores
+
+    monkeypatch.setattr(
+        "retail.shopping_list.stores_for_group",
+        lambda group, repo=None: {
+            "supermercados": ["lider", "tottus"],
+            "retail": ["falabella", "paris"],
+        }.get(group, []),
+    )
+    stores = resolve_list_stores({"store_groups": ["supermercados", "retail"]})
+    assert stores == ["lider", "tottus", "falabella", "paris"]
+    # store_ids legacy sigue funcionando si no hay store_groups
+    assert resolve_list_stores({"store_group": "supermercados", "store_ids": ["lider"]}) == ["lider"]
+
+
+def test_available_store_groups_include_title_and_logo(monkeypatch):
+    monkeypatch.setattr(
+        "retail.shopping_list.list_store_categories",
+        lambda repo=None: [{"id": "retail", "title": "Retail"}],
+    )
+    monkeypatch.setattr(
+        "retail.shopping_list.stores_for_group",
+        lambda group_id, repo=None: ["falabella", "elite_professional"],
+    )
+    groups = available_store_groups()
+    assert groups[0]["title"] == "Retail"
+    assert groups[0]["store_ids"] == ["falabella", "elite_professional"]
+    by_id = {row["id"]: row for row in groups[0]["stores"]}
+    assert by_id["falabella"]["title"] == "Falabella"
+    assert by_id["falabella"]["logo"] == "/static/logos/falabella.png"
+    assert by_id["elite_professional"]["title"] == "Elite Professional"
+    assert by_id["elite_professional"]["logo"] == "/static/logos/_store.svg"

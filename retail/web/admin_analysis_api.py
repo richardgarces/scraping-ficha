@@ -121,8 +121,8 @@ async def _product_analysis(request: Request, *, admin_only: bool = False) -> di
 
 @router.post("/api/product-analysis")
 async def product_analysis(request: Request) -> dict:
-    """Análisis guardado para cuentas aprobadas; consulta en vivo solo para admin."""
-    return await _product_analysis(request)
+    """Análisis de producto: solo administrador (alineado con el menú data-admin)."""
+    return await _product_analysis(request, admin_only=True)
 
 
 @router.post("/api/admin/product-analysis")

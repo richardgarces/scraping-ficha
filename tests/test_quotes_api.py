@@ -162,8 +162,19 @@ def quotes_client(monkeypatch):
         text = str(query).lower()
         return [deepcopy(row) for (store, pid), row in catalog.items() if text[:4] in row["name"].lower() or text in row["name"].lower()]
 
+    miss_jobs = SimpleNamespace(
+        create_index=lambda *a, **k: None,
+        find_one=lambda *a, **k: None,
+        insert_one=lambda *a, **k: SimpleNamespace(inserted_id="x"),
+        find=lambda *a, **k: [],
+    )
     repo = SimpleNamespace(
-        db=SimpleNamespace(business_quotes=quotes, business_quote_events=events),
+        db=SimpleNamespace(
+            business_quotes=quotes,
+            business_quote_events=events,
+            quote_miss_jobs=miss_jobs,
+        ),
+        quote_miss_jobs=miss_jobs,
         product_detail=product_detail,
         find_by_query=find_by_query,
         scrape_priorities=SimpleNamespace(update_one=lambda *a, **k: None),
@@ -171,6 +182,7 @@ def quotes_client(monkeypatch):
     )
     monkeypatch.setattr("retail.web.quotes_api.connect_repo", lambda: repo)
     monkeypatch.setattr("retail.web.quotes_api.current_user", _fake_current_user(user))
+    monkeypatch.setattr("retail.quote_miss_jobs.start_background_worker", lambda: None)
     monkeypatch.setattr(
         "retail.shopping_list.stores_for_group",
         lambda group, repo=None: ["lider", "unimarc", "tottus"] if group == "supermercados" else [],
@@ -179,10 +191,9 @@ def quotes_client(monkeypatch):
         "retail.shopping_list.list_store_categories",
         lambda repo=None: [{"id": "supermercados", "title": "Supermercados", "store_ids": ["lider", "unimarc", "tottus"], "sort_order": 0}],
     )
-    monkeypatch.setattr(
-        "retail.web.quotes_api.resolve_list_stores",
-        lambda quote, repo=None: quote.get("store_ids") or ["lider", "unimarc", "tottus"],
-    )
+    from retail.shopping_list import resolve_list_stores as real_resolve_list_stores
+
+    monkeypatch.setattr("retail.web.quotes_api.resolve_list_stores", real_resolve_list_stores)
     monkeypatch.setattr(
         "retail.web.quotes_api.available_store_groups",
         lambda repo=None: [{"id": "supermercados", "title": "Supermercados", "store_ids": ["lider", "unimarc", "tottus"]}],
@@ -224,7 +235,12 @@ def test_shopping_list_matrix_import_and_export(quotes_client):
     assert exported.status_code == 200
     assert "lista-compra" in exported.headers.get("content-disposition", "")
     assert "Azúcar granulada 1 kg" in exported.text
-    assert "sin producto en catálogo" in exported.text or "sin match" in exported.text
+    assert (
+        "sin producto en catálogo" in exported.text
+        or "sin match" in exported.text
+        or "buscando" in exported.text.lower()
+        or "searching" in exported.text
+    )
     assert "Fecha precio mejor" in exported.text
     assert "Sin despacho" in exported.text
     assert "Celdas stale" in exported.text
@@ -234,7 +250,166 @@ def test_shopping_list_matrix_import_and_export(quotes_client):
     assert body["ok"] is True
     assert body["targets"] >= 1
     assert "message" in body
-    assert report["rows"][1]["cells"]["tottus"]["empty_reason"] in {"no_catalog", "no_match", "unknown"}
+    assert report["rows"][1]["cells"]["tottus"]["empty_reason"] in {
+        "no_catalog", "no_match", "unknown", "searching",
+    }
+    assert "unimarc usable" in exported.text
+    assert "Generado" in exported.text
+    # Canasta completa en unimarc → export marca Exportada.
+    after = client.get(f"/api/quotes/{quote['id']}").json()["quote"]
+    assert after.get("status") == "exported"
+    assert after.get("exported_at")
+
+
+def test_shopping_cart_add_remove_save_and_cotizar_db_only(quotes_client, monkeypatch):
+    client, user, collection, events = quotes_client
+    calls = {"refresh": 0}
+
+    def tracking_build(repo, quote, *, now=None, enqueue_refresh=True):
+        from retail.shopping_list import build_store_matches as real_build
+        if enqueue_refresh:
+            calls["refresh"] += 1
+        return real_build(repo, quote, now=now, enqueue_refresh=enqueue_refresh)
+
+    monkeypatch.setattr("retail.web.quotes_api.build_store_matches", tracking_build)
+
+    created = client.post("/api/quotes/shopping-cart", json={
+        "title": "Carrito test",
+        "store_group": "supermercados",
+        "store_ids": ["lider", "unimarc"],
+        "items": [],
+    })
+    assert created.status_code == 200, created.text
+    body = created.json()
+    assert body["created"] is True
+    quote = body["quote"]
+    assert quote["mode"] == "shopping_list"
+    assert quote["items"] == []
+    assert quote["store_matches"] == {}
+    quote_id = quote["id"]
+    version = quote["version"]
+
+    added = client.post(f"/api/quotes/{quote_id}/items", json={
+        "name": "Azúcar granulada 1 kg",
+        "quantity": 1,
+        "version": version,
+    })
+    assert added.status_code == 200, added.text
+    quote = added.json()["quote"]
+    assert len(quote["items"]) == 1
+    version = quote["version"]
+
+    added2 = client.post(f"/api/quotes/{quote_id}/items", json={
+        "name": "Café molido 500 g",
+        "quantity": 2,
+        "version": version,
+    })
+    assert added2.status_code == 200
+    quote = added2.json()["quote"]
+    version = quote["version"]
+    assert len(quote["items"]) == 2
+
+    removed = client.delete(f"/api/quotes/{quote_id}/items/1?version={version}")
+    assert removed.status_code == 200, removed.text
+    quote = removed.json()["quote"]
+    assert len(quote["items"]) == 1
+    assert quote["items"][0]["name"].startswith("Azúcar")
+    version = quote["version"]
+
+    saved = client.post("/api/quotes/shopping-cart", json={
+        "quote_id": quote_id,
+        "version": version,
+        "title": "Carrito test",
+        "store_group": "supermercados",
+        "store_groups": ["supermercados"],
+        "items": [
+            {"name": "Azúcar granulada 1 kg", "quantity": 1},
+            {"name": "Papel higiénico 12 un", "quantity": 1},
+        ],
+    })
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["created"] is False
+    quote = saved.json()["quote"]
+    assert len(quote["items"]) == 2
+    assert quote["store_ids"] == []
+    assert quote["store_groups"] == ["supermercados"]
+    assert quote["resolved_stores"] == ["lider", "unimarc", "tottus"]
+    assert quote["store_matches"] == {}
+    version = quote["version"]
+
+    stores = client.put(f"/api/quotes/{quote_id}/stores", json={
+        "store_group": "supermercados",
+        "store_groups": ["supermercados"],
+        "version": version,
+    })
+    assert stores.status_code == 200, stores.text
+    quote = stores.json()["quote"]
+    assert quote["resolved_stores"] == ["lider", "unimarc", "tottus"]
+    version = quote["version"]
+
+    cotizado = client.post(f"/api/quotes/{quote_id}/cotizar", json={"version": version})
+    assert cotizado.status_code == 200, cotizado.text
+    report = cotizado.json()["report"]
+    assert report["mode"] == "shopping_list"
+    assert report["summary"]["stores"] == ["lider", "unimarc", "tottus"]
+    assert report["summary"]["matched_cells"] >= 2
+    assert calls["refresh"] == 0  # Cotizar no encola scrape
+    assert any(event["kind"] == "cotizar" for event in events.documents)
+    detail = next(event for event in events.documents if event["kind"] == "cotizar")
+    assert detail["detail"]["db_only"] is True
+
+    # Rebuild sí puede encolar refresh (tracking cuenta enqueue_refresh=True).
+    rebuilt = client.post(f"/api/quotes/{quote_id}/rebuild-matrix")
+    assert rebuilt.status_code == 200
+    assert calls["refresh"] == 1
+
+
+def test_shopping_list_selection_accepts_query_subset(quotes_client):
+    """Confirmar match grocery vía query_subset (misma regla que la matriz)."""
+    client, _user, _quotes, _events = quotes_client
+    created = client.post("/api/quotes/shopping-cart", json={
+        "title": "Azúcar corta",
+        "store_group": "supermercados",
+        "store_ids": ["lider"],
+        "items": [{"name": "azúcar", "quantity": 1, "unit": "unidad"}],
+    })
+    assert created.status_code == 200, created.text
+    quote = created.json()["quote"]
+    quote_id = quote["id"]
+    cotizar = client.post(f"/api/quotes/{quote_id}/cotizar", json={"version": quote["version"]})
+    assert cotizar.status_code == 200, cotizar.text
+    body = cotizar.json()
+    version = body["quote"]["version"]
+    # product_id az exists in fixture as "Azúcar granulada 1 kg"
+    selected = client.put(
+        f"/api/quotes/{quote_id}/selection",
+        json={"index": 0, "store": "lider", "product_id": "az", "version": version, "confirm": True},
+    )
+    assert selected.status_code == 200, selected.text
+    cell = selected.json()["report"]["rows"][0]["cells"]["lider"]
+    assert cell["matched"] is True
+    assert cell.get("confirmed") is True
+
+
+def test_partial_shopping_export_does_not_mark_exported(quotes_client):
+    """Sin canasta completa usable, el CSV no pasa a estado Exportada."""
+    client, _user, _quotes, _events = quotes_client
+    response = client.post("/api/quotes/import-csv", json={
+        "title": "Solo azúcar",
+        "mode": "shopping_list",
+        "store_ids": ["tottus"],
+        "text": "nombre;cantidad\nCafé molido 500 g;1",
+    })
+    assert response.status_code == 201, response.text
+    quote = response.json()
+    # tottus no tiene café en el fixture → canasta incompleta
+    detail = client.get(f"/api/quotes/{quote['id']}").json()
+    assert detail["report"]["summary"]["complete"] is False
+    exported = client.get(f"/api/quotes/{quote['id']}/export.csv")
+    assert exported.status_code == 200
+    after = client.get(f"/api/quotes/{quote['id']}").json()["quote"]
+    assert after.get("status") != "exported"
+    assert not after.get("exported_at")
 
 
 def test_quote_review_and_export_are_private_and_versioned(quotes_client):

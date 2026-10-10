@@ -358,6 +358,17 @@ def test_catalog_category_filter_ignores_accents_and_case():
     assert pattern.fullmatch("FERRETERÍA")
 
 
+def test_accent_insensitive_pattern_matches_azucar():
+    import re
+
+    from retail.mongo import accent_insensitive_pattern
+
+    pattern = re.compile(accent_insensitive_pattern("azucar"), re.I)
+    assert pattern.search("Azúcar granulada Iansa")
+    assert pattern.search("azucar")
+    assert pattern.search("AZÚCAR")
+
+
 def test_telegram_skips_without_token_and_logs(monkeypatch, capsys):
     from retail.batch import alerts
 
@@ -815,6 +826,191 @@ def test_group_batch_does_not_parallelize_two_products_from_same_store(monkeypat
     monkeypatch.setattr(runner, "search_products", fake_search)
     runner.run_batch(grupo="supermercados", persist=False, pause=0, time_budget_minutes=1)
     assert maximum == 1
+
+
+def test_group_batch_maps_executor_shutdown_to_interrupted(monkeypatch):
+    """Deploy/SIGTERM cierra el pool; no debe dejar RuntimeError crudo en last_error."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    from retail.batch import runner
+    from retail.batch.group_scope import (
+        INTERRUPT_EXIT_CODE,
+        GroupBatchInterrupted,
+        interrupt_auto_retries,
+        interrupt_retry_delay_seconds,
+        is_executor_shutdown_error,
+    )
+
+    assert is_executor_shutdown_error(RuntimeError("cannot schedule new futures after shutdown"))
+    assert not is_executor_shutdown_error(RuntimeError("other"))
+    assert INTERRUPT_EXIT_CODE == 75
+    assert interrupt_auto_retries() == 1
+    assert interrupt_retry_delay_seconds(0) == 20.0
+    assert interrupt_retry_delay_seconds(1) == 40.0
+
+    products = [
+        {"id": "prod-lider-1", "query": "leche uno", "category": "alimentos"},
+        {"id": "prod-jumbo-1", "query": "arroz uno", "category": "alimentos"},
+    ]
+    monkeypatch.setenv("BATCH_PRODUCT_WORKERS", "2")
+    monkeypatch.setattr(runner, "refresh_store_categories", lambda: {"source": "test"})
+    monkeypatch.setattr(
+        "retail.store_categories.normalize_group",
+        lambda value, repo=None: "supermercados",
+    )
+    monkeypatch.setattr(
+        "retail.store_categories.stores_for_group", lambda value, repo=None: ["lider", "jumbo"]
+    )
+    monkeypatch.setattr(
+        "retail.store_categories.filter_products_for_group", lambda catalog, value: products
+    )
+
+    real_submit = ThreadPoolExecutor.submit
+
+    def boom(self, fn, *args, **kwargs):
+        raise RuntimeError("cannot schedule new futures after shutdown")
+
+    monkeypatch.setattr(ThreadPoolExecutor, "submit", boom)
+    # Evita que el shutdown del except intente cancelar futuros inexistentes.
+    monkeypatch.setattr(ThreadPoolExecutor, "shutdown", lambda self, *a, **k: None)
+
+    finished = []
+    cursors = []
+
+    class FakeRepo:
+        def activate_group_batch_run(self, run_id, group, fields):
+            return None
+
+        def finish_batch_run(self, run_id, **fields):
+            finished.append((run_id, fields))
+
+        def remember_group_batch_resume(self, group, run):
+            cursors.append((group, run))
+
+        def update_batch_run(self, run_id, **fields):
+            pass
+
+        def get_app_setting(self, key):
+            return {}
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr("retail.search.connect_repo", lambda: FakeRepo())
+    summary = runner.run_batch(
+        grupo="supermercados",
+        persist=False,
+        pause=0,
+        time_budget_minutes=1,
+        batch_run_id="run-interrupt-1",
+    )
+    assert summary.get("interrupted") is True
+    assert summary.get("shutdown_interrupt") is True
+    assert not summary.get("searches")
+    assert finished
+    assert finished[0][1]["status"] == "interrupted"
+    assert finished[0][1]["phase"] == "interrupted"
+    assert finished[0][1].get("resumable") is True
+    monkeypatch.setattr(ThreadPoolExecutor, "submit", real_submit)
+
+
+def test_soyo_cron_retries_interrupt_exit_code():
+    from pathlib import Path
+
+    soyo = Path("scripts/ofertas-diarias-soyo.sh").read_text()
+    assert "INTERRUPT_EXIT_CODE=75" in soyo
+    assert "BATCH_INTERRUPT_RETRIES" in soyo
+    assert "reintento automático" in soyo
+
+
+def test_cli_returns_tempfail_on_interrupted(monkeypatch):
+    from argparse import Namespace
+
+    from retail import cli
+    from retail.batch.group_scope import INTERRUPT_EXIT_CODE
+
+    monkeypatch.setattr(
+        "retail.batch.runner.run_batch",
+        lambda **kwargs: {
+            "searches": [],
+            "alert_count": 0,
+            "interrupted": True,
+            "grupo": "farmacias",
+        },
+    )
+    rc = cli.run_catalog_batch(
+        Namespace(
+            ids=None,
+            catalogo=None,
+            reglas=None,
+            grupo="farmacias",
+            tienda=None,
+            source="both",
+            max=6,
+            delay=1.0,
+            pausa=0,
+            limit=None,
+            dry_run=False,
+            presupuesto_minutos=1,
+        )
+    )
+    assert rc == INTERRUPT_EXIT_CODE
+
+
+def test_resume_interrupted_group_batches_respects_retry_cap(monkeypatch):
+    from retail.web import jobs
+
+    calls = []
+
+    class Repo:
+        def latest_batch_runs_by_grupo(self):
+            return {
+                "farmacias": {
+                    "id": "r1",
+                    "status": "interrupted",
+                    "started_at": "2099-01-01T12:00:00+00:00",
+                    "finished_at": "2099-01-01T13:00:00+00:00",
+                    "processed": 5,
+                    "items": 20,
+                    "interrupt_retries": 0,
+                    "searches": [{"id": "p1"}],
+                },
+                "retail": {
+                    "id": "r2",
+                    "status": "interrupted",
+                    "started_at": "2099-01-01T12:00:00+00:00",
+                    "processed": 3,
+                    "interrupt_retries": 9,
+                    "searches": [{"id": "p2"}],
+                },
+            }
+
+        def update_batch_run(self, run_id, **fields):
+            calls.append(("update", run_id, fields))
+
+        def close(self):
+            pass
+
+    monkeypatch.setenv("BATCH_WEB_AUTO_RESUME", "1")
+    monkeypatch.setenv("BATCH_INTERRUPT_RETRIES", "1")
+    monkeypatch.setattr("retail.search.connect_repo", lambda: Repo())
+    monkeypatch.setattr(
+        "retail.batch.cron_status.chile_today", lambda: "2099-01-01"
+    )
+    monkeypatch.setattr(
+        "retail.batch.cron_status.started_on_chile_day", lambda run, today=None: True
+    )
+    monkeypatch.setattr(
+        jobs,
+        "start_group_batch",
+        lambda group, mode=None: calls.append(("start", group, mode)) or {"ok": True, "run_id": "n"},
+    )
+
+    result = jobs.resume_interrupted_group_batches(limit=5)
+    assert result["ok"] is True
+    assert result["resumed"] == ["farmacias"]
+    assert ("start", "farmacias", "continue") in calls
+    assert not any(item[0] == "start" and item[1] == "retail" for item in calls)
 
 
 def test_group_batch_queries_imported_product_only_in_its_origin_store(monkeypatch):

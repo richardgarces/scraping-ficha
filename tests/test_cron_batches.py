@@ -288,6 +288,16 @@ def test_derive_group_status_today():
     failed_legacy = {"status": "error", "started_at": "2026-09-15T09:00:00-03:00"}
     assert derive_group_status(failed_legacy, today=today) == "failed"
 
+    interrupted_today = {
+        "status": "interrupted",
+        "started_at": "2026-09-15T09:00:00-03:00",
+        "processed": 12,
+        "items": 100,
+        "resumable": True,
+    }
+    assert derive_group_status(interrupted_today, today=today) == "interrupted"
+    assert run_can_continue(interrupted_today) is True
+
     stopped_today = {"status": "stopped", "started_at": "2026-09-15T09:00:00-03:00"}
     assert derive_group_status(stopped_today, today=today) == "stopped"
 
@@ -568,6 +578,7 @@ def test_fail_stale_batch_runs_keeps_an_active_long_run():
     assert closed == 1
     assert docs["live"]["status"] == "running"
     assert docs["paused"]["status"] == "running"
-    assert docs["dead"]["status"] == "failed"
-    assert "sin actividad" in docs["dead"]["last_error"]
+    assert docs["dead"]["status"] == "interrupted"
+    assert "interrumpida" in docs["dead"]["last_error"].lower()
+    assert docs["dead"].get("resumable") is True
     assert isinstance(docs["dead"]["finished_at"], datetime)

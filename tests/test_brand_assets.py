@@ -288,7 +288,6 @@ def test_all_result_filters_use_the_collapsible_compact_pattern():
         "catalogo.html": "catalog-filter-count",
         "hoy.html": "today-filter-count",
         "reales.html": "real-filter-count",
-        "super.html": "super-filter-count",
         "index.html": "search-filter-count",
     }
     for filename, counter in pages.items():
@@ -296,7 +295,7 @@ def test_all_result_filters_use_the_collapsible_compact_pattern():
         assert 'class="collapsible-filters' in html or 'class="collapsible-filters ' in html
         assert f'id="{counter}"' in html
         assert 'class="filter-toggle-label"' in html
-    for filename in ("hoy.html", "reales.html", "super.html"):
+    for filename in ("hoy.html", "reales.html"):
         html = (STATIC / filename).read_text(encoding="utf-8")
         assert 'id="q"' not in html
         assert html.count('name="q" type="search"') == 1

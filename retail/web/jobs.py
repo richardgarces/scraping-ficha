@@ -187,11 +187,47 @@ def stop_group_batch(grupo: str) -> dict[str, Any]:
     }
 
 
-def _run_group(group: str, run_id: str, **kwargs) -> None:
+def _run_group(group: str, run_id: str, *, _interrupt_attempt: int = 0, **kwargs) -> None:
     try:
+        from retail.batch.group_scope import interrupt_auto_retries, interrupt_retry_delay_seconds
         from retail.batch.runner import run_batch
 
-        run_batch(grupo=group, batch_run_id=run_id, **kwargs)
+        summary = run_batch(grupo=group, batch_run_id=run_id, **kwargs) or {}
+        if not summary.get("interrupted"):
+            return
+        # Shutdown del pool suele ir con muerte del proceso (deploy); el arranque
+        # del web o el cron de soyo reanudarán. Reintento in-process solo si el
+        # proceso sigue vivo y quedan cupos.
+        if summary.get("shutdown_interrupt"):
+            logger.warning(
+                "Corrida de %s interrumpida por shutdown del executor; "
+                "reanudación vía arranque web / cron soyo (intento %s)",
+                group,
+                _interrupt_attempt,
+            )
+            return
+        max_retries = interrupt_auto_retries()
+        if _interrupt_attempt >= max_retries:
+            logger.warning(
+                "Corrida de %s interrumpida; sin más reintentos automáticos (%s/%s)",
+                group,
+                _interrupt_attempt,
+                max_retries,
+            )
+            return
+        delay = interrupt_retry_delay_seconds(_interrupt_attempt)
+        logger.info(
+            "Reintento automático %s/%s de %s tras interrupción (espera %.0fs)",
+            _interrupt_attempt + 1,
+            max_retries,
+            group,
+            delay,
+        )
+        import time
+
+        time.sleep(delay)
+        # Nueva corrida en su propio thread (mode=continue usa el cursor Mongo).
+        start_group_batch(group, mode="continue")
     except Exception as exc:
         logger.exception("La corrida de %s falló", group)
         from retail.search import connect_repo
@@ -202,6 +238,77 @@ def _run_group(group: str, run_id: str, **kwargs) -> None:
                 repo.finish_batch_run(run_id, status="failed", last_error=str(exc))
             finally:
                 repo.close()
+
+
+def resume_interrupted_group_batches(*, limit: int = 2) -> dict[str, Any]:
+    """Tras deploy/reinicio: Continuar grupos con última corrida ``interrupted`` de hoy.
+
+    Tope ``limit`` y ``BATCH_INTERRUPT_RETRIES`` para no abrir un torbellino.
+    """
+    from retail.batch.cron_status import chile_today, started_on_chile_day
+    from retail.batch.group_scope import (
+        batch_web_auto_resume_enabled,
+        interrupt_auto_retries,
+        is_interrupt_status,
+    )
+    from retail.search import connect_repo
+
+    if not batch_web_auto_resume_enabled():
+        return {"ok": True, "skipped": True, "reason": "BATCH_WEB_AUTO_RESUME off", "resumed": []}
+
+    max_retries = interrupt_auto_retries()
+    if max_retries <= 0:
+        return {"ok": True, "skipped": True, "reason": "BATCH_INTERRUPT_RETRIES=0", "resumed": []}
+
+    repo = connect_repo()
+    if repo is None:
+        return {"ok": False, "error": "Mongo unavailable", "resumed": []}
+
+    resumed: list[str] = []
+    today = chile_today()
+    try:
+        by_group = repo.latest_batch_runs_by_grupo() if hasattr(repo, "latest_batch_runs_by_grupo") else {}
+        candidates: list[tuple[str, dict[str, Any]]] = []
+        for group, run in (by_group or {}).items():
+            if not is_interrupt_status(run.get("status")):
+                continue
+            if not started_on_chile_day(run, today):
+                continue
+            retries = int(run.get("interrupt_retries") or 0)
+            if retries >= max_retries:
+                continue
+            if int(run.get("processed") or 0) <= 0 and not resume_product_available(repo, group, run):
+                continue
+            candidates.append((str(group), run))
+        candidates.sort(key=lambda item: str(item[1].get("finished_at") or ""), reverse=True)
+        for group, run in candidates[: max(0, int(limit))]:
+            try:
+                run_id = str(run.get("id") or "").strip()
+                if run_id and hasattr(repo, "update_batch_run"):
+                    repo.update_batch_run(
+                        run_id,
+                        interrupt_retries=int(run.get("interrupt_retries") or 0) + 1,
+                    )
+                start_group_batch(group, mode="continue")
+                resumed.append(group)
+                logger.info("Auto-reanudación tras interrupción: grupo=%s", group)
+            except Exception as exc:
+                logger.warning("No se pudo auto-reanudar %s: %s", group, exc)
+    finally:
+        repo.close()
+    return {"ok": True, "resumed": resumed, "limit": limit}
+
+
+def resume_product_available(repo: Any, group: str, run: dict[str, Any] | None) -> bool:
+    from retail.batch.group_scope import batch_cursor_key, resume_product_id
+
+    product = resume_product_id(run)
+    if product:
+        return True
+    if hasattr(repo, "get_app_setting"):
+        cursor = repo.get_app_setting(batch_cursor_key(group)) or {}
+        return bool(str(cursor.get("next_id") or "").strip())
+    return False
 
 
 _STORE_LOCK = threading.Lock()

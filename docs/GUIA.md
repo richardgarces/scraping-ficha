@@ -39,7 +39,7 @@ La pregunta que responde y que un buscador de tienda no responde: **¿este descu
 
 **Redis** guarda dos cosas distintas:
 
-1. El **resultado de cada búsqueda** (por ejemplo «sal») hasta la **medianoche de Chile**, en claves `search:AAAA-MM-DD:...`. Un día va de 00:00:00 a 23:59:59 en `America/Santiago`, incluidos los cambios de horario. La misma consulta, origen, tiendas y filtros reutiliza el resultado durante ese día; también se conservan búsquedas completas sin coincidencias. Los errores y búsquedas canceladas no se guardan como resultados completos. «Forzar tiendas» ignora ese caché.
+1. El **resultado de cada búsqueda** (por ejemplo «sal») en claves diarias `search:AAAA-MM-DD:...` (día Chile `America/Santiago`). El TTL es hasta medianoche, **acotado** por `RETAIL_SEARCH_CACHE_MAX_TTL` (default 14400 s = 4 h; `0` = solo medianoche). La misma consulta, origen, tiendas y filtros reutiliza el resultado mientras viva la clave; también se conservan búsquedas completas sin coincidencias. Los errores y búsquedas canceladas no se guardan como resultados completos. «Forzar tiendas» ignora ese caché.
 2. El **índice de productos genéricos** (`retail:pindex:`): qué es la consulta (tv, no «tv led»), a qué grupos pertenece y por tanto en qué tiendas buscar. La semilla durable está en Mongo (`product_index_seed`); Redis es la copia caliente, renovada cada día por el cron y a mano con `retail indice`. Cada búsqueda deja rastro en `product_index_queries`.
 
 Si Redis no está arriba, cada búsqueda va de nuevo a las tiendas y el índice se resuelve contra la semilla en memoria (Mongo, o el JSON si Mongo tampoco está). Si la consulta no calza con ningún genérico, se recorta a `retail` + `tecnologia` (no a todas las tiendas).
@@ -111,7 +111,12 @@ Hay dos lugares donde se configura: **variables de entorno** para las conexiones
 | `RETAIL_THUMBS` | `1` | `0` desactiva las miniaturas |
 | `RETAIL_THUMB_SIDE` | `240` | Lado máximo de la miniatura en píxeles |
 | `RETAIL_THUMB_LIMIT` | `24` | Miniaturas que se descargan por búsqueda |
-| `RETAIL_STORE_WORKERS` | `8` | Tiendas que se consultan en paralelo por búsqueda |
+| `RETAIL_THUMB_WORKERS` | `2` | Descargas de miniaturas en paralelo |
+| `RETAIL_STORE_WORKERS` | `8` | Tiendas que se consultan en paralelo por búsqueda (acotado por el slot global) |
+| `RETAIL_SCRAPE_CONCURRENCY` | `8` | Tope global de scrapes concurrentes (Redis compartido; ver `retail/concurrency.py`) |
+| `RETAIL_CHROMIUM_CONCURRENCY` | `3` | Playwright/Chromium simultáneos (ocupan también un slot scrape) |
+| `RETAIL_OPTIONAL_STORE_WORKERS` | `2` | Pool de tiendas opcionales en la búsqueda |
+| `BATCH_PRODUCT_WORKERS` | `2` (máx. `4`) | Productos en paralelo en el batch por grupo |
 | `RETAIL_SEARCH_TIMEOUT` | `12` | Timeout por tienda en la búsqueda web (el CLI sigue pasando el suyo) |
 
 Las miniaturas se guardan en Mongo como base64 y se sirven desde `/api/thumb`. Bajarlas cuesta tiempo en cada búsqueda: si vas a correr el batch completo de 1000 productos, conviene `RETAIL_THUMBS=0`.
@@ -267,15 +272,29 @@ La lista sale del sitemap que declara el `robots.txt` de la tienda, que es la fu
 
 ## Las páginas
 
-| Ruta | Para qué |
-|---|---|
-| `/` | Buscar en las tiendas ahora |
-| `/catalogo` | Navegar lo ya guardado, sin buscar |
-| `/hoy` | Ofertas del día con el ahorro real y el resumen de la corrida |
-| `/producto` | Ficha con historial de 7/30/90 días, "¿compro o espero?" y precios de otras tiendas |
-| `/tiendas` | Qué tan confiable es el "antes" de cada cadena |
-| `/siguiendo` | Productos con precio objetivo |
-| `/ofertas` | Reglas, canales, catálogo y cron |
+| Ruta | Acceso | Para qué |
+|---|---|---|
+| `/` | público | Buscar en las tiendas ahora |
+| `/catalogo` | público | Navegar lo ya guardado, sin buscar |
+| `/hoy` | público | Ofertas del día con el ahorro real y el resumen de la corrida |
+| `/producto` | público | Ficha con historial de 7/30/90 días, "¿compro o espero?" y precios de otras tiendas |
+| `/siguiendo` | público (API con login) | Productos seguidos, preferencias y push |
+| `/entrar` | público | Login / inscripción |
+| `/reales` | login | Ofertas reales del día; `?super=1` (alias `/super`) filtra super ofertas |
+| `/comparar` | login | Comparación lado a lado |
+| `/tiendas` | admin | Qué tan confiable es el "antes" de cada cadena |
+| `/ofertas` | admin | Reglas, canales, catálogo y cron |
+| `/cron` | admin | Control de lotes |
+| `/cyber-day`, `/cyber` | admin | Listas Cyber |
+| `/cyber-day/evolucion` | admin | Evolución de precios Cyber |
+| `/cambios-precio` | admin | Cambios de precio del mes → export Cyber |
+| `/estadisticas` | admin | Uso y funnel |
+| `/pronosticos` | admin | Validación de pronósticos |
+| `/usuarios` | admin | Aprobación de cuentas |
+| `/cotizaciones` | admin | Lista de compra multi-tienda y cotizaciones |
+| `/analisis-producto` | admin | Análisis de precio/stock entre tiendas |
+
+Smoke post-deploy: [`SMOKE_PROD.md`](SMOKE_PROD.md).
 
 En la búsqueda, si dejas **Todas** las tiendas, el índice elige los grupos que corresponden al producto («Buscando TV en Tecnología, Retail, Hogar, Supermercados»). Si marcas un subconjunto a mano, se respeta esa elección. La tabla filtra por tienda, marca, rango de precio y descuento mínimo, con el conteo de cada opción, y ordena por precio, descuento o cuánto está bajo lo habitual.
 

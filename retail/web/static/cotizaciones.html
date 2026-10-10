@@ -4,7 +4,7 @@
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Cotizaciones y listas · Retail Chile</title>
   <link rel="stylesheet" href="/static/styles.css?v=83">
-  <link rel="stylesheet" href="/static/cotizaciones.css?v=4">
+  <link rel="stylesheet" href="/static/cotizaciones.css?v=10-fresh-export">
 </head>
 <body>
   <header class="top"><div><p class="eyebrow">Retail Chile</p><h1>Cotizaciones y listas</h1></div>
@@ -32,20 +32,66 @@
       </div>
 
       <div id="mode-shopping" class="quote-mode-panel" role="tabpanel">
-        <h2>Lista de compra multi-tienda</h2>
-        <p>Sube productos (sin precio obligatorio). Elige una categoría de tiendas — por ejemplo supermercado: Líder, Unimarc, Tottus y otras del catálogo — y la app arma una matriz con el mejor match ≥80% por tienda usando precios frescos de Mongo.</p>
-        <form id="shopping-import" class="form-grid">
-          <label>Nombre de la lista <input id="shopping-title" required maxlength="150" placeholder="Compra del mes" value="supermercado"></label>
-          <label>Categoría de tiendas
-            <select id="shopping-group" required>
-              <option value="">Cargando…</option>
-            </select>
-          </label>
-          <label class="span">Archivo CSV <input id="shopping-file" type="file" accept=".csv"></label>
-          <label class="span">Lista CSV <textarea id="shopping-csv" rows="5" placeholder="nombre,cantidad,marca&#10;azúcar,1 kg,Iansa&#10;Café molido,500 g,Juan Valdez&#10;Papel higiénico,1,&#10;&#10;nombre;cantidad;unidad;marca&#10;Azúcar;1;kg;Iansa"></textarea></label>
-          <p class="muted span">Columnas: <code>nombre</code> (obligatorio); opcionales: <code>cantidad</code>, <code>marca</code>, <code>ean</code>, <code>unidad</code>, <code>precio_unitario</code> (solo referencia). En <code>cantidad</code> puedes poner <code>1 kg</code>, <code>0.5 kg</code>, <code>500 g</code> o <code>2 L</code> (separa número y unidad); también <code>cantidad=1</code> + columna <code>unidad=kg</code>. CSV con coma o punto y coma. Máximo 100 productos. No scrapea en vivo: usa el catálogo.</p>
-          <button type="submit">Importar y comparar tiendas</button>
-        </form>
+        <h2>Lista de compra (carrito)</h2>
+        <p>Buscá productos en el catálogo, armá el carrito, elegí tiendas por categoría y pulsá <strong>Cotizar</strong>. La matriz usa precios de Mongo (ventana 48&nbsp;h); las celdas vacías pueden encolar scrape async y se actualizan solas.</p>
+
+        <label class="cart-title-field">Nombre de la lista
+          <input id="shopping-title" required maxlength="150" placeholder="Compra del mes" value="supermercado">
+        </label>
+
+        <div class="cart-step">
+          <h3>1. Buscar productos</h3>
+          <form id="cart-search" class="cart-search-row">
+            <label class="grow"><span class="sr-only">Buscar en catálogo</span>
+              <input id="cart-search-q" type="search" maxlength="200" placeholder="Ej. azúcar Iansa, café molido…" autocomplete="off">
+            </label>
+            <button type="submit">Buscar en catálogo</button>
+          </form>
+          <p class="muted">Solo catálogo Mongo (`/api/catalog`). Agregá con cantidad y editá el carrito abajo.</p>
+          <div id="cart-search-results" class="cart-search-results" aria-live="polite"></div>
+        </div>
+
+        <div class="cart-step">
+          <h3>2. Carrito <span id="cart-count" class="cart-count">0</span></h3>
+          <div class="table-wrap"><table class="cart-table"><thead><tr><th>Producto</th><th>Cant.</th><th></th></tr></thead><tbody id="cart-items"></tbody></table></div>
+          <p id="cart-empty" class="muted">El carrito está vacío. Buscá arriba o importá un CSV.</p>
+          <p class="auth-actions">
+            <button type="button" id="cart-clear" class="secondary">Vaciar carrito</button>
+          </p>
+        </div>
+
+        <div class="cart-step">
+          <h3>3. Categorías a cotizar</h3>
+          <p class="muted">Marcá una o más categorías. Al cotizar se usan <strong>todas</strong> las tiendas de cada categoría seleccionada.</p>
+          <div class="cart-store-picker">
+            <div class="cart-store-toolbar">
+              <p id="cart-store-summary" class="cart-store-summary muted" aria-live="polite"></p>
+              <div class="cart-store-group-actions">
+                <button type="button" id="cart-stores-all" class="secondary">Todas</button>
+                <button type="button" id="cart-stores-none" class="secondary">Ninguna</button>
+              </div>
+            </div>
+            <div id="cart-store-categories" class="cart-category-grid" role="group" aria-label="Categorías de tiendas"></div>
+          </div>
+          <select id="shopping-group" hidden aria-hidden="true"><option value=""></option></select>
+        </div>
+
+        <p class="auth-actions cart-actions">
+          <button type="button" id="cart-save">Guardar lista</button>
+          <button type="button" id="cart-cotizar">Cotizar</button>
+          <button type="button" id="cart-new" class="secondary">Nueva lista</button>
+        </p>
+        <p class="muted">Cotizar responde desde Mongo (sin FlareSolverr en la petición). Misses encolan scrape async («buscando…»). Precios stale (&gt;48&nbsp;h) en amarillo; la canasta suma solo precios frescos.</p>
+
+        <details class="cart-csv-details">
+          <summary>Importar desde CSV (opcional)</summary>
+          <form id="shopping-import" class="form-grid">
+            <label class="span">Archivo CSV <input id="shopping-file" type="file" accept=".csv"></label>
+            <label class="span">Lista CSV <textarea id="shopping-csv" rows="5" placeholder="nombre,cantidad,marca&#10;azúcar,1 kg,Iansa&#10;Café molido,500 g,Juan Valdez&#10;Papel higiénico,1,"></textarea></label>
+            <p class="muted span">Columnas: <code>nombre</code> (obligatorio); opcionales: <code>cantidad</code>, <code>marca</code>, <code>ean</code>, <code>unidad</code>. Usa las tiendas marcadas arriba. Máximo 100 productos.</p>
+            <button type="submit">Importar CSV al carrito y cotizar</button>
+          </form>
+        </details>
       </div>
 
       <div id="mode-quote" class="quote-mode-panel" role="tabpanel" hidden>
@@ -108,6 +154,6 @@
       <p class="auth-actions"><a id="quote-export" class="btn secondary">Exportar CSV</a><button type="button" data-feedback="useful">Me resultó útil</button><button type="button" data-feedback="needs_correction" class="secondary">Necesita corrección</button></p>
     </section>
   </main>
-  <script src="/static/prices.js?v=36"></script><script src="/static/cotizaciones.js?v=5"></script>
+  <script src="/static/prices.js?v=36"></script><script src="/static/cotizaciones.js?v=12-fresh-export"></script>
 </body>
 </html>

@@ -88,6 +88,19 @@ test("un grupo fallido ofrece continuar y reiniciar", () => {
   assert.match(stopped, /Reiniciar/);
 });
 
+test("un grupo interrumpido (deploy) muestra badge y Continuar", () => {
+  const cron = loadCron();
+  assert.match(cron.groupStatusCell({ ...group, status: "interrupted" }), /Interrumpido/);
+  const interrupted = cron.groupActionsCell({
+    ...group,
+    status: "interrupted",
+    last_run: { processed: 50, items: 200, last_error: "deploy/SIGTERM" },
+  }, false);
+  assert.match(interrupted, /data-start-mode="continue"/);
+  assert.match(interrupted, /Continuar/);
+  assert.match(interrupted, /Reiniciar/);
+});
+
 test("parcial hoy (presupuesto) ofrece Continuar; completo no", () => {
   const cron = loadCron();
   assert.match(cron.groupStatusCell({ ...group, status: "partial" }), /Parcial hoy/);

@@ -145,8 +145,11 @@ def test_web_health_and_stores():
     client = TestClient(app)
     health = client.get("/api/health")
     assert health.status_code == 200
-    assert health.json()["ok"] is True
-    assert health.json()["stores"] > 0
+    body = health.json()
+    assert body["ok"] is True
+    assert "degraded" in body
+    assert "mongo_error" in body
+    assert body["stores"] > 0
     page = client.get("/")
     assert page.status_code == 200
     assert "Comparador de precios" in page.text
@@ -195,6 +198,28 @@ def test_web_health_and_stores():
     assert by_id["bebesit"]["group"] == "infantil"
     assert by_id["lavinoteca"]["group"] == "gastronomia"
     assert "Ópticas" in by_id["gmo"]["group_title"]
+
+
+def test_web_health_marks_degraded_when_mongo_queries_fail(monkeypatch):
+    class BrokenRepo:
+        def count(self):
+            raise RuntimeError("boom")
+
+        def real_offer_worker_status(self):
+            raise RuntimeError("boom")
+
+        def close(self):
+            return None
+
+    monkeypatch.setattr("retail.web.app.connect_repo", lambda: BrokenRepo())
+    monkeypatch.setattr("retail.web.app.connect_qdrant", lambda: None)
+    monkeypatch.setattr("retail.search_cache.connect_redis", lambda: None)
+    body = TestClient(app).get("/api/health").json()
+    assert body["ok"] is False
+    assert body["degraded"] is True
+    assert body["mongo"] is False
+    assert body["mongo_error"] == "RuntimeError"
+    assert body["products"] == 0
 
 
 def test_non_admin_search_options_are_forced_to_safe_defaults():
@@ -594,6 +619,13 @@ def test_pack_tokens_spanish_unit_patterns():
     assert pack_tokens("iPhone 16 Pro") == ("1un",)
     assert "65un" not in pack_tokens("Smart TV 65 pulgadas")
     assert pack_tokens("Smart TV 65 pulgadas") == ("1un",)
+
+
+def test_pack_tokens_preserves_decimal_kg_and_case():
+    assert "1500g" in pack_tokens("Azúcar granulada lansa 1.5 kg")
+    assert "1500g" in pack_tokens("Azúcar Granulada 1,5 Kg")
+    assert "1000g" in pack_tokens("Azúcar Granulada 1 Kg")
+    assert "400g" in pack_tokens("Azúcar granulada Iansa, 400 g")
 
 
 def test_one_unit_vs_six_not_comparable_but_same_pack_is():

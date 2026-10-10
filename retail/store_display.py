@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from pathlib import Path
 from typing import Any, Mapping
 from urllib.parse import urlparse
 
@@ -10,6 +11,9 @@ _PUBLIC_FALLBACK_TITLE = "Otro"
 # Sufijo de marca país en títulos de retail («Easy Chile» → «Easy»).
 # No toca compuestos (Chileautos) ni marcas que empiezan por Chile (Chile Perfume).
 _CHILE_SUFFIX = re.compile(r"(?i)\s+Chile\s*$")
+_LOGO_DIR = Path(__file__).resolve().parent / "web" / "static" / "logos"
+_LOGO_FALLBACK = "_store.svg"
+_LOGO_SUFFIXES = ("png", "svg", "jpg", "jpeg", "webp")
 
 
 def _clean(value: Any) -> str:
@@ -42,6 +46,24 @@ def public_store_label(store_id: str | None, titles: Mapping[str, str] | None = 
     if not known and key:
         known, _sites = _catalog()
     return clean_store_display_name(known.get(key) or key or _PUBLIC_FALLBACK_TITLE)
+
+
+def store_logo_static_url(store_id: str | None) -> str:
+    """URL relativa del logo en `/static/logos` si existe el archivo; si no, genérico.
+
+    No inventa marcas: solo sirve un asset ya presente en el árbol estático
+    (mismo criterio que alertas/correo). El agregador interno no tiene logo propio.
+    """
+    key = public_store_key(store_id)
+    if not key or key == "otro":
+        return f"/static/logos/{_LOGO_FALLBACK}"
+    if key != "".join(ch for ch in key if ch.isalnum() or ch in {"-", "_"}):
+        return f"/static/logos/{_LOGO_FALLBACK}"
+    for suffix in _LOGO_SUFFIXES:
+        candidate = _LOGO_DIR / f"{key}.{suffix}"
+        if candidate.is_file():
+            return f"/static/logos/{candidate.name}"
+    return f"/static/logos/{_LOGO_FALLBACK}"
 
 
 def _catalog() -> tuple[dict[str, str], dict[str, str]]:

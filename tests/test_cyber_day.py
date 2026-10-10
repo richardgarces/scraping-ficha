@@ -38,6 +38,7 @@ from retail.cyber_day import (
     is_cyber_group,
     list_all_lists,
     load_seed_items,
+    next_sequential_list,
     normalize_import_row,
     notify_cyber_change,
     offer_signature,
@@ -50,6 +51,7 @@ from retail.cyber_day import (
     query_best_price_change,
     repair_duplicates,
     restart_run,
+    running_list_ids,
     start_run,
     status_payload,
     stop_run,
@@ -1095,6 +1097,121 @@ def test_create_list_independent_run(repo):
     assert status_payload(repo, list_id="cyber_junio2026")["run"]["status"] == "running"
     slugs = {item["slug"] for item in list_all_lists(repo)}
     assert "cyber_junio2026" in slugs and "cyber_prueba" in slugs
+
+
+def test_next_sequential_list_rotates_stable_order():
+    running = ["cyber_a", "cyber_b", "cyber_c"]
+    assert next_sequential_list(running, None) == "cyber_a"
+    assert next_sequential_list(running, "cyber_a") == "cyber_b"
+    assert next_sequential_list(running, "cyber_b") == "cyber_c"
+    assert next_sequential_list(running, "cyber_c") == "cyber_a"
+    assert next_sequential_list(["solo"], "solo") == "solo"
+    assert next_sequential_list([], "x") is None
+    assert next_sequential_list(running, "missing") == "cyber_a"
+
+
+def test_running_list_ids_pin_and_multi(repo, monkeypatch):
+    ensure_seed(repo)
+    create_list(repo, name="Cyber B", slug="cyber_b", use_seed=True)
+    start_run(repo, list_id="cyber_junio2026")
+    start_run(repo, list_id="cyber_b")
+    ids = running_list_ids(repo)
+    assert ids == ["cyber_b", "cyber_junio2026"] or set(ids) == {"cyber_b", "cyber_junio2026"}
+    assert set(ids) == {"cyber_b", "cyber_junio2026"}
+    monkeypatch.setattr("retail.cyber_day.CYBER_DAY_LIST_ID", "cyber_b")
+    assert running_list_ids(repo) == ["cyber_b"]
+    assert running_list_ids(repo, list_id="cyber_junio2026") == ["cyber_junio2026"]
+
+
+def test_pinned_workers_do_not_share_cursors(repo, monkeypatch):
+    """Dos pines distintos solo ven/avanzan su propia lista (cursores independientes)."""
+    from retail.cyber_day import load_run, save_run
+
+    ensure_seed(repo)
+    create_list(repo, name="Cyber B", slug="cyber_b", use_seed=True)
+    start_run(repo, list_id="cyber_junio2026")
+    start_run(repo, list_id="cyber_b")
+    run_a = load_run(repo, "cyber_junio2026")
+    run_b = load_run(repo, "cyber_b")
+    run_a["cursor"] = 3
+    run_b["cursor"] = 7
+    save_run(repo, run_a, list_id="cyber_junio2026")
+    save_run(repo, run_b, list_id="cyber_b")
+
+    monkeypatch.setattr("retail.cyber_day.CYBER_DAY_LIST_ID", "cyber_b")
+    assert running_list_ids(repo) == ["cyber_b"]
+    # process_one con pin explícito no toca la otra lista
+    monkeypatch.setattr(
+        "retail.cyber_day.collect_query_matches",
+        lambda *a, **k: [],
+    )
+    monkeypatch.setattr(
+        "retail.cyber_day.refresh_top_matches",
+        lambda *a, **k: [],
+    )
+    before_a = int(load_run(repo, "cyber_junio2026").get("cursor") or 0)
+    before_b = int(load_run(repo, "cyber_b").get("cursor") or 0)
+    result = process_one(repo, delay=0, list_id="cyber_b")
+    assert result.get("list_id") == "cyber_b"
+    assert int(load_run(repo, "cyber_b").get("cursor") or 0) == before_b + 1
+    assert int(load_run(repo, "cyber_junio2026").get("cursor") or 0) == before_a
+
+
+def test_exclude_list_ids_skips_pinned_for_sequential(repo, monkeypatch):
+    """Worker secuencial con EXCLUDE no ve las listas pineadas (parallel 2)."""
+    ensure_seed(repo)
+    create_list(repo, name="Cyber B", slug="cyber_b", use_seed=True)
+    create_list(repo, name="Cyber C", slug="cyber_c", use_seed=True)
+    start_run(repo, list_id="cyber_junio2026")
+    start_run(repo, list_id="cyber_b")
+    start_run(repo, list_id="cyber_c")
+    monkeypatch.setattr("retail.cyber_day.CYBER_DAY_LIST_ID", None)
+    monkeypatch.setattr(
+        "retail.cyber_day.EXCLUDE_LIST_IDS",
+        frozenset({"cyber_junio2026", "cyber_b"}),
+    )
+    assert set(running_list_ids(repo)) == {"cyber_c"}
+    monkeypatch.setattr("retail.cyber_day.EXCLUDE_LIST_IDS", frozenset())
+    assert set(running_list_ids(repo)) == {"cyber_b", "cyber_c", "cyber_junio2026"}
+
+
+def test_host_stats_collect_report_and_dedupe(repo, monkeypatch):
+    from retail.cyber_day import status_payload
+    from retail.host_stats import (
+        collect_host_stats,
+        load_host_stats,
+        report_host_stats,
+    )
+
+    monkeypatch.setattr("retail.host_stats.HOST_IP", "192.168.1.90")
+    monkeypatch.setattr("retail.host_stats.CYBER_DAY_HOST_IP", "192.168.1.90")
+    monkeypatch.setattr("retail.host_stats._LAST_HOST_REPORT_AT", 0.0)
+    stats = collect_host_stats()
+    assert stats["hostname"]
+    assert stats["ip"] == "192.168.1.90"
+    assert "cpu" in stats and "ram" in stats and "disk" in stats
+    assert stats["ram"]["total_bytes"] is None or stats["ram"]["total_bytes"] > 0
+    first = report_host_stats(repo, force=True)
+    assert first is not None
+    # Segunda llamada inmediata sin force → throttle
+    assert report_host_stats(repo, force=False) is None
+    hosts = load_host_stats(repo)
+    assert len(hosts) == 1
+    assert hosts[0]["hostname"] == stats["hostname"]
+    assert hosts[0]["label"] == "Orange Pi"
+    # Simular 2 docs mismo hostname no duplica en payload
+    repo.save_app_setting(
+        f"cyber_day_host_stats:{stats['hostname']}",
+        {**stats, "reported_at": "2099-01-01T00:00:00+00:00"},
+    )
+    # Dedupe: segundo doc mismo hostname no duplica en load_host_stats
+    hosts2 = load_host_stats(repo)
+    assert len(hosts2) == 1
+    assert hosts2[0]["label"] == "Orange Pi"
+    # Cyber Day status ya no incluye worker_hosts (panel vive en /hosts)
+    ensure_seed(repo)
+    payload = status_payload(repo, enrich_missing=False)
+    assert "worker_hosts" not in payload
 
 
 def test_import_preserves_list_identity(repo):

@@ -305,8 +305,11 @@ def pack_tokens(text: str) -> tuple[str, ...]:
     multipack con el mismo producto suelto, y para que omitir "1 unidad" siga
     calzando con quien sí lo escribe.
     """
-    page = re.sub(r"[.]", " ", text)
+    page = _fold(text)
     page = re.sub(r"\b[345]g\b", " ", page)
+    # Conservar decimales de envase (1.5 kg / 1,5 kg); el resto de puntos molesta.
+    page = re.sub(r"(?<=\d)\.(?=\d)", "\uE000", page)
+    page = page.replace(".", " ").replace("\uE000", ".")
     used = [False] * (len(page) + 1)
     found: list[str] = []
 

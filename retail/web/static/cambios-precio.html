@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#258fdf">
   <title>Cambios de precio</title>
   <script>(function(){var m=localStorage.getItem("retail-theme");if(m==="day"||m==="night"){document.documentElement.dataset.theme=m;return;}var h=new Date().getHours();document.documentElement.dataset.theme=(h>=7&&h<19)?"day":"night";})();</script>
-  <link rel="stylesheet" href="/static/styles.css?v=91">
+  <link rel="stylesheet" href="/static/styles.css?v=102-cambios-sort">
 </head>
 <body>
   <header class="top">
@@ -38,6 +38,7 @@
           <a href="/siguiendo">Siguiendo</a>
           <a href="/cyber-day" data-admin hidden>Cyber</a>
           <a href="/cambios-precio" class="current" data-admin hidden>Cambios de precio</a>
+          <a href="/hosts" data-admin hidden>Hosts</a>
           <a href="/cron" data-admin hidden>Cron / lotes</a>
           <a href="/analisis-producto" data-admin hidden>Análisis de producto</a>
           <a href="/estadisticas" data-admin hidden>Estadísticas</a>
@@ -82,18 +83,18 @@
       </div>
       <p id="meta" class="muted">Cargando…</p>
       <div class="table-wrap scroll-x">
-        <table class="results cron-table">
+        <table class="results cron-table" id="price-changes-table">
           <thead>
             <tr>
               <th><label class="sr-only" for="check-all">Seleccionar visibles</label><input type="checkbox" id="check-all" title="Seleccionar visibles"></th>
-              <th>#</th>
-              <th>Query</th>
-              <th>Categoría</th>
-              <th>Tienda</th>
-              <th>Precio ant.</th>
-              <th>Precio</th>
-              <th>Último cambio</th>
-              <th>Fuente</th>
+              <th><button type="button" class="col-sort" data-sort="n" data-type="num">#</button></th>
+              <th><button type="button" class="col-sort" data-sort="query" data-type="text">Query</button></th>
+              <th><button type="button" class="col-sort" data-sort="category" data-type="text">Categoría</button></th>
+              <th><button type="button" class="col-sort" data-sort="store" data-type="text">Tienda</button></th>
+              <th><button type="button" class="col-sort" data-sort="previous_price" data-type="num">Precio ant.</button></th>
+              <th><button type="button" class="col-sort" data-sort="price" data-type="num">Precio</button></th>
+              <th><button type="button" class="col-sort" data-sort="last_change_at" data-type="date">Último cambio</button></th>
+              <th><button type="button" class="col-sort" data-sort="source" data-type="text">Fuente</button></th>
             </tr>
           </thead>
           <tbody id="body">
@@ -104,6 +105,6 @@
     </section>
   </main>
   <script src="/static/prices.js?v=37"></script>
-  <script src="/static/cambios-precio.js?v=1"></script>
+  <script src="/static/cambios-precio.js?v=2"></script>
 </body>
 </html>

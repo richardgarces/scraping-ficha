@@ -7,6 +7,10 @@ Multi-lista: `cyber_day_lists` (slug/nombre) + productos en `cyber_day_products`
 filtrados por `list_id`. Estado por lista: `app_settings.cyber_day_run:{slug}`
 (legacy `cyber_day_run` se migra a la lista oficial). Seed oficial:
 `data/cyber_junio2026.json` (auto si `cyber_junio2026` está vacía).
+
+Varias listas `running`: el worker las atiende en modo **sequential** (una vuelta
+completa por lista) salvo `CYBER_DAY_MULTI_LIST_MODE=round_robin`. Paralelo real:
+un proceso/contenedor por lista con `CYBER_DAY_LIST_ID` / `--list-id`.
 """
 
 from __future__ import annotations
@@ -23,6 +27,17 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from retail.host_stats import report_host_stats
+
+# Re-export para imports/tests legacy.
+from retail.host_stats import (  # noqa: F401
+    CYBER_DAY_HOST_IP,
+    HOST_STATS_MAX_AGE,
+    HOST_STATS_REPORT_SECONDS,
+    HOST_STATS_SETTING_PREFIX,
+    collect_host_stats,
+)
+
 RUN_SETTING = "cyber_day_run"  # legacy; migrado a cyber_day_run:{slug}
 RUN_SETTING_PREFIX = "cyber_day_run:"
 ACTIVE_LIST_SETTING = "cyber_day_active_list"
@@ -38,6 +53,19 @@ SEARCH_MAX_ITEMS = max(1, int(os.environ.get("CYBER_DAY_SEARCH_MAX_ITEMS") or "3
 # db = rápido (catálogo + refresh). both/scrape = también consulta tiendas (lento).
 SEARCH_SOURCE = (os.environ.get("CYBER_DAY_SEARCH_SOURCE") or "db").strip().lower()
 SEARCH_TIMEOUT = float(os.environ.get("CYBER_DAY_SEARCH_TIMEOUT") or "6")
+# Pin opcional: un proceso/contenedor solo atiende esta lista (paralelo seguro = 1 contenedor por list_id).
+CYBER_DAY_LIST_ID = (os.environ.get("CYBER_DAY_LIST_ID") or "").strip() or None
+# Listas a ignorar (worker secuencial que cubre el resto mientras otros contenedores van pineados).
+EXCLUDE_LIST_IDS = frozenset(
+    s.strip()
+    for s in (os.environ.get("CYBER_DAY_EXCLUDE_LIST_IDS") or "").split(",")
+    if s.strip()
+)
+# sequential = una lista completa su vuelta antes de pasar a la siguiente (default).
+# round_robin = una query por lista en cada ciclo (legado; alarga cada vuelta × N listas).
+MULTI_LIST_MODE = (os.environ.get("CYBER_DAY_MULTI_LIST_MODE") or "sequential").strip().lower()
+if MULTI_LIST_MODE not in {"sequential", "round_robin"}:
+    MULTI_LIST_MODE = "sequential"
 # Tiendas prioritarias si hay scrape en vivo (evita Movistar/etc. que cuelgan el loop).
 PREFERRED_SCRAPE_STORES = tuple(
     s.strip()
@@ -2211,6 +2239,10 @@ def touch_worker(repo: Any, list_id: str | None = None) -> None:
     run["heartbeat_at"] = _now()
     run["worker"] = socket.gethostname()
     save_run(repo, run, list_id=lid)
+    try:
+        report_host_stats(repo)
+    except Exception as exc:
+        print(f"cyber-day: host stats: {exc}", flush=True)
 
 
 def _money_clp(value: Any) -> str:
@@ -2977,49 +3009,130 @@ def _finish_lap(repo: Any, run: dict[str, Any], total: int, *, list_id: str | No
     }
 
 
-def running_list_ids(repo: Any) -> list[str]:
+def running_list_ids(repo: Any, *, list_id: str | None = None) -> list[str]:
+    """Listas con status=running, orden estable (slug).
+
+    Filtros (mutuamente orientados a partición segura entre contenedores):
+    - ``CYBER_DAY_LIST_ID`` / ``list_id``: solo esa lista (worker pineado).
+    - ``CYBER_DAY_EXCLUDE_LIST_IDS``: omite slugs (worker secuencial del resto).
+    """
     ensure_default_list(repo)
+    pin = (list_id or CYBER_DAY_LIST_ID or "").strip() or None
     ids = []
     for meta in list_all_lists(repo):
         slug = str(meta.get("slug") or "")
         if not slug:
             continue
+        if pin and slug != pin:
+            continue
+        if not pin and slug in EXCLUDE_LIST_IDS:
+            continue
         if load_run(repo, slug).get("status") == "running":
             ids.append(slug)
     # Compat: si solo existe el run legacy running
-    if not ids:
+    if not ids and (not pin or pin == CYBER_LIST_ID) and CYBER_LIST_ID not in EXCLUDE_LIST_IDS:
         legacy = load_run(repo, CYBER_LIST_ID)
         if legacy.get("status") == "running":
             ids.append(CYBER_LIST_ID)
     return ids
 
 
+def next_sequential_list(running: list[str], current: str | None) -> str | None:
+    """Tras cerrar una vuelta, rota a la siguiente lista running (ciclo estable por slug)."""
+    if not running:
+        return None
+    if current is None or current not in running:
+        return running[0]
+    if len(running) == 1:
+        return running[0]
+    idx = running.index(current)
+    return running[(idx + 1) % len(running)]
+
+
+def _log_process_metrics(lid: str, metrics: dict[str, Any], *, delay: float) -> None:
+    if metrics.get("skipped"):
+        return
+    if metrics.get("ok"):
+        print(
+            f"cyber-day [{lid}] lap={metrics.get('lap')} n={metrics.get('n')} "
+            f"query={metrics.get('query')!r} matches={metrics.get('matches')} "
+            f"changed={metrics.get('changed')} notified={metrics.get('notified')}",
+            flush=True,
+        )
+        return
+    print(f"cyber-day [{lid}] error: {metrics.get('detail')}", flush=True)
+    time.sleep(max(delay, 1.0))
+
+
 def worker_loop(repo: Any, *, delay: float = DEFAULT_DELAY, poll_seconds: float = 2.0) -> None:
+    """Loop del worker.
+
+    Multi-lista (default ``sequential``): atiende una lista hasta cerrar su vuelta,
+    luego pasa a la siguiente ``running``. Así se pueden dejar N listas en curso
+    sin intercalado query-a-query (que alarga cada vuelta × N).
+
+    ``CYBER_DAY_LIST_ID``: el proceso solo ve esa lista (útil para N contenedores en paralelo).
+    ``CYBER_DAY_EXCLUDE_LIST_IDS``: omite listas ya pineadas (secuencial del resto).
+    ``CYBER_DAY_MULTI_LIST_MODE=round_robin``: legado (1 query por lista por ciclo).
+    """
     ensure_seed(repo, CYBER_LIST_ID)
+    sticky: str | None = None
+    mode = MULTI_LIST_MODE
+    if CYBER_DAY_LIST_ID:
+        print(f"cyber-day: pinned list_id={CYBER_DAY_LIST_ID}", flush=True)
+    if EXCLUDE_LIST_IDS:
+        print(
+            f"cyber-day: exclude list_ids={','.join(sorted(EXCLUDE_LIST_IDS))}",
+            flush=True,
+        )
+    print(f"cyber-day: multi_list_mode={mode}", flush=True)
     while True:
-        active = resolve_list_id(repo)
         running = running_list_ids(repo)
         if not running:
-            touch_worker(repo, active)
+            # Pin/exclude: no tocar cursores/heartbeat de otras particiones.
+            if CYBER_DAY_LIST_ID or EXCLUDE_LIST_IDS:
+                sticky = None
+                time.sleep(poll_seconds)
+                continue
+            touch_worker(repo, resolve_list_id(repo))
+            sticky = None
             time.sleep(poll_seconds)
             continue
+        # Heartbeat solo en las listas que este proceso atiende.
         for lid in running:
             touch_worker(repo, lid)
-            metrics = process_one(repo, delay=delay, list_id=lid)
-            if metrics.get("skipped"):
-                continue
-            if metrics.get("ok"):
+
+        if mode == "round_robin":
+            for lid in running:
+                metrics = process_one(repo, delay=delay, list_id=lid)
+                _log_process_metrics(lid, metrics, delay=delay)
+            continue
+
+        # sequential: una lista hasta lap_finished, luego la siguiente.
+        if sticky not in running:
+            sticky = running[0]
+            if len(running) > 1:
                 print(
-                    f"cyber-day [{lid}] lap={metrics.get('lap')} n={metrics.get('n')} "
-                    f"query={metrics.get('query')!r} matches={metrics.get('matches')} "
-                    f"changed={metrics.get('changed')} notified={metrics.get('notified')}",
+                    f"cyber-day: sequential focus → {sticky} "
+                    f"(cola: {', '.join(running)})",
                     flush=True,
                 )
-            else:
-                print(f"cyber-day [{lid}] error: {metrics.get('detail')}", flush=True)
-                time.sleep(max(delay, 1.0))
-        if not running:
-            time.sleep(poll_seconds)
+
+        metrics = process_one(repo, delay=delay, list_id=sticky)
+        _log_process_metrics(sticky, metrics, delay=delay)
+
+        if metrics.get("reason") == "not_running" or metrics.get("skipped"):
+            sticky = next_sequential_list([x for x in running if x != sticky], None)
+            continue
+        if metrics.get("lap_finished"):
+            running_after = running_list_ids(repo)
+            nxt = next_sequential_list(running_after, sticky)
+            if nxt and nxt != sticky:
+                print(
+                    f"cyber-day: sequential lap done on {sticky}; next → {nxt}",
+                    flush=True,
+                )
+            sticky = nxt
 
 
 def main() -> None:
@@ -3028,7 +3141,16 @@ def main() -> None:
     parser.add_argument("--healthcheck", action="store_true")
     parser.add_argument("--seed", action="store_true", help="Carga seed si la colección está vacía")
     parser.add_argument("--delay", type=float, default=DEFAULT_DELAY)
+    parser.add_argument(
+        "--list-id",
+        default=None,
+        help="Pin a una lista (equivale a CYBER_DAY_LIST_ID; para 1 contenedor por lista)",
+    )
     args = parser.parse_args()
+
+    global CYBER_DAY_LIST_ID
+    if args.list_id:
+        CYBER_DAY_LIST_ID = str(args.list_id).strip() or None
 
     from retail.mongo import ProductRepository
 
@@ -3037,15 +3159,22 @@ def main() -> None:
         repo.cyber_day_products = repo.db["cyber_day_products"]
     try:
         if args.seed or args.healthcheck or args.once:
-            ensure_seed(repo)
+            ensure_seed(repo, CYBER_DAY_LIST_ID or CYBER_LIST_ID)
         if args.healthcheck:
-            run = load_run(repo)
-            progress = progress_view(run, product_total=products_count(repo))
-            if not progress.get("worker_healthy") and run.get("status") == "running":
-                raise SystemExit(1)
+            # Pin → esa lista. Exclude/secuencial → cualquiera de las que atiende.
+            check_ids = (
+                [CYBER_DAY_LIST_ID]
+                if CYBER_DAY_LIST_ID
+                else running_list_ids(repo) or [resolve_list_id(repo)]
+            )
+            for lid in check_ids:
+                run = load_run(repo, lid)
+                progress = progress_view(run, product_total=products_count(repo, lid))
+                if not progress.get("worker_healthy") and run.get("status") == "running":
+                    raise SystemExit(1)
             return
         if args.once:
-            print(process_one(repo, delay=0), flush=True)
+            print(process_one(repo, delay=0, list_id=CYBER_DAY_LIST_ID), flush=True)
             return
         worker_loop(repo, delay=args.delay)
     finally:

@@ -123,38 +123,75 @@ if [[ ! -f "$INDEX_STAMP" ]]; then
 fi
 flock -u 6
 
-run_group() {
+# Tras SIGTERM/deploy (exit 75 = EX_TEMPFAIL) reintenta 1 vez por defecto.
+# El cursor Mongo ya quedó; un proceso nuevo continúa sin «Continuar» manual.
+BATCH_INTERRUPT_RETRIES="${BATCH_INTERRUPT_RETRIES:-1}"
+BATCH_INTERRUPT_RETRY_DELAY="${BATCH_INTERRUPT_RETRY_DELAY:-20}"
+INTERRUPT_EXIT_CODE=75
+
+run_group_once() {
   local g="$1"
   local budget="$BUDGET"
-  local mode="adaptativo"
   local -a env_prefix=()
+  local rc=0
   if [[ "$g" == "retail" ]]; then
     budget="${RETAIL_FULL_BATCH_BUDGET_MINUTES:-0}"
-    mode="completo"
     env_prefix=(env ADAPTIVE_SCRAPING=0)
   fi
-  echo "$(stamp) inicio batch grupo=${g} source=${SOURCE} pausa=${PAUSE} presupuesto=${budget}m modo=${mode}"
   if [[ "$USE_DOCKER" == 1 && "$g" == "retail" ]]; then
-    # compose run no hereda env_prefix fácilmente; pasar -e
     docker compose -f "${ROOT}/docker-compose.worker.soyo.yml" run --rm --no-deps -T \
       -e ADAPTIVE_SCRAPING=0 worker retail batch \
       --grupo "$g" \
       --source "$SOURCE" \
       --pausa "$PAUSE" \
-      --presupuesto-minutos "$budget" >> "$LOG" 2>&1
+      --presupuesto-minutos "$budget" >> "$LOG" 2>&1 || rc=$?
   else
     "${env_prefix[@]}" retail_run batch \
       --grupo "$g" \
       --source "$SOURCE" \
       --pausa "$PAUSE" \
-      --presupuesto-minutos "$budget" >> "$LOG" 2>&1
+      --presupuesto-minutos "$budget" >> "$LOG" 2>&1 || rc=$?
   fi
-  echo "$(stamp) fin batch grupo=${g}"
+  return "$rc"
+}
+
+run_group() {
+  local g="$1"
+  local budget="$BUDGET"
+  local mode="adaptativo"
+  local attempt=0
+  local max_attempts=$((BATCH_INTERRUPT_RETRIES + 1))
+  local rc=0
+  local delay=0
+  if [[ "$g" == "retail" ]]; then
+    budget="${RETAIL_FULL_BATCH_BUDGET_MINUTES:-0}"
+    mode="completo"
+  fi
+  echo "$(stamp) inicio batch grupo=${g} source=${SOURCE} pausa=${PAUSE} presupuesto=${budget}m modo=${mode}"
+  while (( attempt < max_attempts )); do
+    attempt=$((attempt + 1))
+    rc=0
+    run_group_once "$g" || rc=$?
+    if [[ "$rc" -eq 0 ]]; then
+      echo "$(stamp) fin batch grupo=${g}"
+      return 0
+    fi
+    if [[ "$rc" -eq "$INTERRUPT_EXIT_CODE" ]] && (( attempt < max_attempts )); then
+      delay=$((BATCH_INTERRUPT_RETRY_DELAY * attempt))
+      echo "$(stamp) grupo=${g} interrumpido (rc=${rc}); reintento automático ${attempt}/${BATCH_INTERRUPT_RETRIES} en ${delay}s" | tee -a "$LOG" >&2
+      sleep "$delay"
+      continue
+    fi
+    echo "$(stamp) ERROR batch grupo=${g} rc=${rc}" >&2
+    return "$rc"
+  done
+  echo "$(stamp) ERROR batch grupo=${g} rc=${rc} (sin más reintentos)" >&2
+  return "$rc"
 }
 
 if [[ -n "$GRUPO" ]]; then
   run_group "$GRUPO"
-  exit 0
+  exit $?
 fi
 
 mapfile -t GROUPS < <(py_run -c '
@@ -164,11 +201,22 @@ print("\n".join(enabled_group_ids(load_schedule())))
 ')
 if [[ ${#GROUPS[@]} -eq 0 ]]; then
   echo "$(stamp) inicio batch (sin grupos) source=${SOURCE} pausa=${PAUSE}"
-  retail_run batch --source "$SOURCE" --pausa "$PAUSE" >> "$LOG" 2>&1
-  echo "$(stamp) fin batch"
-  exit 0
+  if retail_run batch --source "$SOURCE" --pausa "$PAUSE" >> "$LOG" 2>&1; then
+    echo "$(stamp) fin batch"
+    exit 0
+  fi
+  echo "$(stamp) ERROR batch (sin grupos)" >&2
+  exit 1
 fi
 
+FAILED=0
 for g in "${GROUPS[@]}"; do
-  run_group "$g" || true
+  if ! run_group "$g"; then
+    FAILED=1
+  fi
 done
+if [[ "$FAILED" -ne 0 ]]; then
+  echo "$(stamp) batch diario terminó con uno o más grupos en error" >&2
+  exit 1
+fi
+echo "$(stamp) batch diario completado"

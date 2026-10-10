@@ -109,7 +109,7 @@ Orden de resultados: mayor `gap_percent`, luego mayor ahorro en pesos.
 
 Texto tipo *«TimesFM aún no se muestra en ofertas: Faltan series evaluadas (0/30)»*:
 
-- Visible solo para usuarios con rol **admin** (`data-admin` + chequeo en `reales.js` / `super.js`).
+- Visible solo para usuarios con rol **admin** (`data-admin` + chequeo en `reales.js`).
 - Es una **señal experimental** opcional sobre ofertas ya clasificadas.
 - **No** decide qué entra o sale de la lista ni el orden.
 - Se habilita cuando la validación TimesFM registra ≥ **30** series, mejora ≥ 5% vs baseline y acierto de dirección ≥ 55% (ver `docs/TIMESFM_DATOS.md` y `retail/predictive_alerts.py`).

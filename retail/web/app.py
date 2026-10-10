@@ -25,7 +25,14 @@ from retail.click_stats import click_origin, parse_click_kind, record_click
 from retail.request_stats import client_country, client_ip, record_request
 from retail.search_stats import record_app_search
 from retail.web.auth_api import router as auth_router
-from retail.web.deps import current_user, request_is_admin, require_admin_html, require_login_html
+from retail.web.deps import (
+    admin_next_allowed,
+    current_user,
+    member_next_allowed,
+    request_is_admin,
+    require_admin_html,
+    require_login_html,
+)
 from retail.web.insights_api import router as insights_router
 from retail.web.settings_api import router as settings_router
 from retail.web.forecasts_api import router as forecasts_router
@@ -185,6 +192,39 @@ def _bootstrap_product_index() -> None:
         return
 
 
+@app.on_event("startup")
+def _auto_resume_interrupted_batches() -> None:
+    """Tras recreate de precios-web (deploy): Continuar grupos interrumpidos."""
+    import logging
+    import threading
+
+    log = logging.getLogger("retail.web.startup")
+
+    def _work() -> None:
+        try:
+            from retail.web.jobs import resume_interrupted_group_batches
+
+            result = resume_interrupted_group_batches(limit=2)
+            resumed = result.get("resumed") or []
+            if resumed:
+                log.info("Auto-reanudación post-arranque: %s", ", ".join(resumed))
+        except Exception as exc:
+            log.warning("Auto-reanudación post-arranque omitida: %s", exc)
+
+    threading.Thread(target=_work, daemon=True, name="batch-auto-resume").start()
+
+
+@app.on_event("startup")
+def _start_quote_miss_worker() -> None:
+    """Worker async: scrape on-miss de cotizaciones (celdas «buscando en tienda»)."""
+    try:
+        from retail.quote_miss_jobs import start_background_worker
+
+        start_background_worker()
+    except Exception:
+        return
+
+
 @app.get("/")
 def index() -> FileResponse:
     return FileResponse(STATIC / "index.html")
@@ -238,6 +278,16 @@ def price_changes_page(request: Request):
     return FileResponse(STATIC / "cambios-precio.html")
 
 
+@app.get("/hosts")
+@app.get("/infra")
+def hosts_page(request: Request):
+    """Admin: CPU/RAM/disco de BMAX, soyo y Orange Pi."""
+    gate = require_admin_html(request, next_path="/hosts")
+    if gate is not None:
+        return gate
+    return FileResponse(STATIC / "hosts.html")
+
+
 @app.get("/estadisticas")
 def estadisticas(request: Request):
     gate = require_admin_html(request, next_path="/estadisticas")
@@ -256,7 +306,7 @@ def pronosticos(request: Request):
 
 @app.get("/analisis-producto")
 def analisis_producto(request: Request):
-    gate = require_login_html(request, next_path="/analisis-producto")
+    gate = require_admin_html(request, next_path="/analisis-producto")
     if gate is not None:
         return gate
     return FileResponse(STATIC / "analisis-producto.html")
@@ -342,12 +392,6 @@ def siguiendo() -> FileResponse:
     return FileResponse(STATIC / "siguiendo.html")
 
 
-def _member_page(path: str) -> bool:
-    """Páginas que cualquier cuenta aprobada puede abrir, no solo el admin."""
-    base = path.split("?", 1)[0].rstrip("/") or "/"
-    return base in {"/reales", "/super", "/comparar", "/analisis-producto"}
-
-
 @app.get("/entrar")
 def entrar(request: Request):
     if request.query_params.get("modo") in {"recuperar", "restablecer"}:
@@ -357,16 +401,8 @@ def entrar(request: Request):
     if repo is not None:
         try:
             user = current_user(request, repo)
-            admin_next = user and user.get("role") == "admin" and (
-                nxt.startswith("/ofertas")
-                or nxt.startswith("/cron")
-                or nxt.startswith("/cyber")
-                or nxt.startswith("/estadisticas")
-                or nxt.startswith("/usuarios")
-                or nxt.startswith("/analisis-producto")
-                or nxt.startswith("/cotizaciones")
-            )
-            member_next = user and _member_page(nxt)
+            admin_next = user and user.get("role") == "admin" and admin_next_allowed(nxt)
+            member_next = user and member_next_allowed(nxt)
             if admin_next or member_next:
                 return RedirectResponse(nxt, status_code=303)
         finally:
@@ -405,19 +441,28 @@ def health() -> dict:
     repo = connect_repo()
     mongo = False
     products = 0
+    degraded = False
+    mongo_error: str | None = None
     real_offer_worker = {"healthy": False}
     cyber_day = {"status": "idle", "worker_healthy": False}
-    if repo is not None:
-        mongo = True
+    if repo is None:
+        # Mongo opcional para servir scrapes; marcar degradado sin tumbar el proceso.
+        degraded = True
+        mongo_error = "unavailable"
+    else:
         try:
             products = repo.count()
             real_offer_worker = repo.real_offer_worker_status()
             from retail.cyber_day import status_payload
 
             cyber_day = status_payload(repo).get("run") or cyber_day
-        except Exception:
+            mongo = True
+        except Exception as exc:
             products = 0
-        repo.close()
+            degraded = True
+            mongo_error = type(exc).__name__
+        finally:
+            repo.close()
     qdrant = connect_qdrant()
     redis_ok = False
     try:
@@ -426,9 +471,13 @@ def health() -> dict:
         redis_ok = connect_redis() is not None
     except Exception:
         redis_ok = False
+    # ok=False solo si connect devolvió repo pero count/status falló (antes se
+    # enmascaraba con mongo=true y products=0). Sin Mongo, ok sigue True (proceso vivo).
     return {
-        "ok": True,
+        "ok": bool(mongo or mongo_error == "unavailable"),
+        "degraded": degraded,
         "mongo": mongo,
+        "mongo_error": mongo_error,
         "qdrant": qdrant is not None,
         "redis": redis_ok,
         "real_offer_worker": real_offer_worker,

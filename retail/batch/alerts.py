@@ -17,7 +17,11 @@ from urllib.request import HTTPSHandler, Request
 
 from retail.batch.config import load_channels
 from retail.batch.rules import Alert
-from retail.offer_screenshot import apply_offer_screenshot, is_local_image
+from retail.offer_screenshot import (
+    apply_offer_screenshot,
+    apply_offer_screenshots,
+    is_local_image,
+)
 from retail.short_links import attach_short_url, public_product_url, short_product_url
 
 DEFAULT_LOG = Path("output/alerts.jsonl")
@@ -184,8 +188,15 @@ def dispatch_alerts(
     repo: Any | None = None,
 ) -> list[str]:
     sent: list[str] = []
-    for alert in deduplicate_product_alerts(alerts):
-        payload = apply_offer_screenshot(attach_short_url(_payload(alert), repo))
+    unique = deduplicate_product_alerts(alerts)
+    media: dict[str, dict[str, Any]] = {}
+    for alert in unique:
+        key = alert_entity_key(alert)
+        if key not in media:
+            media[key] = attach_short_url(_payload(alert), repo)
+    apply_offer_screenshots(media)
+    for alert in unique:
+        payload = media[alert_entity_key(alert)]
         if "log" in channels:
             print(f"ALERTA [{alert.rule}] {alert.query}: {alert.message}")
             sent.append("log")
@@ -644,21 +655,25 @@ def dispatch_user_alerts(
     # Correo y push solo si el admin los activó en Medios de alerta.
     email_enabled = "email" in enabled
     push_enabled = "push" in enabled
+    unique = deduplicate_product_alerts(alerts)
     media_cache: dict[str, dict[str, Any]] = {}
+    for alert in unique:
+        key = alert_entity_key(alert)
+        if key not in media_cache:
+            media_cache[key] = attach_short_url(_payload(alert), repo)
+    apply_offer_screenshots(media_cache)
     delivered = 0
     for user in users:
         preferences = user.get("notification_preferences") or {}
         channels = preferences.get("channels") or []
         seen: set[str] = set()
-        for alert in deduplicate_product_alerts(alerts):
+        for alert in unique:
             if not wants_alert(preferences, alert):
                 continue
             key = alert_entity_key(alert)
             if key in seen:
                 continue
             seen.add(key)
-            if key not in media_cache:
-                media_cache[key] = apply_offer_screenshot(attach_short_url(_payload(alert), repo))
             payload = media_cache[key]
             text = _notification_text(payload)
             image_url = payload.get("image_url") or alert.image_url
