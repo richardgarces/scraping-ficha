@@ -2839,11 +2839,16 @@ html[data-theme="day"] .panel { backdrop-filter: none; }
 }
 .cyber-host-gauges {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
-  gap: 0.75rem 1rem;
+  /* 4 anillos (CPU · RAM · Temp · Disco); Temp siempre visible junto a RAM. */
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.75rem 0.65rem;
 }
-.cyber-host-metric { text-align: center; }
+@media (max-width: 1100px) {
+  .cyber-host-gauges { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+.cyber-host-metric { text-align: center; min-width: 0; }
 .cyber-host-metric p { margin: 0.25rem 0 0; font-size: 0.78rem; line-height: 1.35; }
+.cyber-host-metric-temp .cyber-gauge-label { letter-spacing: 0.02em; }
 .cyber-host-note { margin: 0.55rem 0 0; font-size: 0.78rem; }
 .cyber-gauge { display: inline-flex; flex-direction: column; align-items: center; gap: 0.2rem; }
 .cyber-gauge svg { display: block; }
@@ -2862,6 +2867,12 @@ html[data-theme="day"] .panel { backdrop-filter: none; }
 .cyber-gauge-ok .cyber-gauge-fill { stroke: var(--ok, #3ecf8e); }
 .cyber-gauge-warm .cyber-gauge-fill { stroke: var(--warn, #e6a23c); }
 .cyber-gauge-hot .cyber-gauge-fill { stroke: var(--danger, #f56c6c); }
+.cyber-gauge-empty .cyber-gauge-fill { stroke: transparent; }
+.cyber-gauge-empty .cyber-gauge-track {
+  stroke: color-mix(in srgb, var(--muted, #8b93a7) 55%, var(--line));
+  stroke-dasharray: 4 6;
+}
+.cyber-gauge-empty .cyber-gauge-pct { fill: var(--muted, #8b93a7); }
 .cyber-gauge-pct {
   fill: var(--text);
   font-size: 13px;

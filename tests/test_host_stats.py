@@ -407,6 +407,15 @@ def test_hosts_static_assets():
     assert 'metricBlock("temp"' in js or "kind === \"temp\"" in js
     assert "host.temperature" in js
     assert "temp_warn" in js and "temp_hot" in js
+    # Anillo Temp siempre en la tarjeta (junto a RAM), incluso sin sensor.
+    assert "sin sensor" in js
+    assert "empty: true" in js
+    ram_pos = js.find('metricBlock("ram"')
+    temp_pos = js.find('metricBlock("temp"')
+    disk_pos = js.find('metricBlock("disk"')
+    assert 0 <= ram_pos < temp_pos < disk_pos, "orden esperado: RAM → Temp → Disco"
+    assert "hosts.js?v=9-temp-gauge" in html
+    assert "styles.css?v=104-hosts-temp" in html
     assert "hosts-card" in js
     assert "hosts-disk-free" in js
     assert "data-ssh" in js
@@ -445,8 +454,12 @@ def test_hosts_static_assets():
     report_sh = Path("scripts/host-stats-report.sh").read_text(encoding="utf-8")
     assert "host_temp_env" in report_sh
     assert "HOST_STATS_TEMP_C" in report_sh
+    assert "/sys/class/hwmon" in report_sh
+    assert "temp*_input" in report_sh
     assert "host_facts_env" in report_sh
     assert "HOST_STATS_FACTS_B64" in report_sh
+    assert "cyber-gauge-empty" in css
+    assert "repeat(4," in css
     prices = (root / "prices.js").read_text(encoding="utf-8")
     assert 'href="/hosts"' in prices or '"/hosts"' in prices
     assert "Hosts" in prices

@@ -54,12 +54,12 @@
     return `${mins}m`;
   }
 
-  function gaugeSvg(percent, label, { display = null, titleSuffix = "%" } = {}) {
-    const p = Math.max(0, Math.min(100, Number(percent) || 0));
+  function gaugeSvg(percent, label, { display = null, titleSuffix = "%", empty = false } = {}) {
+    const p = empty ? 0 : Math.max(0, Math.min(100, Number(percent) || 0));
     const r = 34;
     const c = 2 * Math.PI * r;
     const dash = (p / 100) * c;
-    const tone = p >= 85 ? "hot" : (p >= 65 ? "warm" : "ok");
+    const tone = empty ? "empty" : (p >= 85 ? "hot" : (p >= 65 ? "warm" : "ok"));
     const center = display != null ? display : `${Math.round(p)}%`;
     const titleVal = display != null ? display : `${Math.round(p)}${titleSuffix}`;
     return `<div class="cyber-gauge cyber-gauge-${tone}" title="${escapeHtml(label)} ${escapeHtml(titleVal)}">
@@ -117,7 +117,8 @@
     if (kind === "temp") {
       const c = cpu.celsius;
       if (c == null || !Number.isFinite(Number(c))) {
-        return `<div class="cyber-host-metric">${gaugeSvg(0, "Temp", { display: "—" })}<p class="muted">sin sensor</p></div>`;
+        return `<div class="cyber-host-metric cyber-host-metric-temp">${gaugeSvg(0, "Temp", { display: "—", empty: true })}`
+          + `<p class="muted">sin sensor</p></div>`;
       }
       const rounded = Math.round(Number(c));
       const fill = tempGaugePercent(c, thresholds);
@@ -125,7 +126,8 @@
         `${Number(c).toFixed(1)}°C`,
         cpu.source ? String(cpu.source) : null,
       ].filter(Boolean).join(" · ");
-      return `<div class="cyber-host-metric">${gaugeSvg(fill, "Temp", { display: `${rounded}°` })}<p class="muted">${escapeHtml(detail)}</p></div>`;
+      return `<div class="cyber-host-metric cyber-host-metric-temp">${gaugeSvg(fill, "Temp", { display: `${rounded}°` })}`
+        + `<p class="muted">${escapeHtml(detail)}</p></div>`;
     }
     const freeLine = cpu.free_bytes != null
       ? `<p class="hosts-disk-free">${escapeHtml(formatBytes(cpu.free_bytes))} libres</p>`
@@ -397,6 +399,19 @@
       yMax: 100,
     });
     if (!tempChart && !cpuChart) {
+      const hasLiveTemp = hosts.some((h) => {
+        const c = Number(h?.temperature?.celsius);
+        return Number.isFinite(c);
+      });
+      const hasPartialHist = hosts.some((h) => Array.isArray(h?.history) && h.history.length >= 1);
+      if (hasLiveTemp || hasPartialHist) {
+        box.hidden = false;
+        box.innerHTML = `<div class="hosts-trends-head">`
+          + `<h3>Tendencias</h3>`
+          + `<p class="muted">Acumulando historial (≥2 muestras) para graficar temperatura y CPU. El anillo Temp de cada tarjeta ya muestra el valor actual.</p>`
+          + `</div>`;
+        return;
+      }
       box.hidden = true;
       box.innerHTML = "";
       return;
@@ -777,12 +792,13 @@
       const tone = cardTone(host);
       const sub = [host.ip, host.hostname].filter(Boolean).join(" · ");
       const thresholds = payload?.thresholds || {};
+      // Orden: CPU · RAM · Temp · Disco — Temp junto a RAM (mismo estilo de anillo).
       const gauges = host.cpu || host.ram || host.disk || host.temperature
         ? [
             metricBlock("cpu", host.cpu, thresholds),
             metricBlock("ram", host.ram, thresholds),
-            metricBlock("disk", host.disk, thresholds),
             metricBlock("temp", host.temperature, thresholds),
+            metricBlock("disk", host.disk, thresholds),
           ].join("")
         : `<p class="muted">Aún no hay métricas publicadas para este host.</p>`;
       const uptime = formatUptime(host.uptime_seconds);

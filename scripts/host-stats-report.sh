@@ -137,24 +137,47 @@ PY
   export HOST_STATS_FACTS_B64
 }
 
-# Temperatura del host (sysfs). Necesaria cuando el reporter corre en Docker
-# sin /sys/class/thermal del host montado.
+# Temperatura del host (sysfs thermal + hwmon). Necesaria cuando el reporter
+# corre en Docker sin /sys del host montado (BMAX/soyo vía docker exec).
+# Orange Pi suele exponer cpu-thermal; x86 a menudo solo hwmon (k10temp/coretemp).
 host_temp_env() {
   unset HOST_STATS_TEMP_C HOST_STATS_TEMP_SOURCE || true
   local best_prio=999 best_c="" best_src="" zone type raw milli c prio
-  for zone in /sys/class/thermal/thermal_zone*; do
-    [[ -r "${zone}/temp" && -r "${zone}/type" ]] || continue
-    type="$(tr -d '\n' <"${zone}/type" 2>/dev/null || true)"
-    raw="$(tr -d '\n' <"${zone}/temp" 2>/dev/null || true)"
-    [[ -n "${raw}" && "${raw}" =~ ^-?[0-9]+$ ]] || continue
-    milli="${raw}"
-    # millidegrees → °C (entero redondeado para env simple)
-    if (( milli < 0 )); then
+  local hw chip input_file label_file label src
+
+  _host_temp_consider() {
+    # $1=prio $2=celsius $3=source
+    local p="$1" val="$2" src_name="$3"
+    [[ -n "${val}" && "${val}" =~ ^-?[0-9]+$ ]] || return 0
+    (( val < -20 || val > 150 )) && return 0
+    if (( p < best_prio )); then
+      best_prio="${p}"
+      best_c="${val}"
+      best_src="${src_name}"
+    fi
+  }
+
+  _host_temp_from_milli() {
+    # $1=raw millidegrees-or-c → stdout °C entero
+    local milli="$1" c
+    [[ -n "${milli}" && "${milli}" =~ ^-?[0-9]+$ ]] || return 1
+    # Valores pequeños (<200) ya vienen en °C (igual que host_stats.py).
+    if (( milli > -200 && milli < 200 )); then
+      c="${milli}"
+    elif (( milli < 0 )); then
       c=$(( -((-milli + 500) / 1000) ))
     else
       c=$(( (milli + 500) / 1000 ))
     fi
-    (( c < -20 || c > 150 )) && continue
+    printf '%s' "${c}"
+  }
+
+  for zone in /sys/class/thermal/thermal_zone*; do
+    [[ -r "${zone}/temp" && -r "${zone}/type" ]] || continue
+    type="$(tr -d '\n' <"${zone}/type" 2>/dev/null || true)"
+    raw="$(tr -d '\n' <"${zone}/temp" 2>/dev/null || true)"
+    c="$(_host_temp_from_milli "${raw}" 2>/dev/null || true)"
+    [[ -n "${c}" ]] || continue
     case "${type,,}" in
       x86_pkg_temp) prio=0 ;;
       k10temp|coretemp) prio=1 ;;
@@ -164,12 +187,43 @@ host_temp_env() {
       *gpu*|*nvme*|*wifi*) prio=80 ;;
       *) prio=50 ;;
     esac
-    if (( prio < best_prio )); then
-      best_prio="${prio}"
-      best_c="${c}"
-      best_src="${type:-thermal}"
-    fi
+    _host_temp_consider "${prio}" "${c}" "${type:-thermal}"
   done
+
+  # hwmon: típico en BMAX/soyo (AMD k10temp / Intel coretemp) cuando no hay
+  # thermal_zone útil visible al wrapper.
+  shopt -s nullglob
+  for hw in /sys/class/hwmon/hwmon*; do
+    [[ -d "${hw}" ]] || continue
+    chip="$(tr -d '\n' <"${hw}/name" 2>/dev/null || true)"
+    [[ -n "${chip}" ]] || chip="hwmon"
+    for input_file in "${hw}"/temp*_input; do
+      [[ -r "${input_file}" ]] || continue
+      label_file="${input_file%_input}_label"
+      label=""
+      if [[ -r "${label_file}" ]]; then
+        label="$(tr -d '\n' <"${label_file}" 2>/dev/null || true)"
+      fi
+      raw="$(tr -d '\n' <"${input_file}" 2>/dev/null || true)"
+      c="$(_host_temp_from_milli "${raw}" 2>/dev/null || true)"
+      [[ -n "${c}" ]] || continue
+      src="${chip}"
+      [[ -n "${label}" ]] && src="${chip}:${label}"
+      case "${label,,}:${chip,,}" in
+        package*|*:x86_pkg_temp|tctl:*|tdie:*) prio=0 ;;
+        *:k10temp|*:coretemp) prio=1 ;;
+        core*) prio=15 ;;
+        *gpu*|*nvme*|*wifi*) prio=80 ;;
+        *) prio=20 ;;
+      esac
+      case "${chip,,}" in
+        *gpu*|*nvme*|*wifi*) prio=80 ;;
+      esac
+      _host_temp_consider "${prio}" "${c}" "${src}"
+    done
+  done
+  shopt -u nullglob
+
   if [[ -n "${best_c}" ]]; then
     HOST_STATS_TEMP_C="${best_c}"
     HOST_STATS_TEMP_SOURCE="${best_src}"
