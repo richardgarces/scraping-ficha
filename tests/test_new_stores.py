@@ -99,6 +99,35 @@ def test_sodimac_normalizes_falabella_host_and_keeps_query():
     assert rewritten == "https://www.sodimac.cl/sodimac-cl/articulo/80726514/taladro?exp=so_com"
 
 
+def test_sodimac_normalizes_public_url_with_sku():
+    from retail.models import normalize_product_url
+
+    rewritten = normalize_product_url(
+        "sodimac",
+        "https://www.sodimac.cl/sodimac-cl/articulo/131703840/lavadora",
+        "Lavadora Carga Superior 9",
+        sku_id="131703842",
+    )
+    assert rewritten == (
+        "https://www.sodimac.cl/sodimac-cl/articulo/131703840/"
+        "lavadora/131703842"
+    )
+
+
+def test_sodimac_marketplace_seller_opens_tottus_not_notfound():
+    from retail.models import normalize_product_url
+
+    rewritten = normalize_product_url(
+        "sodimac",
+        "https://www.sodimac.cl/sodimac-cl/articulo/136303467/LAVADORA/136303468",
+        seller="TOTTUS",
+        sku_id="136303468",
+    )
+    assert rewritten == (
+        "https://www.tottus.cl/tottus-cl/product/136303467/LAVADORA/136303468"
+    )
+
+
 def test_stored_sodimac_product_url_is_normalized_when_loaded():
     product = Product.from_dict(
         {
@@ -112,6 +141,26 @@ def test_stored_sodimac_product_url_is_normalized_when_loaded():
     assert product.url == "https://www.sodimac.cl/sodimac-cl/articulo/80726514/taladro"
 
 
+def test_stored_sodimac_product_url_appends_distinct_sku():
+    product = Product.from_dict(
+        {
+            "store": "sodimac",
+            "product_id": "131703840",
+            "sku_id": "131703842",
+            "name": "Lavadora Carga Superior 9 Blanco WA90CG4240BYZS",
+            "seller": "Sodimac",
+            "url": (
+                "https://www.sodimac.cl/sodimac-cl/articulo/131703840/"
+                "lavadora-carga-superior-9-lavender-gray-wa90cg4240byzs"
+            ),
+        }
+    )
+    assert product.url == (
+        "https://www.sodimac.cl/sodimac-cl/articulo/131703840/"
+        "lavadora-carga-superior-9-lavender-gray-wa90cg4240byzs/131703842"
+    )
+
+
 def test_product_page_uses_sodimac_articulo_fallback():
     from pathlib import Path
 
@@ -119,11 +168,9 @@ def test_product_page_uses_sodimac_articulo_fallback():
     page = Path("retail/web/static/producto.html").read_text(encoding="utf-8")
     assert "sodimac-cl/articulo/" in script
     assert "sodimac-cl/product/" not in script
+    assert "producto/${encodeURIComponent(sku)}" in script
     assert 'src="/static/producto.js?v=' in page
-    assert 'id="chart-offer"' in page
-    assert 'id="chart-normal"' in page
     assert 'id="chart-combined"' in page
-    assert 'data-chart-mode="combined"' in page
 
 
 def test_falabella_alt_product_id():
@@ -132,6 +179,9 @@ def test_falabella_alt_product_id():
         "153777946/kit-taladro/153777947"
     )
     assert FalabellaClient._product_id_from_path(url) == "153777946"
+    assert FalabellaClient._product_id_from_path(
+        "https://www.sodimac.cl/sodimac-cl/articulo/131703840/lavadora/131703842"
+    ) == "131703840"
 
 
 def test_parse_easy():

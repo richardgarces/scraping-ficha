@@ -37,7 +37,35 @@ def _url_slug(value: str | None) -> str:
     return re.sub(r"[^a-z0-9]+", "-", text).strip("-")
 
 
-def normalize_product_url(store: str | None, url: str | None, name: str | None = None) -> str | None:
+def _sodimac_path_ids(path: str) -> tuple[str | None, str | None, str | None]:
+    """Extrae (product_id, slug, sku_id) de /articulo|product/{id}/{slug?}/{sku?}."""
+    parts = [part for part in str(path or "").split("/") if part]
+    key = next((part for part in ("articulo", "product") if part in parts), None)
+    if not key:
+        return None, None, None
+    idx = parts.index(key)
+    product_id = parts[idx + 1] if idx + 1 < len(parts) else None
+    if not product_id:
+        return None, None, None
+    rest = parts[idx + 2 :]
+    if not rest:
+        return product_id, None, None
+    # Forma pública: /articulo/{productId}/{slug}/{skuId}
+    if len(rest) >= 2 and rest[-1].isdigit():
+        return product_id, rest[0], rest[-1]
+    if len(rest) == 1 and rest[0].isdigit() and rest[0] != product_id:
+        return product_id, None, rest[0]
+    return product_id, rest[0], None
+
+
+def normalize_product_url(
+    store: str | None,
+    url: str | None,
+    name: str | None = None,
+    *,
+    sku_id: str | None = None,
+    seller: str | None = None,
+) -> str | None:
     """Corrige rutas conocidas de tiendas sin modificar URLs de otras cadenas."""
     if not url:
         return url
@@ -47,12 +75,29 @@ def normalize_product_url(store: str | None, url: str | None, name: str | None =
     path = parsed.path
     if store_id == "sodimac":
         # La API compartida de Falabella devuelve /product/, ruta que Sodimac
-        # redirige a la portada. Su ficha pública vigente usa /articulo/.
-        if parsed.netloc.lower() in {"falabella.com", "www.falabella.com"}:
-            parsed = parsed._replace(netloc="www.sodimac.cl")
+        # redirige a la portada. Su ficha pública vigente usa /articulo/{id}/{slug}/{sku}.
+        if parsed.netloc.lower() in {"falabella.com", "www.falabella.com", "tottus.cl", "www.tottus.cl"}:
             path = path.replace("/falabella-cl/", "/sodimac-cl/", 1)
+            path = path.replace("/tottus-cl/", "/sodimac-cl/", 1)
         path = path.replace("/sodimac-cl/product/", "/sodimac-cl/articulo/", 1)
-        return urlunparse(parsed._replace(scheme="https", netloc="www.sodimac.cl", path=path))
+        product_id, slug, sku_from_path = _sodimac_path_ids(path)
+        sku = str(sku_id or sku_from_path or "").strip() or None
+        if sku and product_id and sku == product_id:
+            sku = sku_from_path if sku_from_path and sku_from_path != product_id else None
+        slug = slug or _url_slug(name) or "producto"
+        seller_key = re.sub(r"[^A-Z0-9]+", "", str(seller or "").upper())
+        # Listados marketplace (p. ej. Tottus) aparecen en la API con pid SODIMAC
+        # pero sodimac.cl responde notFound: abrir la vitrina real del seller.
+        if product_id and seller_key.startswith("TOTTUS"):
+            tail = f"{product_id}/{slug}"
+            if sku and sku != product_id:
+                tail = f"{tail}/{sku}"
+            return f"https://www.tottus.cl/tottus-cl/product/{tail}"
+        if product_id:
+            path = f"/sodimac-cl/articulo/{product_id}/{slug}"
+            if sku and sku != product_id:
+                path = f"{path}/{sku}"
+        return urlunparse(parsed._replace(scheme="https", netloc="www.sodimac.cl", path=path, params="", fragment=""))
     if store_id == "cruzverde":
         match = re.fullmatch(r"/(?:product|producto)/([A-Z]+_)?(\d+)/?", path, re.I)
         slug = _url_slug(name)
@@ -290,7 +335,13 @@ class Product:
                 self.stock = sum(variant_stocks)
         self.low_stock = bool(self.low_stock or detects_low_stock(self.name, self.description, self.availability))
 
-        self.url = normalize_product_url(self.store, self.url, self.name)
+        self.url = normalize_product_url(
+            self.store,
+            self.url,
+            self.name,
+            sku_id=self.sku_id,
+            seller=self.seller,
+        )
         candidates = [normalize_image_url(self.store, url) for url in all_image_urls(self.image_url)]
         candidates = [url for url in candidates if url]
         for url in all_image_urls(self.image_urls):

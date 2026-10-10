@@ -1,9 +1,14 @@
+from typing import Any
 from urllib.parse import parse_qs, unquote, urlparse
 
 from retail.base import StoreClient
+from retail.http import HttpError
 from retail.models import Target, normalize_product_url
 from retail.registry import StoreSpec, register
 from retail.sources.falabella import FalabellaClient, SORT_MAP
+
+# Sites de la API Falabella donde la ficha pública vive en sodimac.cl.
+_SODIMAC_PUBLIC_SITES = frozenset({"SODIMAC", "SO_COM"})
 
 
 def parse_sodimac_target(value: str) -> Target:
@@ -66,6 +71,19 @@ class SodimacStore(FalabellaClient, StoreClient):
             "https://www.sodimac.cl/sodimac-cl",
         )
         return normalize_product_url(self.store_id, rewritten) or rewritten
+
+    def product(self, product_id: str) -> dict[str, Any]:
+        payload = super().product(product_id)
+        data = payload.get("data") if isinstance(payload.get("data"), dict) else payload
+        if not isinstance(data, dict):
+            return payload
+        sites = {str(site).upper() for site in (data.get("productSites") or []) if site}
+        if sites and not sites & _SODIMAC_PUBLIC_SITES:
+            raise HttpError(
+                f"Producto {product_id} no publicado en Sodimac "
+                f"(sites={', '.join(sorted(sites))})"
+            )
+        return payload
 
     def parse_target(self, value: str) -> Target:
         return parse_sodimac_target(value)

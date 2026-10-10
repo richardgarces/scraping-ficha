@@ -21,9 +21,13 @@ def normalize_host(url: str) -> str:
     return url
 
 
-def product_url(product_id: str, slug: str | None = None) -> str:
+def product_url(product_id: str, slug: str | None = None, sku_id: str | None = None) -> str:
     slug = slug or "producto"
-    return f"https://www.falabella.com/falabella-cl/product/{product_id}/{slug}"
+    url = f"https://www.falabella.com/falabella-cl/product/{product_id}/{slug}"
+    sku = str(sku_id or "").strip()
+    if sku and sku != str(product_id):
+        return f"{url}/{sku}"
+    return url
 
 
 def parse_target(value: str) -> Target:

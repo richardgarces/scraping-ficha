@@ -145,6 +145,7 @@ def product_detail_to_product(
     image = first_image_url(gallery)
 
     product_id = str(data.get("id") or variant.get("id") or "")
+    sku_id = str(variant.get("id") or product_id)
     slug = data.get("slug")
     specs = _spec_map((data.get("attributes") or {}).get("specifications"))
     if not specs:
@@ -152,10 +153,13 @@ def product_detail_to_product(
 
     return Product(
         product_id=product_id,
-        sku_id=str(variant.get("id") or product_id),
+        sku_id=sku_id,
         name=str(data.get("name") or variant.get("name") or "").strip(),
         brand=data.get("brandName") or None,
-        url=_maybe_rewrite(product_url(product_id, slug) if product_id else None, rewrite_url),
+        url=_maybe_rewrite(
+            product_url(product_id, slug, sku_id=sku_id) if product_id else None,
+            rewrite_url,
+        ),
         seller=seller,
         seller_id=seller_id,
         price_cmr=prices.get("cmrPrice"),

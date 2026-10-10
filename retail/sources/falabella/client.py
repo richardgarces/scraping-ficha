@@ -134,10 +134,12 @@ class FalabellaClient:
     @staticmethod
     def _product_id_from_path(url: str) -> str | None:
         parts = [p for p in url.split("/") if p]
-        if "product" in parts:
-            idx = parts.index("product")
-            if idx + 1 < len(parts):
-                return parts[idx + 1]
+        key = next((part for part in ("product", "articulo") if part in parts), None)
+        if not key:
+            return None
+        idx = parts.index(key)
+        if idx + 1 < len(parts):
+            return parts[idx + 1]
         return None
 
     def scrape(

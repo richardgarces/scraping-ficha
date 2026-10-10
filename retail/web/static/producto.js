@@ -99,7 +99,14 @@ function offerUrl(item) {
   if (!id) return "";
   if (item.store === "lider") return `https://www.lider.cl/ip/${encodeURIComponent(id)}`;
   if (item.store === "falabella") return `https://www.falabella.com/falabella-cl/product/${encodeURIComponent(id)}`;
-  if (item.store === "sodimac") return `https://www.sodimac.cl/sodimac-cl/articulo/${encodeURIComponent(id)}`;
+  if (item.store === "sodimac") {
+    // Forma pública: /articulo/{productId}/{slug}/{skuId}
+    const sku = String(item.sku_id || "").trim();
+    if (sku && sku !== String(id)) {
+      return `https://www.sodimac.cl/sodimac-cl/articulo/${encodeURIComponent(id)}/producto/${encodeURIComponent(sku)}`;
+    }
+    return `https://www.sodimac.cl/sodimac-cl/articulo/${encodeURIComponent(id)}`;
+  }
   if (item.store === "tottus") return `https://www.tottus.cl/tottus-cl/product/${encodeURIComponent(id)}`;
   return "";
 }
