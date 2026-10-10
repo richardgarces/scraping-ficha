@@ -151,6 +151,10 @@ Un push a `main` despliega solo. El workflow `.github/workflows/deploy-bmax.yml`
 
 El job sincroniza el checkout a `~/precios` con `scripts/sync-to-precios.sh` (conserva `.env` y la programación remota) y ejecuta `EDGE=platform scripts/deploy-prod.sh`.
 
+## Monitoreo (Prometheus)
+
+Host metrics de BMAX + workers soyo / Orange Pi: ver [MONITORING.md](./MONITORING.md). Prometheus vive en `~/platform-kit` (`platform-prometheus`); no forma parte del compose de `precios-web`.
+
 ## Qué no hacer
 
 - No sustituir el `Caddyfile` de platform-caddy por el de esta app (borraría rent y el resto).

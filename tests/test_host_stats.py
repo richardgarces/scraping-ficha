@@ -414,7 +414,7 @@ def test_hosts_static_assets():
     temp_pos = js.find('metricBlock("temp"')
     disk_pos = js.find('metricBlock("disk"')
     assert 0 <= ram_pos < temp_pos < disk_pos, "orden esperado: RAM → Temp → Disco"
-    assert "hosts.js?v=9-temp-gauge" in html
+    assert "hosts.js?v=10-ram-charts" in html
     assert "styles.css?v=104-hosts-temp" in html
     assert "hosts-card" in js
     assert "hosts-disk-free" in js
@@ -435,6 +435,10 @@ def test_hosts_static_assets():
     assert "multiHostChart" in js
     assert "renderTrends" in js
     assert "hostSparklines" in js
+    assert 'historySeries(history, "ram")' in js
+    assert 'hosts-spark-label">RAM</span>' in js
+    assert 'title: "RAM"' in js
+    assert "temperatura, CPU y RAM" in js
     assert "historySeries" in js
     assert "openHostDetail" in js
     assert "FACT_ROWS" in js

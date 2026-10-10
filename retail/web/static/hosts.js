@@ -237,11 +237,14 @@
     const history = Array.isArray(host?.history) ? host.history : [];
     const temps = historySeries(history, "temp");
     const cpus = historySeries(history, "cpu");
-    if (temps.length < 2 && cpus.length < 2) return "";
+    const rams = historySeries(history, "ram");
+    if (temps.length < 2 && cpus.length < 2 && rams.length < 2) return "";
     const range = historyTimeRangeLabel(history);
     const color = HOST_CHART_COLORS[host.id] || "var(--accent)";
     const warn = Number(thresholds?.temp_warn);
     const tempGuide = Number.isFinite(warn) ? warn : 70;
+    const ramWarn = Number(thresholds?.ram_warn);
+    const ramGuide = Number.isFinite(ramWarn) ? ramWarn : null;
     const bits = [];
     if (temps.length >= 2) {
       bits.push(
@@ -262,6 +265,18 @@
         + sparklineSvg(cpus, {
           stroke: color,
           ariaLabel: `CPU ${host.label || host.id}`,
+        })
+        + `</div>`
+      );
+    }
+    if (rams.length >= 2) {
+      bits.push(
+        `<div class="hosts-spark-block">`
+        + `<span class="hosts-spark-label">RAM</span>`
+        + sparklineSvg(rams, {
+          stroke: color,
+          guide: ramGuide,
+          ariaLabel: `RAM ${host.label || host.id}`,
         })
         + `</div>`
       );
@@ -398,7 +413,14 @@
       yMin: 0,
       yMax: 100,
     });
-    if (!tempChart && !cpuChart) {
+    const ramChart = multiHostChart(hosts, "ram", {
+      title: "RAM",
+      unit: "%",
+      guide: thresholds.ram_warn ?? null,
+      yMin: 0,
+      yMax: 100,
+    });
+    if (!tempChart && !cpuChart && !ramChart) {
       const hasLiveTemp = hosts.some((h) => {
         const c = Number(h?.temperature?.celsius);
         return Number.isFinite(c);
@@ -408,7 +430,7 @@
         box.hidden = false;
         box.innerHTML = `<div class="hosts-trends-head">`
           + `<h3>Tendencias</h3>`
-          + `<p class="muted">Acumulando historial (≥2 muestras) para graficar temperatura y CPU. El anillo Temp de cada tarjeta ya muestra el valor actual.</p>`
+          + `<p class="muted">Acumulando historial (≥2 muestras) para graficar temperatura, CPU y RAM. El anillo Temp de cada tarjeta ya muestra el valor actual.</p>`
           + `</div>`;
         return;
       }
@@ -421,7 +443,7 @@
       + `<h3>Tendencias</h3>`
       + `<p class="muted">Historial publicado por cada host (retención acotada).</p>`
       + `</div>`
-      + `<div class="hosts-trends-grid">${tempChart}${cpuChart}</div>`;
+      + `<div class="hosts-trends-grid">${tempChart}${cpuChart}${ramChart}</div>`;
   }
 
   /** Comandos seguros sugeridos según código de alerta (copiar → pegar en el host). */

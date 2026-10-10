@@ -1,4 +1,4 @@
-"""Métricas de host (CPU / RAM / disco / temp) → Mongo `cyber_day_host_stats:{ip}`.
+"""Métricas de host (CPU / RAM / disco / temp / potencia) → Mongo `cyber_day_host_stats:{ip}`.
 
 Usado por workers Cyber (Orange Pi) y reporters ligeros en BMAX/soyo
 (`python -m retail.host_stats --once` / `--loop`).
@@ -34,6 +34,13 @@ ALERT_TEMP_WARN = max(40, int(os.environ.get("HOST_STATS_TEMP_WARN") or "70"))
 ALERT_TEMP_HOT = max(ALERT_TEMP_WARN, int(os.environ.get("HOST_STATS_TEMP_HOT") or "85"))
 # Docker reclaimable ≥ este umbral (GiB) → alerta informativa.
 ALERT_DOCKER_RECLAIM_GIB = max(1.0, float(os.environ.get("HOST_STATS_DOCKER_RECLAIM_GIB") or "20"))
+# Errores que disparan Telegram/email admin (no warn informativos ni docker reclaim).
+HOST_NOTIFY_ALERT_CODES = frozenset({"stale", "no_data", "disk_hot", "temp_hot"})
+HOST_ALERT_NOTIFY_STATE_KEY = "host_stats_alert_notify_state"
+HOST_ALERT_NOTIFY_USER = "host_ops"
+HOST_ALERT_NOTIFY_COOLDOWN_DAYS = max(
+    1, int(os.environ.get("HOST_STATS_ALERT_COOLDOWN_DAYS") or "1")
+)
 # IP fija del host (containers Docker suelen ver otra IP).
 HOST_IP = (
     (os.environ.get("HOST_STATS_HOST_IP") or "").strip()
@@ -760,6 +767,236 @@ def host_alerts(host: dict[str, Any]) -> list[dict[str, str]]:
     return alerts
 
 
+def _alert_metric_price(code: str, host: dict[str, Any]) -> int:
+    """Precio sintético para claim: menor = peor → reenvía si empeora dentro del cooldown."""
+    if code in ("stale", "no_data"):
+        return 100
+    if code == "disk_hot":
+        try:
+            pct = float((host.get("disk") or {}).get("percent") or 90)
+        except (TypeError, ValueError):
+            pct = 90.0
+        return max(1, int(round(10_000 - pct * 100)))
+    if code == "temp_hot":
+        try:
+            temp = float((host.get("temperature") or {}).get("celsius") or 85)
+        except (TypeError, ValueError):
+            temp = 85.0
+        return max(1, int(round(10_000 - temp * 100)))
+    return 1000
+
+
+def _alert_severity_score(code: str, host: dict[str, Any]) -> int:
+    """Mayor = peor (para detectar empeoramiento frente al estado previo)."""
+    if code in ("stale", "no_data"):
+        return 1
+    if code == "disk_hot":
+        try:
+            return max(1, int(round(float((host.get("disk") or {}).get("percent") or 90))))
+        except (TypeError, ValueError):
+            return 90
+    if code == "temp_hot":
+        try:
+            return max(1, int(round(float((host.get("temperature") or {}).get("celsius") or 85))))
+        except (TypeError, ValueError):
+            return 85
+    return 0
+
+
+def _format_host_alert_text(host: dict[str, Any], alert: dict[str, Any]) -> str:
+    label = str(host.get("label") or host.get("id") or "host")
+    ip = str(host.get("ip") or "").strip()
+    msg = str(alert.get("message") or alert.get("code") or "alerta")
+    code = str(alert.get("code") or "")
+    level = str(alert.get("level") or "warn").upper()
+    where = f"{label} ({ip})" if ip else label
+    lines = [
+        f"Hosts · {level} · {where}",
+        msg,
+    ]
+    if code:
+        lines.append(f"código: {code}")
+    role = str(host.get("role") or "").strip()
+    if role:
+        lines.append(role)
+    return "\n".join(lines)
+
+
+def _load_notify_state(repo: Any) -> dict[str, Any]:
+    empty = {"active": {}, "notified": {}, "generations": {}}
+    if not hasattr(repo, "get_app_setting"):
+        return empty
+    try:
+        raw = repo.get_app_setting(HOST_ALERT_NOTIFY_STATE_KEY) or {}
+    except Exception:
+        return empty
+    if not isinstance(raw, dict):
+        return empty
+    active = raw.get("active") if isinstance(raw.get("active"), dict) else {}
+    notified = raw.get("notified") if isinstance(raw.get("notified"), dict) else {}
+    generations = raw.get("generations") if isinstance(raw.get("generations"), dict) else {}
+    return {
+        "active": {str(k): int(v) for k, v in active.items() if str(k)},
+        "notified": {str(k): int(v) for k, v in notified.items() if str(k)},
+        "generations": {str(k): int(v) for k, v in generations.items() if str(k)},
+    }
+
+
+def _save_notify_state(repo: Any, state: dict[str, Any]) -> None:
+    if not hasattr(repo, "save_app_setting"):
+        return
+    try:
+        repo.save_app_setting(
+            HOST_ALERT_NOTIFY_STATE_KEY,
+            {
+                "active": state.get("active") or {},
+                "notified": state.get("notified") or {},
+                "generations": state.get("generations") or {},
+                "updated_at": _iso(_now()),
+            },
+        )
+    except Exception:
+        pass
+
+
+def _send_host_alert_channels(text: str, *, entity_key: str, price: int, repo: Any) -> int:
+    """Telegram chat admin (+ email ALERT_EMAIL_TO). Solo ops, no broadcast a usuarios."""
+    delivered = 0
+    try:
+        from retail.batch.alerts import _secret, _telegram_text, send_email
+    except Exception:
+        return 0
+
+    # Telegram: TELEGRAM_CHAT_ID / canales.local (destination_chats vía _telegram_text).
+    claimed_tg = True
+    if hasattr(repo, "claim_user_notification_send"):
+        claimed_tg = repo.claim_user_notification_send(
+            HOST_ALERT_NOTIFY_USER,
+            "telegram",
+            entity_key,
+            price,
+            cooldown_days=HOST_ALERT_NOTIFY_COOLDOWN_DAYS,
+        )
+    if claimed_tg:
+        try:
+            if _telegram_text(text):
+                delivered += 1
+            elif hasattr(repo, "release_user_notification_send"):
+                repo.release_user_notification_send(
+                    HOST_ALERT_NOTIFY_USER, "telegram", entity_key, price
+                )
+        except Exception as exc:
+            print(f"host-stats: telegram alerta: {exc}", flush=True)
+            if hasattr(repo, "release_user_notification_send"):
+                try:
+                    repo.release_user_notification_send(
+                        HOST_ALERT_NOTIFY_USER, "telegram", entity_key, price
+                    )
+                except Exception:
+                    pass
+
+    to_addr = _secret("ALERT_EMAIL_TO", "alert_email_to").strip()
+    if to_addr and _secret("SMTP_HOST", "smtp_host").strip():
+        claimed_em = True
+        if hasattr(repo, "claim_user_notification_send"):
+            claimed_em = repo.claim_user_notification_send(
+                HOST_ALERT_NOTIFY_USER,
+                "email",
+                entity_key,
+                price,
+                cooldown_days=HOST_ALERT_NOTIFY_COOLDOWN_DAYS,
+            )
+        if claimed_em:
+            subject = text.split("\n", 1)[0][:120] or "Hosts · alerta"
+            try:
+                if send_email(to_addr, subject, text):
+                    delivered += 1
+                elif hasattr(repo, "release_user_notification_send"):
+                    repo.release_user_notification_send(
+                        HOST_ALERT_NOTIFY_USER, "email", entity_key, price
+                    )
+            except Exception as exc:
+                print(f"host-stats: email alerta: {exc}", flush=True)
+                if hasattr(repo, "release_user_notification_send"):
+                    try:
+                        repo.release_user_notification_send(
+                            HOST_ALERT_NOTIFY_USER, "email", entity_key, price
+                        )
+                    except Exception:
+                        pass
+    return delivered
+
+
+def notify_host_alerts(repo: Any, *, payload: dict[str, Any] | None = None) -> int:
+    """Notifica admins si hay alertas nuevas/peores (stale, disco crítico, temp hot).
+
+    Canales: Telegram admin (TELEGRAM_CHAT_ID / canales) y opcionalmente
+    ALERT_EMAIL_TO. No envía a usuarios finales.
+
+    Dedupe: estado en app_settings (generación por episodio) +
+    claim_user_notification_send por host+código (cooldown
+    HOST_STATS_ALERT_COOLDOWN_DAYS, default 1 día; reenvía si empeora).
+    """
+    data = payload if isinstance(payload, dict) else admin_hosts_payload(repo)
+    state = _load_notify_state(repo)
+    prev_active: dict[str, int] = dict(state.get("active") or {})
+    notified: dict[str, int] = dict(state.get("notified") or {})
+    generations: dict[str, int] = dict(state.get("generations") or {})
+
+    current_active: dict[str, int] = {}
+    pending: list[tuple[dict[str, Any], dict[str, Any], str, int]] = []
+
+    for host in data.get("hosts") or []:
+        if not isinstance(host, dict):
+            continue
+        host_id = str(host.get("id") or "").strip()
+        if not host_id:
+            continue
+        for alert in host.get("alerts") or []:
+            if not isinstance(alert, dict):
+                continue
+            code = str(alert.get("code") or "").strip()
+            if code not in HOST_NOTIFY_ALERT_CODES:
+                continue
+            key = f"{host_id}:{code}"
+            score = _alert_severity_score(code, host)
+            current_active[key] = score
+            last_notified = notified.get(key)
+            # Nuevo episodio, o empeoró respecto a lo ya avisado.
+            if last_notified is None or score > last_notified:
+                pending.append((host, alert, key, score))
+
+    # Alertas que desaparecieron: subir generación para poder reavisar si vuelven.
+    for key in list(prev_active):
+        if key not in current_active:
+            generations[key] = int(generations.get(key) or 0) + 1
+            notified.pop(key, None)
+
+    delivered = 0
+    for host, alert, key, score in pending:
+        code = str(alert.get("code") or "")
+        gen = int(generations.get(key) or 0)
+        entity_key = f"host:{key}:g{gen}"
+        price = _alert_metric_price(code, host)
+        text = _format_host_alert_text(host, alert)
+        sent = _send_host_alert_channels(
+            text, entity_key=entity_key, price=price, repo=repo
+        )
+        delivered += sent
+        if sent:
+            notified[key] = score
+
+    _save_notify_state(
+        repo,
+        {
+            "active": current_active,
+            "notified": notified,
+            "generations": generations,
+        },
+    )
+    return delivered
+
+
 def _host_stats_key(stats: dict[str, Any]) -> str:
     """Clave estable: IP del host (varios contenedores Docker → un solo panel)."""
     ip = str(stats.get("ip") or HOST_IP or CYBER_DAY_HOST_IP or "").strip()
@@ -867,6 +1104,11 @@ def report_host_stats(repo: Any, *, force: bool = False) -> dict[str, Any] | Non
     stats["history"] = merge_host_history(previous, stats)
     if hasattr(repo, "save_app_setting"):
         repo.save_app_setting(key, stats)
+    # Tras guardar: revisar los 3 hosts (stale de otros, disco/temp de este).
+    try:
+        notify_host_alerts(repo)
+    except Exception as exc:
+        print(f"host-stats: notify alerts: {exc}", flush=True)
     return stats
 
 
@@ -1049,6 +1291,11 @@ def main() -> None:
     parser.add_argument("--once", action="store_true", help="Una sola publicación (default)")
     parser.add_argument("--loop", action="store_true", help="Publicar en bucle")
     parser.add_argument(
+        "--check-alerts",
+        action="store_true",
+        help="Solo evaluar alertas y notificar admins (sin reportar métricas)",
+    )
+    parser.add_argument(
         "--interval",
         type=float,
         default=HOST_STATS_REPORT_SECONDS,
@@ -1059,6 +1306,10 @@ def main() -> None:
 
     repo = ProductRepository()
     try:
+        if args.check_alerts:
+            sent = notify_host_alerts(repo)
+            print(f"host-stats: check-alerts enviados={sent}", flush=True)
+            return
         if args.loop:
             interval = max(5.0, float(args.interval))
             print(f"host-stats: loop cada {interval}s → Mongo", flush=True)

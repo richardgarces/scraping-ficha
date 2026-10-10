@@ -1,0 +1,26 @@
+# Host metrics for Prometheus (BMAX platform-prometheus).
+# Run on soyo and Orange Pi (LAN). BMAX already has platform-node-exporter.
+#
+#   docker compose -f docker-compose.node-exporter.yml up -d
+#   curl -sS http://127.0.0.1:9100/metrics | head
+#
+# Bind only LAN IP if preferred:
+#   NODE_EXPORTER_BIND=192.168.1.197 docker compose -f docker-compose.node-exporter.yml up -d
+
+services:
+  node-exporter:
+    image: prom/node-exporter:v1.8.2
+    container_name: precios-node-exporter
+    restart: unless-stopped
+    command:
+      - --path.rootfs=/host
+      - --path.procfs=/host/proc
+      - --path.sysfs=/host/sys
+      - --collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)
+      - --collector.hwmon
+      - --collector.thermal_zone
+    pid: host
+    ports:
+      - "${NODE_EXPORTER_BIND:-0.0.0.0}:9100:9100"
+    volumes:
+      - /:/host:ro,rslave
