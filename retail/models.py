@@ -8,13 +8,12 @@ import unicodedata
 
 from retail.commercial import (
     CARD_NAMES,
-    detect_condition,
     detects_low_stock,
     extract_financing,
     extract_shipping,
     landed_price,
-    normalize_condition,
     normalize_variants,
+    resolve_condition,
 )
 
 
@@ -302,20 +301,17 @@ class Product:
         if self.price_card and not self.payment_card_name:
             self.payment_card_name = CARD_NAMES.get(str(self.store or "").lower())
 
-        explicit_condition = normalize_condition(self.condition)
-        if explicit_condition == "unknown":
-            inferred, confidence, source = detect_condition(
-                self.name,
-                self.description,
-                " ".join(f"{key}: {value}" for key, value in (self.specifications or {}).items()),
-            )
-            self.condition = inferred
-            self.condition_confidence = self.condition_confidence or confidence
-            self.condition_source = self.condition_source or source
-        else:
-            self.condition = explicit_condition
-            self.condition_confidence = self.condition_confidence or 1.0
-            self.condition_source = self.condition_source or "store"
+        # Texto con uso explícito (reacondicionado, etc.) gana sobre "new" de
+        # tienda: si no, se mezclan precios de nuevo y usado en la comparación.
+        resolved, confidence, source = resolve_condition(
+            self.condition,
+            self.name,
+            self.description,
+            " ".join(f"{key}: {value}" for key, value in (self.specifications or {}).items()),
+        )
+        self.condition = resolved
+        self.condition_confidence = self.condition_confidence or confidence
+        self.condition_source = self.condition_source or source
 
         shipping = extract_shipping(self.description)
         for key, value in shipping.items():

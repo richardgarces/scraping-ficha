@@ -12,17 +12,24 @@ from typing import Any
 
 CONDITIONS = {"new", "refurbished", "open_box", "display", "used", "unknown"}
 
-_CONDITION_RULES = (
-    ("refurbished", (
-        "reacondicionado", "refurbished", "renewed", "grado a", "grado b",
-        "detalles esteticos", "saldo de tienda", "producto saldo",
+# Raíces / frases: el match admite género y plural vía regex (reacondicionada,
+# usados, etc.). Un título con uso explícito nunca debe quedar como "new".
+_CONDITION_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("refurbished", re.compile(
+        r"\b(?:reacondicionad[oa]s?|refurbished|renewed|renew|"
+        r"grado\s*[ab]\b|detalles?\s+esteticos?|saldo\s+de\s+tienda|"
+        r"producto\s+saldo|certifi(?:cado|ed)\s+(?:refurbished|reacondicionad[oa]))\b"
     )),
-    ("open_box", (
-        "open box", "caja abierta", "devolucion de cliente", "embalaje abierto",
-        "empaque danado", "empaque abierto",
+    ("open_box", re.compile(
+        r"\b(?:open\s*box|caja\s+abierta|devolucion(?:es)?\s+de\s+cliente|"
+        r"embalaje\s+abierto|empaque\s+(?:danado|abierto))\b"
     )),
-    ("display", ("exhibicion", "producto de muestra", "equipo demo", "vitrina")),
-    ("used", ("usado", "segunda mano", "pre owned", "pre-owned")),
+    ("display", re.compile(
+        r"\b(?:exhibicion(?:es)?|producto\s+de\s+muestra|equipo\s+demo|vitrina)\b"
+    )),
+    ("used", re.compile(
+        r"\b(?:usad[oa]s?|segunda\s+mano|pre[\s-]?owned)\b"
+    )),
 )
 
 CARD_NAMES = {
@@ -70,12 +77,31 @@ def normalize_condition(value: Any) -> str:
 
 def detect_condition(*values: Any) -> tuple[str, float, str | None]:
     text = fold(" ".join(str(value or "") for value in values))
-    for condition, words in _CONDITION_RULES:
-        if any(word in text for word in words):
+    for condition, pattern in _CONDITION_PATTERNS:
+        if pattern.search(text):
             return condition, 0.98, "rule"
     # En retail, "nuevo" solo se acepta cuando está escrito expresamente.
-    if re.search(r"\b(?:producto|equipo|estado)?\s*nuevo\b", text):
+    if re.search(r"\b(?:producto|equipo|estado)?\s*nuev[oa]s?\b", text):
         return "new", 0.9, "rule"
+    return "unknown", 0.0, None
+
+
+def resolve_condition(value: Any, *text_sources: Any) -> tuple[str, float, str | None]:
+    """Condición efectiva para comparar precios.
+
+    Si el título/descripción declara uso (reacondicionado, caja abierta, etc.),
+    eso gana sobre un ``new`` de catálogo: las tiendas suelen etiquetar todo
+    como nuevo y el precio de un reacondicionado distorsiona la comparación.
+    """
+    explicit = normalize_condition(value)
+    if text_sources:
+        inferred, confidence, source = detect_condition(*text_sources)
+        if inferred not in {"unknown", "new"}:
+            return inferred, confidence, source or "rule"
+        if explicit == "unknown" and inferred == "new":
+            return inferred, confidence, source or "rule"
+    if explicit != "unknown":
+        return explicit, 1.0, "store"
     return "unknown", 0.0, None
 
 

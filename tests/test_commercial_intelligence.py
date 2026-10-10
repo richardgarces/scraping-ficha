@@ -31,6 +31,35 @@ def test_condition_is_detected_and_prevents_new_refurbished_collision():
     assert len(compare_products([new, refurbished])) == 2
 
 
+def test_store_new_label_cannot_hide_refurbished_in_title():
+    """Las tiendas marcan 'new' aunque el título diga reacondicionado."""
+    new = product(store="falabella", product_id="new", condition="new")
+    mislabeled = product(
+        store="paris",
+        product_id="ref",
+        name="Samsung Galaxy S25 256GB Reacondicionada",
+        condition="new",
+        sku_id="7802900001308",
+    )
+    alone = product(
+        store="lider",
+        product_id="ean-new",
+        name="Samsung Galaxy S25 256GB",
+        condition="new",
+        sku_id="7802900001308",
+    )
+    assert mislabeled.condition == "refurbished"
+    groups = compare_products([new, mislabeled])
+    assert len(groups) == 2
+    assert all(not group.get("comparable") or group["offer_count"] == 1 for group in groups)
+    ean_groups = compare_products([alone, mislabeled])
+    assert len(ean_groups) == 2
+    assert {group["compare_code"] for group in ean_groups} == {
+        "ean:07802900001308",
+        "ean:07802900001308:refurbished",
+    }
+
+
 def test_ram_variants_are_not_merged():
     first = product(store="falabella", product_id="8", name="Samsung Galaxy S25 256GB 8GB RAM")
     second = product(store="paris", product_id="12", name="Samsung Galaxy S25 256GB RAM 12GB")

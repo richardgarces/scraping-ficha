@@ -42,8 +42,10 @@ pre-Cyber) y un puntaje que también considera identidad, stock e historial.
 - Se reconocen expresiones como reacondicionado, grado A/B, caja abierta,
   devolución de cliente, exhibición y detalles estéticos.
 - Un producto con uso explícito nunca comparte comparación ni mínimo histórico
-  con uno nuevo. `unknown` se mantiene compatible con nuevo hasta contar con un
-  dato explícito, para no vaciar el catálogo histórico existente.
+  con uno nuevo. Si el título dice reacondicionado/caja abierta/usado y la
+  tienda etiquetó `new`, gana el texto: no se comparan precios de nuevo vs
+  usado. `unknown` se mantiene compatible con nuevo hasta contar con un dato
+  explícito, para no vaciar el catálogo histórico existente.
 
 ## 3. Despacho y costo total
 

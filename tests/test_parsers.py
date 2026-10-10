@@ -40,6 +40,43 @@ def test_listing_item_prices():
     assert product.is_sponsored is True
 
 
+def test_falabella_event_price_is_all_payment_not_crossed_normal():
+    """Campañas publican eventPrice + normalPrice tachado, sin internetPrice."""
+    product = product_detail_to_product(
+        {
+            "data": {
+                "id": "157189413",
+                "name": "Samsung Galaxy S26 FE 256 GB Blueberry",
+                "brandName": "SAMSUNG",
+                "slug": "samsung-galaxy-s26-fe",
+                "variants": [
+                    {
+                        "id": "157189414",
+                        "prices": [
+                            {
+                                "type": "eventPrice",
+                                "crossed": False,
+                                "price": ["769.990"],
+                            },
+                            {
+                                "type": "normalPrice",
+                                "crossed": True,
+                                "price": ["919.990"],
+                            },
+                        ],
+                        "offerings": [{"sellerName": "samsung", "sellerId": "S"}],
+                    }
+                ],
+            }
+        }
+    )
+    assert product.price == 769990
+    assert product.price_internet == 769990
+    assert product.price_all_payment == 769990
+    assert product.price_normal == 919990
+    assert product.discount_percent == 16
+
+
 def test_first_image_skips_empty_entries_and_accepts_nested_objects():
     images = [None, {}, {"url": ""}, {"image": {"src": "https://img.example/primera.jpg"}}, "https://img.example/segunda.jpg"]
     assert first_image_url(images) == "https://img.example/primera.jpg"

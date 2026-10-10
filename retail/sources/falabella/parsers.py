@@ -18,6 +18,29 @@ def _prices_by_type(prices: Any) -> dict[str, int | None]:
     return mapped
 
 
+def _price_fields(prices: Any) -> dict[str, int | None]:
+    """Separa tarjeta, todo medio y lista.
+
+    Falabella publica campañas como ``eventPrice`` (no tachado) junto a
+    ``normalPrice`` tachado, a menudo **sin** ``internetPrice``. Si solo
+    miramos internet/normal, el comparable queda en el precio rayado y la
+    ficha muestra p. ej. 919.990 en vez de 769.990.
+    """
+    by_type = _prices_by_type(prices)
+    card = by_type.get("cmrPrice")
+    # eventPrice es el precio de campaña para todo medio; internetPrice el
+    # habitual sin CMR. Preferimos el evento cuando ambos existen.
+    all_payment = by_type.get("eventPrice") or by_type.get("internetPrice")
+    normal = by_type.get("normalPrice")
+    current = card or all_payment or normal
+    return {
+        "price_cmr": card,
+        "price_internet": all_payment,
+        "price_normal": normal,
+        "price": current,
+    }
+
+
 def _discount_percent(badge: Any, normal: int | None, current: int | None) -> int | None:
     if isinstance(badge, dict):
         parsed = parse_int(badge.get("label"))
@@ -54,9 +77,10 @@ def listing_item_to_product(
     store: str = "falabella",
     rewrite_url=None,
 ) -> Product:
-    prices = _prices_by_type(item.get("prices"))
-    current = prices.get("cmrPrice") or prices.get("internetPrice") or prices.get("normalPrice")
-    normal = prices.get("normalPrice")
+    prices = _price_fields(item.get("prices"))
+    current = prices["price"]
+    normal = prices["price_normal"]
+    comparable = prices["price_internet"] or current
     slug_url = item.get("url")
     product_id = str(item.get("productId") or item.get("skuId") or "")
     gallery = item.get("mediaUrls")
@@ -74,11 +98,11 @@ def listing_item_to_product(
         url=_maybe_rewrite(slug_url or (product_url(product_id) if product_id else None), rewrite_url),
         seller=item.get("sellerName") or None,
         seller_id=item.get("sellerId") or None,
-        price_cmr=prices.get("cmrPrice"),
-        price_internet=prices.get("internetPrice"),
+        price_cmr=prices["price_cmr"],
+        price_internet=prices["price_internet"],
         price_normal=normal,
         price=current,
-        discount_percent=_discount_percent(item.get("discountBadge"), normal, current),
+        discount_percent=_discount_percent(item.get("discountBadge"), normal, comparable),
         rating=parse_float(item.get("rating")),
         reviews=parse_int(item.get("totalReviews")),
         image_url=image,
@@ -108,9 +132,10 @@ def product_detail_to_product(
     elif isinstance(variants, dict) and variants:
         variant = next(iter(variants.values()))
 
-    prices = _prices_by_type(variant.get("prices") or data.get("prices"))
-    current = prices.get("cmrPrice") or prices.get("internetPrice") or prices.get("normalPrice")
-    normal = prices.get("normalPrice")
+    prices = _price_fields(variant.get("prices") or data.get("prices"))
+    current = prices["price"]
+    normal = prices["price_normal"]
+    comparable = prices["price_internet"] or current
 
     offerings = variant.get("offerings") or []
     seller = seller_id = None
@@ -162,11 +187,11 @@ def product_detail_to_product(
         ),
         seller=seller,
         seller_id=seller_id,
-        price_cmr=prices.get("cmrPrice"),
-        price_internet=prices.get("internetPrice"),
+        price_cmr=prices["price_cmr"],
+        price_internet=prices["price_internet"],
         price_normal=normal,
         price=current,
-        discount_percent=_discount_percent(variant.get("discountBadge"), normal, current),
+        discount_percent=_discount_percent(variant.get("discountBadge"), normal, comparable),
         image_url=image,
         image_urls=gallery,
         category=category,

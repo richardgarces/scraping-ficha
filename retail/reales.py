@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 from statistics import median
 from typing import Any
 
-from retail.commercial import condition_group, shipping_comparable
+from retail.commercial import condition_group, resolve_condition, shipping_comparable
 from retail.compare import (
     FAMILY_ORDER,
     collapse_variants,
@@ -695,7 +695,15 @@ def pick_real_offer(
     ranked: list[dict[str, Any]] = []
     by_pack: dict[tuple[tuple[str, ...], str], list[dict[str, Any]]] = defaultdict(list)
     for item in shown:
-        by_pack[(pack_of(item), condition_group(item.get("condition")))].append(item)
+        # Releer condición desde el título: Mongo puede conservar "new" aunque el
+        # aviso diga reacondicionado, y eso mezclaba precios nuevo vs usado.
+        resolved, _, _ = resolve_condition(
+            item.get("condition"),
+            item.get("name"),
+            item.get("description"),
+            item.get("title"),
+        )
+        by_pack[(pack_of(item), condition_group(resolved))].append(item)
     for group in by_pack.values():
         # Pares entre tiendas por identidad de nombre/atributos. Los códigos
         # internos (product_id/sku) no definen el grupo: cambian por comercio.
