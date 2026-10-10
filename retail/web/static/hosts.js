@@ -1,6 +1,8 @@
 // Panel admin Recursos de hosts (/hosts). Solo admin; la API exige admin.
 (function () {
   const el = (id) => document.getElementById(id);
+  /** Último payload de hosts indexado por id (para el modal de características). */
+  let lastHostsById = {};
 
   function escapeHtml(value) {
     return String(value ?? "")
@@ -52,25 +54,46 @@
     return `${mins}m`;
   }
 
-  function gaugeSvg(percent, label) {
+  function gaugeSvg(percent, label, { display = null, titleSuffix = "%" } = {}) {
     const p = Math.max(0, Math.min(100, Number(percent) || 0));
     const r = 34;
     const c = 2 * Math.PI * r;
     const dash = (p / 100) * c;
     const tone = p >= 85 ? "hot" : (p >= 65 ? "warm" : "ok");
-    return `<div class="cyber-gauge cyber-gauge-${tone}" title="${escapeHtml(label)} ${p}%">
+    const center = display != null ? display : `${Math.round(p)}%`;
+    const titleVal = display != null ? display : `${Math.round(p)}${titleSuffix}`;
+    return `<div class="cyber-gauge cyber-gauge-${tone}" title="${escapeHtml(label)} ${escapeHtml(titleVal)}">
       <svg viewBox="0 0 80 80" width="80" height="80" aria-hidden="true">
         <circle class="cyber-gauge-track" cx="40" cy="40" r="${r}" />
         <circle class="cyber-gauge-fill" cx="40" cy="40" r="${r}"
           stroke-dasharray="${dash.toFixed(1)} ${c.toFixed(1)}"
           transform="rotate(-90 40 40)" />
-        <text x="40" y="44" text-anchor="middle" class="cyber-gauge-pct">${Math.round(p)}%</text>
+        <text x="40" y="44" text-anchor="middle" class="cyber-gauge-pct">${escapeHtml(center)}</text>
       </svg>
       <span class="cyber-gauge-label">${escapeHtml(label)}</span>
     </div>`;
   }
 
-  function metricBlock(kind, data) {
+  /** Mapea °C → % del anillo (0–100°C) y tono (warn 70 / hot 85). */
+  function tempGaugePercent(celsius, thresholds) {
+    const c = Number(celsius);
+    if (!Number.isFinite(c)) return 0;
+    const warn = Number(thresholds?.temp_warn);
+    const hot = Number(thresholds?.temp_hot);
+    const warnN = Number.isFinite(warn) ? warn : 70;
+    const hotN = Number.isFinite(hot) ? hot : 85;
+    // Escala no lineal: debajo de warn ocupa hasta 65%, warn→hot 65–85%, hot→100.
+    if (c <= 0) return 0;
+    if (c < warnN) return Math.min(64, (c / warnN) * 65);
+    if (c < hotN) {
+      const span = Math.max(1, hotN - warnN);
+      return 65 + ((c - warnN) / span) * 20;
+    }
+    const over = Math.min(1, (c - hotN) / Math.max(15, 100 - hotN));
+    return Math.min(100, 85 + over * 15);
+  }
+
+  function metricBlock(kind, data, thresholds) {
     const cpu = data || {};
     if (kind === "cpu") {
       const loads = [cpu.load1, cpu.load5, cpu.load15]
@@ -90,6 +113,19 @@
         cpu.total_bytes != null ? `total ${formatBytes(cpu.total_bytes)}` : null,
       ].filter(Boolean).join(" · ");
       return `<div class="cyber-host-metric">${gaugeSvg(cpu.percent, "RAM")}<p class="muted">${escapeHtml(detail || "sin datos")}</p></div>`;
+    }
+    if (kind === "temp") {
+      const c = cpu.celsius;
+      if (c == null || !Number.isFinite(Number(c))) {
+        return `<div class="cyber-host-metric">${gaugeSvg(0, "Temp", { display: "—" })}<p class="muted">sin sensor</p></div>`;
+      }
+      const rounded = Math.round(Number(c));
+      const fill = tempGaugePercent(c, thresholds);
+      const detail = [
+        `${Number(c).toFixed(1)}°C`,
+        cpu.source ? String(cpu.source) : null,
+      ].filter(Boolean).join(" · ");
+      return `<div class="cyber-host-metric">${gaugeSvg(fill, "Temp", { display: `${rounded}°` })}<p class="muted">${escapeHtml(detail)}</p></div>`;
     }
     const freeLine = cpu.free_bytes != null
       ? `<p class="hosts-disk-free">${escapeHtml(formatBytes(cpu.free_bytes))} libres</p>`
@@ -118,6 +154,261 @@
     return `<p class="muted hosts-docker-line">Docker: ${escapeHtml(parts.join(" · "))}</p>`;
   }
 
+  const HOST_CHART_COLORS = {
+    bmax: "#258fdf",
+    soyo: "#3ecf8e",
+    orange_pi: "#e6a23c",
+  };
+
+  function historySeries(history, key) {
+    const rows = Array.isArray(history) ? history : [];
+    return rows
+      .map((row) => {
+        const n = Number(row?.[key]);
+        return Number.isFinite(n) ? n : null;
+      })
+      .filter((v) => v != null);
+  }
+
+  function historyTimeRangeLabel(history) {
+    const rows = Array.isArray(history) ? history : [];
+    const times = rows
+      .map((row) => Date.parse(String(row?.t || "")))
+      .filter((t) => Number.isFinite(t));
+    if (times.length < 2) return null;
+    const spanMs = times[times.length - 1] - times[0];
+    if (spanMs < 0) return null;
+    const mins = Math.round(spanMs / 60000);
+    if (mins < 90) return `últ. ${mins || 1} min`;
+    const hours = Math.round(mins / 60);
+    if (hours < 36) return `últ. ${hours} h`;
+    return `últ. ${Math.round(hours / 24)} d`;
+  }
+
+  /** Sparkline SVG (serie numérica). */
+  function sparklineSvg(values, {
+    width = 160,
+    height = 36,
+    stroke = "currentColor",
+    fill = "none",
+    guide = null,
+    ariaLabel = "",
+  } = {}) {
+    const nums = (Array.isArray(values) ? values : [])
+      .map((v) => Number(v))
+      .filter((v) => Number.isFinite(v));
+    if (nums.length < 2) {
+      return `<div class="hosts-spark hosts-spark-empty" title="Historial insuficiente">`
+        + `<span class="muted">sin historial</span></div>`;
+    }
+    const padX = 2;
+    const padY = 3;
+    const min = Math.min(...nums);
+    const max = Math.max(...nums);
+    const span = Math.max(0.5, max - min);
+    const innerW = width - padX * 2;
+    const innerH = height - padY * 2;
+    const points = nums.map((v, i) => {
+      const x = padX + (nums.length === 1 ? innerW / 2 : (i / (nums.length - 1)) * innerW);
+      const y = padY + (1 - (v - min) / span) * innerH;
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    }).join(" ");
+    let guideLine = "";
+    if (guide != null && Number.isFinite(Number(guide)) && Number(guide) >= min && Number(guide) <= max) {
+      const gy = padY + (1 - (Number(guide) - min) / span) * innerH;
+      guideLine = `<line class="hosts-spark-guide" x1="${padX}" y1="${gy.toFixed(1)}" x2="${(width - padX).toFixed(1)}" y2="${gy.toFixed(1)}" />`;
+    }
+    const last = nums[nums.length - 1];
+    const lastX = points.split(" ").pop().split(",")[0];
+    const lastY = points.split(" ").pop().split(",")[1];
+    return `<svg class="hosts-spark-svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}"`
+      + ` role="img" aria-label="${escapeHtml(ariaLabel || "historial")}">`
+      + guideLine
+      + `<polyline class="hosts-spark-line" fill="${escapeHtml(fill)}" stroke="${escapeHtml(stroke)}"`
+      + ` stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" points="${points}" />`
+      + `<circle class="hosts-spark-dot" cx="${lastX}" cy="${lastY}" r="2.25" fill="${escapeHtml(stroke)}" />`
+      + `<title>${escapeHtml(`${min.toFixed(0)}–${max.toFixed(0)} · ahora ${last.toFixed(1)}`)}</title>`
+      + `</svg>`;
+  }
+
+  function hostSparklines(host, thresholds) {
+    const history = Array.isArray(host?.history) ? host.history : [];
+    const temps = historySeries(history, "temp");
+    const cpus = historySeries(history, "cpu");
+    if (temps.length < 2 && cpus.length < 2) return "";
+    const range = historyTimeRangeLabel(history);
+    const color = HOST_CHART_COLORS[host.id] || "var(--accent)";
+    const warn = Number(thresholds?.temp_warn);
+    const tempGuide = Number.isFinite(warn) ? warn : 70;
+    const bits = [];
+    if (temps.length >= 2) {
+      bits.push(
+        `<div class="hosts-spark-block">`
+        + `<span class="hosts-spark-label">Temp</span>`
+        + sparklineSvg(temps, {
+          stroke: color,
+          guide: tempGuide,
+          ariaLabel: `Temperatura ${host.label || host.id}`,
+        })
+        + `</div>`
+      );
+    }
+    if (cpus.length >= 2) {
+      bits.push(
+        `<div class="hosts-spark-block">`
+        + `<span class="hosts-spark-label">CPU</span>`
+        + sparklineSvg(cpus, {
+          stroke: color,
+          ariaLabel: `CPU ${host.label || host.id}`,
+        })
+        + `</div>`
+      );
+    }
+    return `<div class="hosts-sparklines">`
+      + bits.join("")
+      + (range ? `<p class="muted hosts-spark-range">${escapeHtml(range)} · ${history.length} pts</p>` : "")
+      + `</div>`;
+  }
+
+  /** Gráfico combinado (varios hosts) para una métrica. */
+  function multiHostChart(hosts, key, {
+    title,
+    unit = "",
+    yMin = null,
+    yMax = null,
+    guide = null,
+    height = 120,
+    width = 560,
+  } = {}) {
+    const series = [];
+    for (const host of hosts) {
+      const history = Array.isArray(host?.history) ? host.history : [];
+      const points = history
+        .map((row) => {
+          const t = Date.parse(String(row?.t || ""));
+          const v = Number(row?.[key]);
+          if (!Number.isFinite(t) || !Number.isFinite(v)) return null;
+          return { t, v };
+        })
+        .filter(Boolean);
+      if (points.length >= 2) {
+        series.push({
+          id: host.id,
+          label: host.label || host.id,
+          color: HOST_CHART_COLORS[host.id] || "var(--accent)",
+          points,
+        });
+      }
+    }
+    if (!series.length) return "";
+
+    let tMin = Infinity;
+    let tMax = -Infinity;
+    let vMin = yMin != null ? yMin : Infinity;
+    let vMax = yMax != null ? yMax : -Infinity;
+    for (const s of series) {
+      for (const p of s.points) {
+        tMin = Math.min(tMin, p.t);
+        tMax = Math.max(tMax, p.t);
+        if (yMin == null) vMin = Math.min(vMin, p.v);
+        if (yMax == null) vMax = Math.max(vMax, p.v);
+      }
+    }
+    if (!(tMax > tMin)) return "";
+    if (yMin == null && yMax == null) {
+      const pad = Math.max(0.5, (vMax - vMin) * 0.12);
+      vMin -= pad;
+      vMax += pad;
+    }
+    if (!(vMax > vMin)) {
+      vMin -= 1;
+      vMax += 1;
+    }
+
+    const padL = 34;
+    const padR = 10;
+    const padT = 10;
+    const padB = 22;
+    const innerW = width - padL - padR;
+    const innerH = height - padT - padB;
+    const toX = (t) => padL + ((t - tMin) / (tMax - tMin)) * innerW;
+    const toY = (v) => padT + (1 - (v - vMin) / (vMax - vMin)) * innerH;
+
+    const gridYs = [vMin, (vMin + vMax) / 2, vMax];
+    const grid = gridYs.map((v) => {
+      const y = toY(v);
+      return `<line class="hosts-chart-grid" x1="${padL}" y1="${y.toFixed(1)}" x2="${(width - padR).toFixed(1)}" y2="${y.toFixed(1)}" />`
+        + `<text class="hosts-chart-axis" x="${padL - 4}" y="${(y + 3).toFixed(1)}" text-anchor="end">${escapeHtml(`${Math.round(v)}${unit}`)}</text>`;
+    }).join("");
+
+    let guideEl = "";
+    if (guide != null && Number.isFinite(Number(guide)) && Number(guide) >= vMin && Number(guide) <= vMax) {
+      const gy = toY(Number(guide));
+      guideEl = `<line class="hosts-chart-warn" x1="${padL}" y1="${gy.toFixed(1)}" x2="${(width - padR).toFixed(1)}" y2="${gy.toFixed(1)}" />`
+        + `<text class="hosts-chart-axis hosts-chart-warn-label" x="${(width - padR).toFixed(1)}" y="${(gy - 3).toFixed(1)}" text-anchor="end">warn ${escapeHtml(String(Math.round(Number(guide))))}${escapeHtml(unit)}</text>`;
+    }
+
+    const paths = series.map((s) => {
+      const d = s.points.map((p, i) => {
+        const cmd = i === 0 ? "M" : "L";
+        return `${cmd}${toX(p.t).toFixed(1)},${toY(p.v).toFixed(1)}`;
+      }).join(" ");
+      const last = s.points[s.points.length - 1];
+      return `<path class="hosts-chart-series" d="${d}" fill="none" stroke="${escapeHtml(s.color)}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />`
+        + `<circle cx="${toX(last.t).toFixed(1)}" cy="${toY(last.v).toFixed(1)}" r="3" fill="${escapeHtml(s.color)}" />`;
+    }).join("");
+
+    const legend = series.map((s) => {
+      const last = s.points[s.points.length - 1].v;
+      return `<span class="hosts-chart-legend-item">`
+        + `<i style="background:${escapeHtml(s.color)}"></i>`
+        + `${escapeHtml(s.label)} ${escapeHtml(last.toFixed(1))}${escapeHtml(unit)}`
+        + `</span>`;
+    }).join("");
+
+    const spanMin = Math.max(1, Math.round((tMax - tMin) / 60000));
+    const spanLabel = spanMin < 90 ? `${spanMin} min` : `${Math.round(spanMin / 60)} h`;
+
+    return `<div class="hosts-chart-card">`
+      + `<div class="hosts-chart-head"><strong>${escapeHtml(title)}</strong>`
+      + `<span class="muted">${escapeHtml(spanLabel)}</span></div>`
+      + `<div class="hosts-chart-legend">${legend}</div>`
+      + `<svg class="hosts-chart-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeHtml(title)}">`
+      + grid + guideEl + paths
+      + `</svg></div>`;
+  }
+
+  function renderTrends(payload) {
+    const box = el("hosts-trends");
+    if (!box) return;
+    const hosts = Array.isArray(payload?.hosts) ? payload.hosts : [];
+    const thresholds = payload?.thresholds || {};
+    const tempChart = multiHostChart(hosts, "temp", {
+      title: "Temperatura",
+      unit: "°",
+      guide: thresholds.temp_warn ?? 70,
+      yMin: null,
+      yMax: null,
+    });
+    const cpuChart = multiHostChart(hosts, "cpu", {
+      title: "CPU",
+      unit: "%",
+      yMin: 0,
+      yMax: 100,
+    });
+    if (!tempChart && !cpuChart) {
+      box.hidden = true;
+      box.innerHTML = "";
+      return;
+    }
+    box.hidden = false;
+    box.innerHTML = `<div class="hosts-trends-head">`
+      + `<h3>Tendencias</h3>`
+      + `<p class="muted">Historial publicado por cada host (retención acotada).</p>`
+      + `</div>`
+      + `<div class="hosts-trends-grid">${tempChart}${cpuChart}</div>`;
+  }
+
   /** Comandos seguros sugeridos según código de alerta (copiar → pegar en el host). */
   const ALERT_COMMANDS = {
     docker_reclaim: [
@@ -144,6 +435,20 @@
     ram_warn: [
       { label: "Memoria", cmd: "free -h" },
       { label: "Procesos por RAM", cmd: "ps aux --sort=-%mem | head -n 20" },
+    ],
+    temp_warn: [
+      {
+        label: "Temp thermal",
+        cmd: "paste <(cat /sys/class/thermal/thermal_zone*/type) <(cat /sys/class/thermal/thermal_zone*/temp) 2>/dev/null || sensors 2>/dev/null || echo 'sin sensores'",
+      },
+      { label: "Load / top", cmd: "uptime; ps aux --sort=-%cpu | head -n 15" },
+    ],
+    temp_hot: [
+      {
+        label: "Temp thermal",
+        cmd: "paste <(cat /sys/class/thermal/thermal_zone*/type) <(cat /sys/class/thermal/thermal_zone*/temp) 2>/dev/null || sensors 2>/dev/null || echo 'sin sensores'",
+      },
+      { label: "Load / top", cmd: "uptime; ps aux --sort=-%cpu | head -n 15" },
     ],
     stale: [
       { label: "Cron host-stats", cmd: "crontab -l | grep -n host-stats || true" },
@@ -355,12 +660,107 @@
     return "ok";
   }
 
+  const FACT_ROWS = [
+    ["machine_model", "Modelo"],
+    ["hostname", "Hostname"],
+    ["cpu_model", "CPU"],
+    ["cpu_cores", "Núcleos"],
+    ["cpu_arch", "Arquitectura"],
+    ["mem_total_bytes", "Memoria total"],
+    ["disk_total_bytes", "Disco total"],
+    ["os_pretty_name", "Sistema"],
+    ["kernel", "Kernel"],
+    ["uptime_seconds", "Uptime"],
+  ];
+
+  function formatFactCell(key, value) {
+    if (value == null || value === "") return "—";
+    if (key === "mem_total_bytes" || key === "disk_total_bytes") {
+      return formatBytes(value);
+    }
+    if (key === "uptime_seconds") {
+      const up = formatUptime(value);
+      if (!up) return "—";
+      const secs = Number(value);
+      const extra = Number.isFinite(secs) ? ` (${Math.round(secs)}s)` : "";
+      return `${up}${extra}`;
+    }
+    if (key === "cpu_cores") {
+      const n = Number(value);
+      return Number.isFinite(n) ? String(n) : "—";
+    }
+    return String(value);
+  }
+
+  function closeHostDetail() {
+    const modal = el("hosts-detail-modal");
+    if (!modal) return;
+    modal.hidden = true;
+    document.body.classList.remove("modal-open");
+  }
+
+  function openHostDetail(hostId) {
+    const host = lastHostsById[hostId];
+    const modal = el("hosts-detail-modal");
+    const body = el("hosts-detail-body");
+    if (!host || !modal || !body) return;
+
+    const facts = host.facts && typeof host.facts === "object" ? host.facts : {};
+    // Hostname/uptime del reporte si facts no los trae aún.
+    const merged = {
+      ...facts,
+      hostname: facts.hostname || host.hostname || null,
+      uptime_seconds: facts.uptime_seconds != null ? facts.uptime_seconds : host.uptime_seconds,
+      mem_total_bytes: facts.mem_total_bytes != null
+        ? facts.mem_total_bytes
+        : (host.ram && host.ram.total_bytes != null ? host.ram.total_bytes : null),
+      disk_total_bytes: facts.disk_total_bytes != null
+        ? facts.disk_total_bytes
+        : (host.disk && host.disk.total_bytes != null ? host.disk.total_bytes : null),
+      cpu_cores: facts.cpu_cores != null
+        ? facts.cpu_cores
+        : (host.cpu && host.cpu.cores != null ? host.cpu.cores : null),
+    };
+    const hasAny = FACT_ROWS.some(([key]) => {
+      const v = merged[key];
+      return v != null && v !== "";
+    });
+    const photo = host.image
+      ? `<div class="hosts-photo" aria-hidden="true">`
+        + `<img src="${escapeHtml(host.image)}" alt="" width="120" height="120" loading="lazy" decoding="async">`
+        + `</div>`
+      : `<div class="hosts-photo hosts-photo-empty" aria-hidden="true"></div>`;
+    const sub = [host.ip, host.hostname].filter(Boolean).join(" · ");
+    const rowsHtml = FACT_ROWS.map(([key, label]) => (
+      `<tr><th scope="row">${escapeHtml(label)}</th>`
+      + `<td>${escapeHtml(formatFactCell(key, merged[key]))}</td></tr>`
+    )).join("");
+    body.innerHTML = `<div class="hosts-detail-head">`
+      + photo
+      + `<div>`
+      + `<h2 id="hosts-detail-title">${escapeHtml(host.label || host.id || "Host")}</h2>`
+      + `<p class="muted">${escapeHtml(sub || "—")}</p>`
+      + (host.role ? `<p class="hosts-detail-role">${escapeHtml(host.role)}</p>` : "")
+      + `</div></div>`
+      + (hasAny
+        ? `<table class="hosts-facts-table"><tbody>${rowsHtml}</tbody></table>`
+        : `<p class="muted hosts-facts-empty">Aún no hay características publicadas para este host. Se rellenan con cada reporte de host-stats.</p>`);
+    modal.hidden = false;
+    document.body.classList.add("modal-open");
+    el("hosts-detail-close")?.focus();
+  }
+
   function renderHosts(payload) {
     const grid = el("hosts-grid");
     const meta = el("hosts-meta");
     if (!grid) return;
     const rows = Array.isArray(payload?.hosts) ? payload.hosts : [];
+    lastHostsById = {};
+    for (const host of rows) {
+      if (host?.id) lastHostsById[host.id] = host;
+    }
     renderAlertsBanner(payload?.alerts);
+    renderTrends(payload);
     if (!rows.length) {
       grid.innerHTML = `<p class="muted">Sin hosts configurados.</p>`;
       if (meta) meta.textContent = "";
@@ -376,11 +776,13 @@
       const statusLabel = host.online ? "en línea" : (host.reported_at ? "stale" : "sin datos");
       const tone = cardTone(host);
       const sub = [host.ip, host.hostname].filter(Boolean).join(" · ");
-      const gauges = host.cpu || host.ram || host.disk
+      const thresholds = payload?.thresholds || {};
+      const gauges = host.cpu || host.ram || host.disk || host.temperature
         ? [
-            metricBlock("cpu", host.cpu),
-            metricBlock("ram", host.ram),
-            metricBlock("disk", host.disk),
+            metricBlock("cpu", host.cpu, thresholds),
+            metricBlock("ram", host.ram, thresholds),
+            metricBlock("disk", host.disk, thresholds),
+            metricBlock("temp", host.temperature, thresholds),
           ].join("")
         : `<p class="muted">Aún no hay métricas publicadas para este host.</p>`;
       const uptime = formatUptime(host.uptime_seconds);
@@ -399,7 +801,7 @@
           + `<img src="${escapeHtml(host.image)}" alt="" width="160" height="160" loading="lazy" decoding="async">`
           + `</div>`
         : `<div class="hosts-photo hosts-photo-empty" aria-hidden="true"></div>`;
-      return `<article class="cyber-host-panel hosts-card hosts-card-${status} hosts-card-tone-${tone}" data-host-id="${escapeHtml(host.id || "")}">
+      return `<article class="cyber-host-panel hosts-card hosts-card-${status} hosts-card-tone-${tone}" data-host-id="${escapeHtml(host.id || "")}" tabindex="0" role="button" aria-label="Ver características de ${escapeHtml(label)}">
         <div class="hosts-card-top">
           ${photo}
           <div class="hosts-card-id">
@@ -413,6 +815,7 @@
         </div>
         ${alertBadges(host.alerts)}
         <div class="cyber-host-gauges">${gauges}</div>
+        ${hostSparklines(host, thresholds)}
         ${dockerLine(host.docker)}
         ${ssh}
         ${maintenancePanel(host)}
@@ -422,10 +825,13 @@
     if (meta) {
       const maxAge = payload?.max_age_seconds;
       const th = payload?.thresholds || {};
+      const hist = payload?.history || {};
       const bits = [
         maxAge != null ? `Umbral stale: ${maxAge}s` : null,
         th.disk_warn != null ? `disco warn/hot ${th.disk_warn}/${th.disk_hot}%` : null,
         th.ram_warn != null ? `RAM warn ${th.ram_warn}%` : null,
+        th.temp_warn != null ? `temp warn/hot ${th.temp_warn}/${th.temp_hot}°C` : null,
+        hist.max_points != null ? `historial ≤${hist.max_points} pts` : null,
         "refresco cada 15s",
       ].filter(Boolean);
       meta.textContent = bits.join(" · ");
@@ -470,11 +876,13 @@
   el("hosts-grid")?.addEventListener("click", (event) => {
     const ssh = event.target.closest("[data-ssh]");
     if (ssh) {
+      event.stopPropagation();
       copyText(ssh.getAttribute("data-ssh") || "", "No se pudo copiar el comando SSH");
       return;
     }
     const maint = event.target.closest(".hosts-maint-btn[data-copy]");
     if (maint) {
+      event.stopPropagation();
       // Alt/Option: solo el comando local (sin SSH).
       const useLocal = event.altKey;
       const cmd = useLocal
@@ -485,14 +893,45 @@
     }
     const copyBtn = event.target.closest("[data-copy]");
     if (copyBtn) {
+      event.stopPropagation();
       copyText(copyBtn.getAttribute("data-copy") || "", "No se pudo copiar el comando");
+      return;
     }
+    // No abrir detalle al interactuar con botones / details / enlaces.
+    if (event.target.closest("button, a, summary, details, input, select, textarea, label")) {
+      return;
+    }
+    const card = event.target.closest(".hosts-card[data-host-id]");
+    if (!card) return;
+    openHostDetail(card.getAttribute("data-host-id") || "");
+  });
+
+  el("hosts-grid")?.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    if (event.target.closest("button, a, summary, details, input, select, textarea")) return;
+    const card = event.target.closest(".hosts-card[data-host-id]");
+    if (!card || event.target !== card) return;
+    event.preventDefault();
+    openHostDetail(card.getAttribute("data-host-id") || "");
   });
 
   el("hosts-alerts")?.addEventListener("click", (event) => {
     const copyBtn = event.target.closest("[data-copy]");
     if (!copyBtn) return;
+    event.stopPropagation();
     copyText(copyBtn.getAttribute("data-copy") || "", "No se pudo copiar el comando");
+  });
+
+  el("hosts-detail-close")?.addEventListener("click", () => {
+    closeHostDetail();
+  });
+  el("hosts-detail-modal")?.addEventListener("click", (event) => {
+    if (event.target === el("hosts-detail-modal")) closeHostDetail();
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape") return;
+    const modal = el("hosts-detail-modal");
+    if (modal && !modal.hidden) closeHostDetail();
   });
 
   refresh();

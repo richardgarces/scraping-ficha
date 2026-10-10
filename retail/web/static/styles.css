@@ -2495,6 +2495,64 @@ html[data-theme="day"] .panel { backdrop-filter: none; }
 .hosts-card-tone-hot { border-color: color-mix(in srgb, #ff6b6b 55%, var(--line)); }
 .hosts-card-tone-warn { border-color: color-mix(in srgb, var(--warn, #e6a23c) 55%, var(--line)); }
 .hosts-card-tone-info { border-color: color-mix(in srgb, var(--accent, #6ea8fe) 45%, var(--line)); }
+.hosts-card {
+  cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.hosts-card:hover {
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent, #6ea8fe) 35%, transparent);
+}
+.hosts-card:focus-visible {
+  outline: 2px solid var(--accent, #6ea8fe);
+  outline-offset: 2px;
+}
+.hosts-detail-modal .hosts-detail-content {
+  width: min(32rem, 96%);
+  max-width: 32rem;
+}
+.hosts-detail-head {
+  display: flex;
+  gap: 0.85rem;
+  align-items: flex-start;
+  margin: 0 2.2rem 0.85rem 0;
+}
+.hosts-detail-head .hosts-photo {
+  flex: 0 0 4.5rem;
+  width: 4.5rem;
+  height: 4.5rem;
+}
+.hosts-detail-head h2 {
+  margin: 0 0 0.2rem;
+  font-size: 1.25rem;
+}
+.hosts-detail-head .muted { margin: 0; }
+.hosts-detail-role {
+  margin: 0.25rem 0 0;
+  font-size: 0.88rem;
+  color: var(--muted);
+}
+.hosts-facts-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+.hosts-facts-table th,
+.hosts-facts-table td {
+  padding: 0.4rem 0.35rem;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+}
+.hosts-facts-table th {
+  width: 38%;
+  font-weight: 600;
+  color: var(--muted);
+}
+.hosts-facts-table td { word-break: break-word; }
+.hosts-facts-empty {
+  margin: 0.5rem 0 0;
+  font-size: 0.9rem;
+}
 .hosts-status {
   margin-left: auto;
   font-size: 0.78rem;
@@ -2541,6 +2599,125 @@ html[data-theme="day"] .panel { backdrop-filter: none; }
   color: var(--text);
 }
 .hosts-docker-line { margin: 0.55rem 0 0; font-size: 0.78rem; }
+.hosts-trends {
+  margin: 0 0 1rem;
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel-2, var(--panel));
+}
+.hosts-trends-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.35rem 0.85rem;
+  margin-bottom: 0.65rem;
+}
+.hosts-trends-head h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+.hosts-trends-head .muted { margin: 0; font-size: 0.82rem; }
+.hosts-trends-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  gap: 0.85rem 1.1rem;
+}
+.hosts-chart-card { min-width: 0; }
+.hosts-chart-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  align-items: baseline;
+  margin-bottom: 0.25rem;
+  font-size: 0.9rem;
+}
+.hosts-chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.85rem;
+  margin: 0 0 0.35rem;
+  font-size: 0.75rem;
+  color: var(--muted);
+  font-weight: 600;
+}
+.hosts-chart-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+.hosts-chart-legend-item i {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  display: inline-block;
+}
+.hosts-chart-svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-width: 100%;
+  color: var(--accent);
+}
+.hosts-chart-grid {
+  stroke: var(--line);
+  stroke-width: 1;
+}
+.hosts-chart-warn {
+  stroke: var(--warn, #e6a23c);
+  stroke-width: 1;
+  stroke-dasharray: 4 4;
+}
+.hosts-chart-axis {
+  fill: var(--muted);
+  font-size: 10px;
+}
+.hosts-chart-warn-label { fill: var(--warn, #e6a23c); }
+.hosts-sparklines {
+  margin: 0.65rem 0 0;
+  display: grid;
+  gap: 0.45rem 0.75rem;
+  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+  align-items: end;
+}
+.hosts-spark-block {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+.hosts-spark-label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--muted);
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+.hosts-spark-svg {
+  display: block;
+  width: 100%;
+  max-width: 11rem;
+  height: auto;
+  color: var(--accent);
+}
+.hosts-spark-line { fill: none; }
+.hosts-spark-guide {
+  stroke: var(--warn, #e6a23c);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+  opacity: 0.7;
+}
+.hosts-spark-empty {
+  min-height: 36px;
+  display: grid;
+  place-items: center;
+  font-size: 0.75rem;
+}
+.hosts-spark-range {
+  grid-column: 1 / -1;
+  margin: 0;
+  font-size: 0.72rem;
+}
 .hosts-ssh {
   display: inline-flex;
   margin-top: 0.55rem;

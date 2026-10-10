@@ -1,4 +1,4 @@
-"""Métricas de host (CPU / RAM / disco) → Mongo `cyber_day_host_stats:{ip}`.
+"""Métricas de host (CPU / RAM / disco / temp) → Mongo `cyber_day_host_stats:{ip}`.
 
 Usado por workers Cyber (Orange Pi) y reporters ligeros en BMAX/soyo
 (`python -m retail.host_stats --once` / `--loop`).
@@ -21,9 +21,17 @@ from typing import Any
 HOST_STATS_SETTING_PREFIX = "cyber_day_host_stats:"
 HOST_STATS_REPORT_SECONDS = max(5.0, float(os.environ.get("CYBER_DAY_HOST_STATS_SECONDS") or os.environ.get("HOST_STATS_SECONDS") or "15"))
 HOST_STATS_MAX_AGE = max(30, int(os.environ.get("CYBER_DAY_HOST_STATS_MAX_AGE") or os.environ.get("HOST_STATS_MAX_AGE") or "120"))
+# Historial acotado en el mismo doc Mongo (cron ~1/min → ~24h con 1440 pts).
+HOST_STATS_HISTORY_MAX = max(24, int(os.environ.get("HOST_STATS_HISTORY_MAX") or "1440"))
+HOST_STATS_HISTORY_MAX_AGE = max(
+    3600,
+    int(os.environ.get("HOST_STATS_HISTORY_MAX_AGE") or str(24 * 3600)),
+)
 ALERT_DISK_WARN = max(50, int(os.environ.get("HOST_STATS_DISK_WARN") or "80"))
 ALERT_DISK_HOT = max(ALERT_DISK_WARN, int(os.environ.get("HOST_STATS_DISK_HOT") or "90"))
 ALERT_RAM_WARN = max(50, int(os.environ.get("HOST_STATS_RAM_WARN") or "90"))
+ALERT_TEMP_WARN = max(40, int(os.environ.get("HOST_STATS_TEMP_WARN") or "70"))
+ALERT_TEMP_HOT = max(ALERT_TEMP_WARN, int(os.environ.get("HOST_STATS_TEMP_HOT") or "85"))
 # Docker reclaimable ≥ este umbral (GiB) → alerta informativa.
 ALERT_DOCKER_RECLAIM_GIB = max(1.0, float(os.environ.get("HOST_STATS_DOCKER_RECLAIM_GIB") or "20"))
 # IP fija del host (containers Docker suelen ver otra IP).
@@ -237,8 +245,331 @@ def _uptime_seconds() -> float | None:
         return None
 
 
+def _read_first_line(path: str) -> str | None:
+    try:
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            text = fh.readline().strip()
+        return text or None
+    except OSError:
+        return None
+
+
+def _cpu_model_from_proc() -> str | None:
+    """Modelo de CPU desde /proc/cpuinfo (x86 model name / ARM Hardware)."""
+    try:
+        with open("/proc/cpuinfo", encoding="utf-8", errors="replace") as fh:
+            model = hardware = processor = None
+            for line in fh:
+                if ":" not in line:
+                    continue
+                key, raw = line.split(":", 1)
+                key_l = key.strip().lower()
+                val = raw.strip()
+                if not val:
+                    continue
+                if key_l == "model name" and not model:
+                    model = val
+                elif key_l == "hardware" and not hardware:
+                    hardware = val
+                elif key_l == "processor" and not processor and not val.isdigit():
+                    processor = val
+            return model or hardware or processor
+    except OSError:
+        return None
+
+
+def _os_pretty_name() -> str | None:
+    """PRETTY_NAME de /etc/os-release (p. ej. Ubuntu 24.04.1 LTS)."""
+    try:
+        with open("/etc/os-release", encoding="utf-8", errors="replace") as fh:
+            data: dict[str, str] = {}
+            for line in fh:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, raw = line.split("=", 1)
+                data[key] = raw.strip().strip('"')
+        return data.get("PRETTY_NAME") or data.get("NAME")
+    except OSError:
+        return None
+
+
+def _machine_model() -> str | None:
+    """Modelo de máquina (DMI product_name o device-tree model en ARM)."""
+    for path in (
+        "/sys/devices/virtual/dmi/id/product_name",
+        "/sys/firmware/devicetree/base/model",
+        "/proc/device-tree/model",
+    ):
+        text = _read_first_line(path)
+        if text:
+            # device-tree a veces trae null bytes.
+            cleaned = text.replace("\x00", "").strip()
+            if cleaned and cleaned.lower() not in {"none", "to be filled by o.e.m.", "default string"}:
+                return cleaned
+    return None
+
+
+def _facts_from_env() -> dict[str, Any] | None:
+    """JSON de hechos del host inyectado por scripts/host-stats-report.sh."""
+    injected = (os.environ.get("HOST_STATS_FACTS") or "").strip()
+    if not injected:
+        b64 = (os.environ.get("HOST_STATS_FACTS_B64") or "").strip()
+        if b64:
+            try:
+                injected = base64.b64decode(b64).decode("utf-8")
+            except (ValueError, UnicodeDecodeError):
+                injected = ""
+    if not injected:
+        return None
+    try:
+        data = json.loads(injected)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    return data
+
+
+def _normalize_facts(raw: dict[str, Any] | None) -> dict[str, Any]:
+    """Normaliza campos de hechos del sistema (nulls si faltan / inválidos)."""
+    src = raw if isinstance(raw, dict) else {}
+
+    def _str(key: str) -> str | None:
+        val = src.get(key)
+        if val is None:
+            return None
+        text = str(val).strip()
+        return text or None
+
+    def _int(key: str) -> int | None:
+        val = src.get(key)
+        if val is None or val == "":
+            return None
+        try:
+            return int(val)
+        except (TypeError, ValueError):
+            return None
+
+    def _float(key: str) -> float | None:
+        val = src.get(key)
+        if val is None or val == "":
+            return None
+        try:
+            return round(float(val), 1)
+        except (TypeError, ValueError):
+            return None
+
+    return {
+        "hostname": _str("hostname"),
+        "cpu_model": _str("cpu_model"),
+        "cpu_cores": _int("cpu_cores"),
+        "cpu_arch": _str("cpu_arch"),
+        "mem_total_bytes": _int("mem_total_bytes"),
+        "disk_total_bytes": _int("disk_total_bytes"),
+        "os_pretty_name": _str("os_pretty_name"),
+        "kernel": _str("kernel"),
+        "uptime_seconds": _float("uptime_seconds"),
+        "machine_model": _str("machine_model"),
+    }
+
+
+def collect_host_facts() -> dict[str, Any]:
+    """Características estáticas/semi-estáticas del sistema (CPU, RAM, OS, …).
+
+    En contenedores Docker, ``scripts/host-stats-report.sh`` puede inyectar
+    ``HOST_STATS_FACTS`` / ``HOST_STATS_FACTS_B64`` con hechos del host real
+    (modelo, OS, kernel) porque el contenedor ve otra vista de /etc y a veces
+    de /proc.
+    """
+    injected = _facts_from_env()
+    if injected is not None:
+        return _normalize_facts(injected)
+
+    mem_total = None
+    try:
+        with open("/proc/meminfo", encoding="utf-8") as fh:
+            for line in fh:
+                if line.startswith("MemTotal:"):
+                    num = line.split(":", 1)[1].strip().split()[0]
+                    mem_total = int(num) * 1024
+                    break
+    except (OSError, IndexError, ValueError):
+        pass
+
+    disk_path = (
+        (os.environ.get("HOST_STATS_DISK_PATH") or os.environ.get("CYBER_DAY_DISK_PATH") or "/").strip()
+        or "/"
+    )
+    disk_total = None
+    try:
+        disk_total = int(shutil.disk_usage(disk_path).total)
+    except OSError:
+        pass
+
+    kernel = None
+    arch = None
+    try:
+        uname = os.uname()
+        kernel = uname.release or None
+        arch = uname.machine or None
+    except AttributeError:
+        pass
+
+    return _normalize_facts(
+        {
+            "hostname": socket.gethostname() or None,
+            "cpu_model": _cpu_model_from_proc(),
+            "cpu_cores": os.cpu_count(),
+            "cpu_arch": arch,
+            "mem_total_bytes": mem_total,
+            "disk_total_bytes": disk_total,
+            "os_pretty_name": _os_pretty_name(),
+            "kernel": kernel,
+            "uptime_seconds": _uptime_seconds(),
+            "machine_model": _machine_model(),
+        }
+    )
+
+
+# Fuentes térmicas preferidas (menor índice = mejor). Tipos típicos de x86 / ARM / Orange Pi.
+_THERMAL_TYPE_PRIORITY: dict[str, int] = {
+    "x86_pkg_temp": 0,
+    "k10temp": 1,
+    "coretemp": 2,
+    "cpu-thermal": 3,
+    "cpu_thermal": 3,
+    "soc-thermal": 4,
+    "soc_thermal": 4,
+    "cpu": 5,
+    "package": 6,
+    "acpitz": 20,
+}
+
+
+def _milli_celsius_to_c(raw: int) -> float | None:
+    """Convierte lecturas sysfs (miligrados) a °C; rechaza valores absurdos."""
+    # thermal_zone*/temp y hwmon temp*_input suelen estar en millidegrees.
+    celsius = raw / 1000.0 if abs(raw) >= 200 else float(raw)
+    if celsius < -20.0 or celsius > 150.0:
+        return None
+    return round(celsius, 1)
+
+
+def _thermal_type_rank(type_name: str) -> int:
+    key = (type_name or "").strip().lower()
+    if key in _THERMAL_TYPE_PRIORITY:
+        return _THERMAL_TYPE_PRIORITY[key]
+    if "cpu" in key or "pkg" in key or "package" in key or "soc" in key:
+        return 10
+    if "gpu" in key or "nvme" in key or "wifi" in key:
+        return 80
+    return 50
+
+
+def _read_thermal_zones() -> list[tuple[int, str, float]]:
+    """Lista (rank, source, °C) desde /sys/class/thermal."""
+    root = "/sys/class/thermal"
+    rows: list[tuple[int, str, float]] = []
+    try:
+        names = sorted(os.listdir(root))
+    except OSError:
+        return rows
+    for name in names:
+        if not name.startswith("thermal_zone"):
+            continue
+        base = os.path.join(root, name)
+        try:
+            with open(os.path.join(base, "type"), encoding="utf-8") as fh:
+                type_name = fh.read().strip()
+            with open(os.path.join(base, "temp"), encoding="utf-8") as fh:
+                raw = int(fh.read().strip())
+        except (OSError, ValueError):
+            continue
+        celsius = _milli_celsius_to_c(raw)
+        if celsius is None:
+            continue
+        source = type_name or name
+        rows.append((_thermal_type_rank(source), source, celsius))
+    return rows
+
+
+def _read_hwmon_temps() -> list[tuple[int, str, float]]:
+    """Lista (rank, source, °C) desde /sys/class/hwmon (coretemp, k10temp, …)."""
+    root = "/sys/class/hwmon"
+    rows: list[tuple[int, str, float]] = []
+    try:
+        chips = sorted(os.listdir(root))
+    except OSError:
+        return rows
+    for chip in chips:
+        base = os.path.join(root, chip)
+        try:
+            with open(os.path.join(base, "name"), encoding="utf-8") as fh:
+                chip_name = fh.read().strip() or chip
+        except OSError:
+            chip_name = chip
+        try:
+            entries = os.listdir(base)
+        except OSError:
+            continue
+        for entry in sorted(entries):
+            if not (entry.startswith("temp") and entry.endswith("_input")):
+                continue
+            label_path = os.path.join(base, entry.replace("_input", "_label"))
+            label = ""
+            try:
+                with open(label_path, encoding="utf-8") as fh:
+                    label = fh.read().strip()
+            except OSError:
+                pass
+            try:
+                with open(os.path.join(base, entry), encoding="utf-8") as fh:
+                    raw = int(fh.read().strip())
+            except (OSError, ValueError):
+                continue
+            celsius = _milli_celsius_to_c(raw)
+            if celsius is None:
+                continue
+            source = f"{chip_name}:{label}" if label else chip_name
+            rank = _thermal_type_rank(label or chip_name)
+            # Preferir Package / Tctl sobre núcleos individuales.
+            label_l = label.lower()
+            if "package" in label_l or label_l in {"tctl", "tdie"}:
+                rank = min(rank, 0)
+            elif label_l.startswith("core"):
+                rank = max(rank, 15)
+            rows.append((rank, source, celsius))
+    return rows
+
+
+def collect_temperature() -> dict[str, Any] | None:
+    """Temperatura del host (°C) desde env inyectado, thermal zones o hwmon.
+
+    En contenedores Docker sin sysfs del host, el wrapper
+    ``scripts/host-stats-report.sh`` puede inyectar ``HOST_STATS_TEMP_C``
+    (y opcionalmente ``HOST_STATS_TEMP_SOURCE``).
+    """
+    injected = (os.environ.get("HOST_STATS_TEMP_C") or "").strip()
+    if injected:
+        try:
+            celsius = round(float(injected), 1)
+        except ValueError:
+            celsius = None
+        if celsius is not None and -20.0 <= celsius <= 150.0:
+            source = (os.environ.get("HOST_STATS_TEMP_SOURCE") or "injected").strip() or "injected"
+            return {"celsius": celsius, "source": source}
+
+    candidates = _read_thermal_zones() + _read_hwmon_temps()
+    if not candidates:
+        return None
+    candidates.sort(key=lambda row: (row[0], row[2]))
+    _rank, source, celsius = candidates[0]
+    return {"celsius": celsius, "source": source}
+
+
 def collect_host_stats() -> dict[str, Any]:
-    """Métricas del host donde corre el proceso (CPU / RAM / disco / Docker)."""
+    """Métricas del host donde corre el proceso (CPU / RAM / disco / temp / Docker)."""
     cores = os.cpu_count() or 1
     load1 = load5 = load15 = None
     try:
@@ -294,7 +625,14 @@ def collect_host_stats() -> dict[str, Any]:
 
     hostname = socket.gethostname()
     docker = collect_docker_df()
+    temperature = collect_temperature()
     uptime = _uptime_seconds()
+    facts = collect_host_facts()
+    # Preferir hostname/uptime de facts inyectados (host real vs contenedor).
+    if facts.get("hostname"):
+        hostname = str(facts["hostname"])
+    if facts.get("uptime_seconds") is not None:
+        uptime = facts["uptime_seconds"]
     return {
         "hostname": hostname,
         "ip": _host_ip_guess(),
@@ -320,7 +658,9 @@ def collect_host_stats() -> dict[str, Any]:
             "total_bytes": disk_total,
             "percent": disk_pct,
         },
+        "temperature": temperature,
         "docker": docker,
+        "facts": facts,
     }
 
 
@@ -336,9 +676,11 @@ def host_alerts(host: dict[str, Any]) -> list[dict[str, str]]:
 
     disk = host.get("disk") or {}
     ram = host.get("ram") or {}
+    temp = host.get("temperature") or {}
     docker = host.get("docker") or {}
     disk_pct = disk.get("percent")
     ram_pct = ram.get("percent")
+    temp_c = temp.get("celsius") if isinstance(temp, dict) else None
     try:
         disk_n = float(disk_pct) if disk_pct is not None else None
     except (TypeError, ValueError):
@@ -347,6 +689,10 @@ def host_alerts(host: dict[str, Any]) -> list[dict[str, str]]:
         ram_n = float(ram_pct) if ram_pct is not None else None
     except (TypeError, ValueError):
         ram_n = None
+    try:
+        temp_n = float(temp_c) if temp_c is not None else None
+    except (TypeError, ValueError):
+        temp_n = None
 
     if disk_n is not None:
         free = disk.get("free_bytes")
@@ -380,6 +726,27 @@ def host_alerts(host: dict[str, Any]) -> list[dict[str, str]]:
             }
         )
 
+    if temp_n is not None:
+        src = ""
+        if isinstance(temp, dict) and temp.get("source"):
+            src = f" ({temp['source']})"
+        if temp_n >= ALERT_TEMP_HOT:
+            alerts.append(
+                {
+                    "level": "hot",
+                    "code": "temp_hot",
+                    "message": f"Temperatura {temp_n:.0f}°C{src}",
+                }
+            )
+        elif temp_n >= ALERT_TEMP_WARN:
+            alerts.append(
+                {
+                    "level": "warn",
+                    "code": "temp_warn",
+                    "message": f"Temperatura {temp_n:.0f}°C{src}",
+                }
+            )
+
     reclaim = docker.get("reclaimable_bytes") if isinstance(docker, dict) else None
     if isinstance(reclaim, (int, float)) and reclaim >= ALERT_DOCKER_RECLAIM_GIB * (1000**3):
         gib = reclaim / (1000**3)
@@ -401,8 +768,89 @@ def _host_stats_key(stats: dict[str, Any]) -> str:
     return str(stats.get("hostname") or "unknown").strip() or "unknown"
 
 
+def _history_point(stats: dict[str, Any]) -> dict[str, Any]:
+    """Punto compacto para la serie histórica (mismo doc Mongo)."""
+    cpu = stats.get("cpu") if isinstance(stats.get("cpu"), dict) else {}
+    ram = stats.get("ram") if isinstance(stats.get("ram"), dict) else {}
+    disk = stats.get("disk") if isinstance(stats.get("disk"), dict) else {}
+    temp = stats.get("temperature") if isinstance(stats.get("temperature"), dict) else {}
+    docker = stats.get("docker") if isinstance(stats.get("docker"), dict) else {}
+    return {
+        "t": stats.get("reported_at"),
+        "cpu": cpu.get("percent"),
+        "ram": ram.get("percent"),
+        "disk": disk.get("percent"),
+        "temp": temp.get("celsius"),
+        "dkr": docker.get("reclaimable_bytes"),
+    }
+
+
+def _parse_history_ts(value: Any) -> datetime | None:
+    if isinstance(value, datetime):
+        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    if isinstance(value, str) and value:
+        try:
+            return datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    return None
+
+
+def merge_host_history(
+    previous: dict[str, Any] | None,
+    stats: dict[str, Any],
+    *,
+    max_points: int | None = None,
+    max_age_seconds: int | None = None,
+) -> list[dict[str, Any]]:
+    """Append del snapshot actual + retención acotada (edad y cantidad)."""
+    cap = max_points if max_points is not None else HOST_STATS_HISTORY_MAX
+    max_age = max_age_seconds if max_age_seconds is not None else HOST_STATS_HISTORY_MAX_AGE
+    prev_rows = []
+    if isinstance(previous, dict):
+        raw = previous.get("history")
+        if isinstance(raw, list):
+            prev_rows = [row for row in raw if isinstance(row, dict)]
+
+    point = _history_point(stats)
+    point_ts = _parse_history_ts(point.get("t"))
+    cutoff = None
+    if point_ts is not None and max_age > 0:
+        cutoff = point_ts.timestamp() - float(max_age)
+
+    merged: list[dict[str, Any]] = []
+    seen_t = set()
+    point_t = point.get("t")
+    if point_t:
+        seen_t.add(str(point_t))
+    for row in prev_rows:
+        ts = _parse_history_ts(row.get("t"))
+        if cutoff is not None and ts is not None and ts.timestamp() < cutoff:
+            continue
+        row_t = _iso(row.get("t")) if isinstance(row.get("t"), datetime) else row.get("t")
+        # Evitar duplicar el mismo instante exacto (re-save del mismo snapshot).
+        if row_t is not None and str(row_t) in seen_t:
+            continue
+        if row_t is not None:
+            seen_t.add(str(row_t))
+        merged.append(
+            {
+                "t": row_t,
+                "cpu": row.get("cpu"),
+                "ram": row.get("ram"),
+                "disk": row.get("disk"),
+                "temp": row.get("temp"),
+                "dkr": row.get("dkr"),
+            }
+        )
+    merged.append(point)
+    if cap > 0 and len(merged) > cap:
+        merged = merged[-cap:]
+    return merged
+
+
 def report_host_stats(repo: Any, *, force: bool = False) -> dict[str, Any] | None:
-    """Persiste métricas del host (1 doc por máquina)."""
+    """Persiste métricas del host (1 doc por máquina) + historial acotado."""
     global _LAST_HOST_REPORT_AT
     now = time.monotonic()
     if not force and (now - _LAST_HOST_REPORT_AT) < HOST_STATS_REPORT_SECONDS:
@@ -410,6 +858,13 @@ def report_host_stats(repo: Any, *, force: bool = False) -> dict[str, Any] | Non
     _LAST_HOST_REPORT_AT = now
     stats = collect_host_stats()
     key = f"{HOST_STATS_SETTING_PREFIX}{_host_stats_key(stats)}"
+    previous = None
+    if hasattr(repo, "get_app_setting"):
+        try:
+            previous = repo.get_app_setting(key)
+        except Exception:
+            previous = None
+    stats["history"] = merge_host_history(previous, stats)
     if hasattr(repo, "save_app_setting"):
         repo.save_app_setting(key, stats)
     return stats
@@ -515,7 +970,10 @@ def admin_hosts_payload(repo: Any) -> dict[str, Any]:
                 "cpu": None,
                 "ram": None,
                 "disk": None,
+                "temperature": None,
                 "docker": None,
+                "facts": None,
+                "history": [],
             }
             row["alerts"] = host_alerts(row)
             hosts.append(row)
@@ -523,6 +981,8 @@ def admin_hosts_payload(repo: Any) -> dict[str, Any]:
         age = _reported_age_seconds(raw.get("reported_at"))
         stale = age is None or age > HOST_STATS_MAX_AGE
         reported = raw.get("reported_at")
+        history_raw = raw.get("history")
+        history = [h for h in history_raw if isinstance(h, dict)] if isinstance(history_raw, list) else []
         row = {
             "id": known["id"],
             "label": known["label"],
@@ -539,7 +999,10 @@ def admin_hosts_payload(repo: Any) -> dict[str, Any]:
             "cpu": raw.get("cpu"),
             "ram": raw.get("ram"),
             "disk": raw.get("disk"),
+            "temperature": raw.get("temperature"),
             "docker": raw.get("docker"),
+            "facts": raw.get("facts") if isinstance(raw.get("facts"), dict) else None,
+            "history": history,
         }
         row["alerts"] = host_alerts(row)
         hosts.append(row)
@@ -567,8 +1030,14 @@ def admin_hosts_payload(repo: Any) -> dict[str, Any]:
             "disk_warn": ALERT_DISK_WARN,
             "disk_hot": ALERT_DISK_HOT,
             "ram_warn": ALERT_RAM_WARN,
+            "temp_warn": ALERT_TEMP_WARN,
+            "temp_hot": ALERT_TEMP_HOT,
             "docker_reclaim_gib": ALERT_DOCKER_RECLAIM_GIB,
             "stale_seconds": HOST_STATS_MAX_AGE,
+        },
+        "history": {
+            "max_points": HOST_STATS_HISTORY_MAX,
+            "max_age_seconds": HOST_STATS_HISTORY_MAX_AGE,
         },
         "max_age_seconds": HOST_STATS_MAX_AGE,
         "report_interval_seconds": HOST_STATS_REPORT_SECONDS,
@@ -576,7 +1045,7 @@ def admin_hosts_payload(repo: Any) -> dict[str, Any]:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Reporta CPU/RAM/disco del host a Mongo.")
+    parser = argparse.ArgumentParser(description="Reporta CPU/RAM/disco/temp del host a Mongo.")
     parser.add_argument("--once", action="store_true", help="Una sola publicación (default)")
     parser.add_argument("--loop", action="store_true", help="Publicar en bucle")
     parser.add_argument(
@@ -597,9 +1066,12 @@ def main() -> None:
                 try:
                     stats = report_host_stats(repo, force=True)
                     if stats:
+                        temp = (stats.get("temperature") or {}).get("celsius")
+                        temp_txt = f" temp={temp}°C" if temp is not None else ""
                         print(
                             f"host-stats: {display_label(stats)} "
-                            f"{stats.get('ip')} cpu={stats.get('cpu', {}).get('percent')}%",
+                            f"{stats.get('ip')} cpu={stats.get('cpu', {}).get('percent')}%"
+                            f"{temp_txt}",
                             flush=True,
                         )
                 except Exception as exc:

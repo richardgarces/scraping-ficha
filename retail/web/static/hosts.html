@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#258fdf">
   <title>Hosts</title>
   <script>(function(){var m=localStorage.getItem("retail-theme");if(m==="day"||m==="night"){document.documentElement.dataset.theme=m;return;}var h=new Date().getHours();document.documentElement.dataset.theme=(h>=7&&h<19)?"day":"night";})();</script>
-  <link rel="stylesheet" href="/static/styles.css?v=101-hosts-photo">
+  <link rel="stylesheet" href="/static/styles.css?v=103-hosts-facts">
 </head>
 <body>
   <header class="top">
@@ -61,18 +61,25 @@
       <div class="cron-head">
         <div>
           <h2>Recursos de hosts</h2>
-          <p class="muted">CPU, RAM, disco y Docker reclaimable de BMAX, soyo y Orange Pi. Alertas si disco ≥80 %, RAM ≥90 % o heartbeat <em>stale</em>. En cada host: mantenimiento (updates, firewall, Docker…). <a href="/cron">Cron</a> · <a href="/cyber-day">Cyber</a>.</p>
+          <p class="muted">CPU, RAM, disco, temperatura y Docker reclaimable de BMAX, soyo y Orange Pi. Clic en una tarjeta para ver características (CPU, memoria, OS…). Historial acotado (hasta ~24 h) para temperatura y CPU. Alertas si disco ≥80 %, RAM ≥90 %, temp ≥70 °C o heartbeat <em>stale</em>. En cada host: mantenimiento (updates, firewall, Docker…). <a href="/cron">Cron</a> · <a href="/cyber-day">Cyber</a>.</p>
         </div>
         <div class="cron-controls">
           <button type="button" id="hosts-refresh" class="secondary">Actualizar</button>
         </div>
       </div>
       <div id="hosts-alerts" class="hosts-alerts" hidden aria-live="polite"></div>
+      <div id="hosts-trends" class="hosts-trends" hidden aria-live="polite"></div>
       <div id="hosts-grid" class="hosts-grid" aria-live="polite"></div>
       <p id="hosts-meta" class="muted cyber-host-note"></p>
     </section>
   </main>
+  <div id="hosts-detail-modal" class="modal hosts-detail-modal" hidden>
+    <div class="modal-content hosts-detail-content" role="dialog" aria-modal="true" aria-labelledby="hosts-detail-title">
+      <button type="button" class="modal-close" id="hosts-detail-close" aria-label="Cerrar">×</button>
+      <div id="hosts-detail-body"></div>
+    </div>
+  </div>
   <script src="/static/prices.js?v=84"></script>
-  <script src="/static/hosts.js?v=5"></script>
+  <script src="/static/hosts.js?v=8"></script>
 </body>
 </html>

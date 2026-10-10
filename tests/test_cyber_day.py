@@ -1190,6 +1190,7 @@ def test_host_stats_collect_report_and_dedupe(repo, monkeypatch):
     assert stats["hostname"]
     assert stats["ip"] == "192.168.1.90"
     assert "cpu" in stats and "ram" in stats and "disk" in stats
+    assert "temperature" in stats  # None si no hay sensor / sysfs
     assert stats["ram"]["total_bytes"] is None or stats["ram"]["total_bytes"] > 0
     first = report_host_stats(repo, force=True)
     assert first is not None
