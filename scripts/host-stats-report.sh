@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Publica CPU/RAM/disco/temp/potencia del host a Mongo (app_settings cyber_day_host_stats:{ip}).
 # BMAX: docker exec precios-web (o venv). soyo: venv o imagen worker.
+# Orange Pi: docker exec precios-cyber-worker-pi-* (o compose worker.pi).
 # Uso: HOST_STATS_HOST_IP=192.168.1.198 bash scripts/host-stats-report.sh
 set -euo pipefail
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
@@ -19,7 +20,8 @@ fi
 if [[ -z "${HOST_STATS_HOST_IP:-}" && -z "${CYBER_DAY_HOST_IP:-}" ]]; then
   case "$(hostname -s 2>/dev/null || hostname || true)" in
     soyo*|precios-worker-soyo*) export HOST_STATS_HOST_IP=192.168.1.197 ;;
-    bmax*|precios*) export HOST_STATS_HOST_IP=192.168.1.198 ;;
+    orangepi*|orangepizero*|opi*|precios-cyber-pi*) export HOST_STATS_HOST_IP=192.168.1.90 ;;
+    bmax*|precios*|richard-bmax*) export HOST_STATS_HOST_IP=192.168.1.198 ;;
   esac
 fi
 export HOST_STATS_HOST_IP="${HOST_STATS_HOST_IP:-${CYBER_DAY_HOST_IP:-}}"
@@ -408,6 +410,24 @@ host_power_env() {
   fi
 }
 
+# Contenedor Cyber en Orange Pi (cualquier pin sano sirve para --once).
+pick_pi_cyber_container() {
+  local name
+  for name in \
+    precios-cyber-worker-pi-junio \
+    precios-cyber-worker-pi-oct \
+    precios-cyber-worker-pi-cambio \
+    precios-cyber-worker-pi-alertas \
+    precios-cyber-worker-pi-seq
+  do
+    if docker inspect -f '{{.State.Running}}' "${name}" 2>/dev/null | grep -qx true; then
+      printf '%s' "${name}"
+      return 0
+    fi
+  done
+  return 1
+}
+
 run_once() {
   docker_df_env
   host_temp_env
@@ -429,6 +449,24 @@ run_once() {
       precios-web python -m retail.host_stats --once
     return
   fi
+  # Orange Pi: workers Cyber ya montan retail/host_stats.py y tienen Mongo en .env.
+  if command -v docker >/dev/null 2>&1; then
+    local pi_ctr
+    if pi_ctr="$(pick_pi_cyber_container)"; then
+      docker exec \
+        -e HOST_STATS_HOST_IP="${HOST_STATS_HOST_IP}" \
+        -e CYBER_DAY_HOST_IP="${CYBER_DAY_HOST_IP}" \
+        -e HOST_STATS_SECONDS="${HOST_STATS_SECONDS:-15}" \
+        -e HOST_STATS_DOCKER_DF_B64="${HOST_STATS_DOCKER_DF_B64:-}" \
+        -e HOST_STATS_TEMP_C="${HOST_STATS_TEMP_C:-}" \
+        -e HOST_STATS_TEMP_SOURCE="${HOST_STATS_TEMP_SOURCE:-}" \
+        -e HOST_STATS_POWER_W="${HOST_STATS_POWER_W:-}" \
+        -e HOST_STATS_POWER_SOURCE="${HOST_STATS_POWER_SOURCE:-}" \
+        -e HOST_STATS_FACTS_B64="${HOST_STATS_FACTS_B64:-}" \
+        "${pi_ctr}" python -m retail.host_stats --once
+      return
+    fi
+  fi
   if [[ -f "${ROOT}/.venv/bin/activate" ]]; then
     # shellcheck disable=SC1091
     source "${ROOT}/.venv/bin/activate"
@@ -437,6 +475,20 @@ run_once() {
     export HOST_STATS_POWER_SOURCE="${HOST_STATS_POWER_SOURCE:-}"
     export HOST_STATS_RAPL_STATE_FILE="${ROOT}/logs/host-stats-rapl-py.state"
     python -m retail.host_stats --once
+    return
+  fi
+  if command -v docker >/dev/null 2>&1 && [[ -f "${ROOT}/docker-compose.worker.pi.yml" ]] \
+    && docker image inspect precios-cyber-worker >/dev/null 2>&1; then
+    docker compose -f "${ROOT}/docker-compose.worker.pi.yml" run --rm --no-deps -T \
+      -e HOST_STATS_HOST_IP="${HOST_STATS_HOST_IP}" \
+      -e CYBER_DAY_HOST_IP="${CYBER_DAY_HOST_IP}" \
+      -e HOST_STATS_DOCKER_DF_B64="${HOST_STATS_DOCKER_DF_B64:-}" \
+      -e HOST_STATS_TEMP_C="${HOST_STATS_TEMP_C:-}" \
+      -e HOST_STATS_TEMP_SOURCE="${HOST_STATS_TEMP_SOURCE:-}" \
+      -e HOST_STATS_POWER_W="${HOST_STATS_POWER_W:-}" \
+      -e HOST_STATS_POWER_SOURCE="${HOST_STATS_POWER_SOURCE:-}" \
+      -e HOST_STATS_FACTS_B64="${HOST_STATS_FACTS_B64:-}" \
+      cyber-junio2026 python -m retail.host_stats --once
     return
   fi
   if command -v docker >/dev/null 2>&1 && docker image inspect precios-worker >/dev/null 2>&1; then
@@ -452,7 +504,7 @@ run_once() {
       worker python -m retail.host_stats --once
     return
   fi
-  echo "$(date '+%Y-%m-%dT%H:%M:%S%z') host-stats: falta precios-web, .venv o precios-worker" >&2
+  echo "$(date '+%Y-%m-%dT%H:%M:%S%z') host-stats: falta precios-web, worker Pi, .venv o precios-worker" >&2
   exit 1
 }
 

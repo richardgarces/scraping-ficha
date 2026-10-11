@@ -249,7 +249,7 @@ function mountRefreshPrice(item) {
   if (!button || !item?.store || !item?.product_id) return;
   button.addEventListener("click", async () => {
     button.disabled = true;
-    button.textContent = "Encolando…";
+    button.textContent = "Actualizando…";
     try {
       const response = await fetch(
         `/api/product/refresh?store=${encodeURIComponent(item.store)}&id=${encodeURIComponent(item.product_id)}`,
@@ -257,12 +257,12 @@ function mountRefreshPrice(item) {
       );
       const data = await response.json().catch(() => ({}));
       if (!response.ok) {
-        flash(typeof data.detail === "string" ? data.detail : "No se pudo encolar la actualización.");
+        flash(typeof data.detail === "string" ? data.detail : "No se pudo iniciar la actualización.");
         button.disabled = false;
         button.textContent = "Actualizar precio";
         return;
       }
-      button.textContent = data.queued === false ? "En curso" : "Encolado";
+      button.textContent = "Actualizando";
       const freshness = $("price-freshness");
       if (freshness) {
         freshness.hidden = false;
@@ -273,7 +273,7 @@ function mountRefreshPrice(item) {
         button.textContent = "Actualizar precio";
       }, 8000);
     } catch (error) {
-      flash(error.message || "No se pudo encolar la actualización.");
+      flash(error.message || "No se pudo iniciar la actualización.");
       button.disabled = false;
       button.textContent = "Actualizar precio";
     }
@@ -851,27 +851,16 @@ function limitedTickIndexes(count, maximum = 5) {
   return [...new Set(Array.from({ length: maximum }, (_, index) => Math.round(index * (count - 1) / (maximum - 1))))];
 }
 
-function chartPointLabel(point, meaningfulNormal) {
-  const parts = [chartDateLabel(point.day, true)];
-  parts.push(`${meaningfulNormal ? "Oferta" : "Precio"}: ${money(point.offer)}`);
-  if (meaningfulNormal && point.normal != null) {
-    parts.push(`Normal: ${money(point.normal)}`);
-    if (point.offer < point.normal) {
-      const saving = point.normal - point.offer;
-      parts.push(`Ahorro: ${money(saving)} (${Math.round(saving * 100 / point.normal)}%)`);
-    } else {
-      parts.push("Sin descuento");
-    }
-  }
-  return parts.join(" · ");
+function chartPointLabel(point) {
+  return `${chartDateLabel(point.day, true)} · Precio oferta: ${money(point.offer)}`;
 }
 
-function mountChartPointInteractions(container, observations, meaningfulNormal) {
+function mountChartPointInteractions(container, observations) {
   const tooltip = $("chart-tooltip");
   for (const target of container.querySelectorAll("[data-chart-point]")) {
     const show = () => {
       const point = observations[Number(target.dataset.chartPoint)];
-      if (point && tooltip) tooltip.textContent = chartPointLabel(point, meaningfulNormal);
+      if (point && tooltip) tooltip.textContent = chartPointLabel(point);
     };
     target.addEventListener("click", show);
     target.addEventListener("focus", show);
@@ -879,7 +868,7 @@ function mountChartPointInteractions(container, observations, meaningfulNormal) 
   }
 }
 
-/** Gráfico único: observaciones reales, sin rellenar días ni duplicar series iguales. */
+/** Gráfico único: solo precio oferta (observaciones reales, sin rellenar días). */
 function renderCharts() {
   const observations = observationsForWindow(windowDays);
   const container = $("chart-combined");
@@ -895,67 +884,54 @@ function renderCharts() {
   }
 
   const offerRows = observations.filter((point) => point.offer != null);
-  const paired = observations.filter((point) => point.offer != null && point.normal != null);
-  const meaningfulNormal = PriceHistory.hasMeaningfulNormal(paired);
   const offerStats = observedStats(offerRows.map((point) => point.offer));
   summary.innerHTML = summaryCards(offerStats);
   summary.setAttribute(
     "aria-label",
-    `Resumen de ${offerStats.count} observaciones: actual ${money(offerStats.current)}, mínimo ${money(offerStats.min)}, máximo ${money(offerStats.max)}, promedio ${money(offerStats.average)}.`
+    `Resumen de precio oferta (${offerStats.count} observaciones): actual ${money(offerStats.current)}, mínimo ${money(offerStats.min)}, máximo ${money(offerStats.max)}, promedio ${money(offerStats.average)}.`
   );
-  legend.innerHTML = meaningfulNormal
-    ? '<span><i class="offer"></i>Oferta</span><span><i class="normal"></i>Normal (línea discontinua)</span><span><i class="discount"></i>Ahorro observado</span>'
-    : '<span><i class="offer"></i>Precio observado</span>';
+  legend.innerHTML = '<span><i class="offer"></i>Precio oferta</span><span><i class="marker-min"></i>Mínimo</span><span><i class="marker-now"></i>Actual</span>';
 
-  const allPrices = offerRows.flatMap((point) => meaningfulNormal && point.normal != null
-    ? [point.offer, point.normal]
-    : [point.offer]);
+  const allPrices = offerRows.map((point) => point.offer);
   if (!allPrices.length) {
-    container.innerHTML = "<p class='muted chart-empty'>No hay precios válidos en este período.</p>";
+    container.innerHTML = "<p class='muted chart-empty'>No hay precios de oferta en este período.</p>";
     return;
   }
   const width = 760;
   const height = 300;
-  const plot = { left: 82, right: 18, top: 26, bottom: 54 };
+  const plot = { left: 88, right: 22, top: 28, bottom: 52 };
   const rawMin = Math.min(...allPrices);
   const rawMax = Math.max(...allPrices);
-  const spread = Math.max(rawMax - rawMin, Math.round(rawMax * 0.08), 1);
-  const domainMin = Math.max(0, rawMin - spread * 0.12);
-  const domainMax = rawMax + spread * 0.12;
+  const spread = Math.max(rawMax - rawMin, Math.round(rawMax * 0.06), 1);
+  const domainMin = Math.max(0, rawMin - spread * 0.18);
+  const domainMax = rawMax + spread * 0.14;
   const toX = (index) => plot.left + index * (width - plot.left - plot.right) / Math.max(observations.length - 1, 1);
   const toY = (price) => plot.top + (domainMax - price) * (height - plot.top - plot.bottom) / (domainMax - domainMin);
-  const offerPath = offerRows.map((point) => {
+  const offerCoords = offerRows.map((point) => {
     const index = observations.indexOf(point);
-    return `${toX(index).toFixed(1)},${toY(point.offer).toFixed(1)}`;
-  }).join(" ");
-  const normalRows = meaningfulNormal ? observations.filter((point) => point.normal != null) : [];
-  const normalPath = normalRows.map((point) => {
-    const index = observations.indexOf(point);
-    return `${toX(index).toFixed(1)},${toY(point.normal).toFixed(1)}`;
-  }).join(" ");
-  const guides = [domainMin, (domainMin + domainMax) / 2, domainMax].map((value) => {
+    return { x: toX(index), y: toY(point.offer) };
+  });
+  const offerPath = offerCoords.map((point) => `${point.x.toFixed(1)},${point.y.toFixed(1)}`).join(" ");
+  const areaPath = offerCoords.length
+    ? `M ${offerCoords[0].x.toFixed(1)},${(height - plot.bottom).toFixed(1)} L ${offerPath} L ${offerCoords[offerCoords.length - 1].x.toFixed(1)},${(height - plot.bottom).toFixed(1)} Z`
+    : "";
+  const guideValues = [domainMin, (domainMin + domainMax) / 2, domainMax];
+  const guides = guideValues.map((value) => {
     const y = toY(value);
     return `<line class="chart-grid" x1="${plot.left}" x2="${width - plot.right}" y1="${y.toFixed(1)}" y2="${y.toFixed(1)}"/>
       <text class="axis price-axis" x="${plot.left - 10}" y="${(y + 4).toFixed(1)}" text-anchor="end">${money(Math.round(value))}</text>`;
   }).join("");
+  const spanYears = observations[0].day.slice(0, 4) !== observations[observations.length - 1].day.slice(0, 4);
   const dates = limitedTickIndexes(observations.length).map((index) => {
     const anchor = chartAxisAnchor(index, observations.length);
-    return `<text class="axis" x="${toX(index).toFixed(1)}" y="${height - 18}" text-anchor="${anchor}">${chartDateLabel(observations[index].day, false)}</text>`;
-  }).join("");
-  const bands = observations.map((point, index) => {
-    if (!meaningfulNormal || point.offer == null || point.normal == null || point.offer >= point.normal) return "";
-    const x = toX(index);
-    const top = toY(point.normal);
-    const bottom = toY(point.offer);
-    return `<rect class="chart-discount-band" x="${(x - 8).toFixed(1)}" y="${top.toFixed(1)}" width="16" height="${Math.max(bottom - top, 2).toFixed(1)}" rx="5"/>`;
+    return `<text class="axis" x="${toX(index).toFixed(1)}" y="${height - 16}" text-anchor="${anchor}">${chartDateLabel(observations[index].day, spanYears)}</text>`;
   }).join("");
   const points = observations.map((point, index) => {
     if (point.offer == null) return "";
-    const label = chartPointLabel(point, meaningfulNormal);
-    const saving = meaningfulNormal && point.normal != null && point.offer < point.normal;
+    const label = chartPointLabel(point);
     return `<g class="chart-hit" data-chart-point="${index}" tabindex="0" role="button" aria-label="${attr(label)}">
       <circle class="chart-touch-target" cx="${toX(index).toFixed(1)}" cy="${toY(point.offer).toFixed(1)}" r="18"/>
-      <circle class="chart-series chart-point offer${saving ? " discounted" : ""}" cx="${toX(index).toFixed(1)}" cy="${toY(point.offer).toFixed(1)}" r="4.5"><title>${label}</title></circle>
+      <circle class="chart-series chart-point offer" cx="${toX(index).toFixed(1)}" cy="${toY(point.offer).toFixed(1)}" r="4.5"><title>${label}</title></circle>
     </g>`;
   }).join("");
   const currentIndex = observations.length - 1;
@@ -967,17 +943,16 @@ function renderCharts() {
     </circle>
     ${sameMarker ? "" : `<circle class="chart-marker current" cx="${toX(currentIndex).toFixed(1)}" cy="${toY(observations[currentIndex].offer).toFixed(1)}" r="8"><title>Precio actual: ${money(offerStats.current)}</title></circle>`}`;
   container.innerHTML = `
-    <svg class="chart combined-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="Historial con ${offerStats.count} observaciones reales. Actual ${money(offerStats.current)}; mínimo ${money(offerStats.min)}; máximo ${money(offerStats.max)}.">
-      ${guides}${bands}
-      ${normalRows.length > 1 ? `<polyline class="chart-series normal" fill="none" points="${normalPath}"/>` : ""}
-      ${offerRows.length > 1 ? `<polyline class="chart-series offer" fill="none" stroke-width="3" points="${offerPath}"/>` : ""}
+    <svg class="chart combined-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="Evolución del precio oferta con ${offerStats.count} observaciones. Actual ${money(offerStats.current)}; mínimo ${money(offerStats.min)}; máximo ${money(offerStats.max)}.">
+      ${guides}
+      ${areaPath ? `<path class="chart-offer-area" d="${areaPath}"/>` : ""}
+      ${offerRows.length > 1 ? `<polyline class="chart-series offer" fill="none" stroke-width="3.25" points="${offerPath}"/>` : ""}
       ${markers}${points}${dates}
     </svg>`;
-  const discounts = paired.filter((point) => point.offer < point.normal);
-  note.textContent = meaningfulNormal
-    ? `${offerStats.count} observaciones en el período · ${discounts.length} con ahorro frente al precio normal.`
-    : `${offerStats.count} observaciones en el período · Oferta y normal fueron iguales cuando ambas se informaron; no hubo descuento publicado.`;
-  mountChartPointInteractions(container, observations, meaningfulNormal);
+  const change = offerStats.current - offerStats.first;
+  const changeLabel = change === 0 ? "sin cambio" : `${change > 0 ? "+" : "−"}${money(Math.abs(change))}`;
+  note.textContent = `${offerStats.count} observaciones de precio oferta · Actual ${money(offerStats.current)} · Mín ${money(offerStats.min)} · Máx ${money(offerStats.max)} · Cambio ${changeLabel}.`;
+  mountChartPointInteractions(container, observations);
 }
 
 const FORECAST_TRENDS = {
@@ -1666,11 +1641,9 @@ function paintPriceAlert(box, item, state) {
     return;
   }
   const active = Boolean(state.active);
-  const email = state.email || user.email || "";
-  const shown = email ? attr(email) : "";
   const note = active
-    ? `Te avisamos a ${shown || "tu correo"} si el precio cambia.`
-    : `Te avisamos a tu correo${shown ? ` (${shown})` : ""} si el precio sube o baja.`;
+    ? "Te avisamos por los canales de tu cuenta (push, correo, Telegram) si el precio cambia."
+    : "Te avisamos por los canales de tu cuenta (push, correo, Telegram) si el precio sube o baja.";
   box.innerHTML = `
     <button type="button" class="secondary${active ? " current" : ""}" data-price-alert="${active ? "off" : "on"}" data-store="${attr(item.store)}" data-id="${attr(item.product_id)}">${active ? "Alerta activa" : "Activar alerta"}</button>
     <p class="muted price-alert-note">${note}</p>`;
@@ -1694,36 +1667,6 @@ async function mountPriceAlert(item) {
   }
   paintPriceAlert(box, item, { user, active: data.active, email: data.email || user.email });
 }
-
-document.addEventListener("click", async (event) => {
-  const button = event.target.closest("[data-price-alert]");
-  if (!button || button.disabled) return;
-  const store = button.dataset.store;
-  const id = button.dataset.id;
-  if (!store || !id) return;
-  button.disabled = true;
-  const turnOff = button.dataset.priceAlert === "off";
-  const params = new URLSearchParams({ store, id });
-  try {
-    const response = turnOff
-      ? await fetch(`/api/price-alert?${params}`, { method: "DELETE" })
-      : await fetch("/api/price-alert", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ store, product_id: id }),
-        });
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      flash(typeof data.detail === "string" ? data.detail : "No se pudo guardar la alerta.");
-      button.disabled = false;
-      return;
-    }
-    await mountPriceAlert({ store, product_id: id });
-  } catch (error) {
-    flash(error.message || "No se pudo guardar la alerta.");
-    button.disabled = false;
-  }
-});
 
 $("others").addEventListener("click", (event) => {
   if (event.target.closest("a")) return;

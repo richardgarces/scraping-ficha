@@ -1248,5 +1248,6 @@ def test_delete_list_blocks_running_and_last(repo):
     slugs = {item["slug"] for item in list_all_lists(repo)}
     assert "cyber_borrar" not in slugs
     assert "cyber_junio2026" in slugs
-    with pytest.raises(CyberDayError, match="única lista"):
-        delete_list(repo, "cyber_junio2026")
+    assert "alertas_usuarios" in slugs
+    with pytest.raises(CyberDayError, match="sistema"):
+        delete_list(repo, "alertas_usuarios")

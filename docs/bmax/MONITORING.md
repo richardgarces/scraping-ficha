@@ -18,7 +18,7 @@ Topología corta (LAN `192.168.1.0/24`, sin VPN).
 
 Grafana: compose en `~/platform-kit/ubuntu/platform/grafana/` — **no** está corriendo. Arrancar solo si hace falta dashboard UI.
 
-App Precios: `/hosts` sigue con `host_stats` → Mongo (CPU/RAM/temp). Prometheus es la capa host metrics estándar.
+App Precios: `/hosts` (sección **Tendencias**) usa `host_stats` → Mongo (CPU/RAM/temp/potencia + historial). Cron en BMAX/soyo/Orange Pi: `scripts/install-host-stats-cron.sh`. Prometheus es la capa host metrics estándar (node-exporter), aparte del panel.
 
 ## Archivos
 

@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# Instala cron cada minuto: scripts/host-stats-report.sh (BMAX o soyo).
+# Instala cron cada minuto: scripts/host-stats-report.sh (BMAX, soyo u Orange Pi).
 # Uso:
 #   HOST_STATS_HOST_IP=192.168.1.198 bash scripts/install-host-stats-cron.sh
 #   HOST_STATS_HOST_IP=192.168.1.197 bash scripts/install-host-stats-cron.sh
+#   HOST_STATS_HOST_IP=192.168.1.90  bash scripts/install-host-stats-cron.sh
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
@@ -27,6 +28,7 @@ mkdir -p "${ROOT}/logs"
 if [[ -z "${HOST_STATS_HOST_IP:-}" ]]; then
   case "$(hostname -s 2>/dev/null || hostname || true)" in
     soyo*) HOST_STATS_HOST_IP=192.168.1.197 ;;
+    orangepi*|orangepizero*|opi*) HOST_STATS_HOST_IP=192.168.1.90 ;;
     *) HOST_STATS_HOST_IP=192.168.1.198 ;;
   esac
 fi

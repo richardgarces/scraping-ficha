@@ -45,7 +45,11 @@ def test_cyber_day_static_assets_exist():
     assert "Eliminar lista" in html
     assert "Importar / actualizar lista activa" in html
     assert "reemplaza las queries" in html
-    assert "cyber-day.js?v=28" in html
+    assert "cyber-day.js?v=29-alertas" in html
+    assert "Agregó" in html
+    assert "Usuarios" in html
+    assert "isUserAlertsList" in js
+    assert "first_watcher_label" in js
     assert "styles.css?v=97-hosts" in html
     assert "cyber-host-panel" not in html
     assert "Host scrape" not in html

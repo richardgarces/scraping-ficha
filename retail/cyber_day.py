@@ -860,6 +860,7 @@ def ensure_default_list(repo: Any) -> dict[str, Any]:
 
     Si borraron la oficial pero quedan otras, no la recrea. Solo inserta
     `cyber_junio2026` cuando no hay ninguna meta de lista.
+    También asegura la lista sistema ``alertas_usuarios``.
     """
     coll = lists_collection(repo)
     now = _now()
@@ -879,6 +880,12 @@ def ensure_default_list(repo: Any) -> dict[str, Any]:
         )
     except Exception as exc:
         print(f"cyber-day: backfill list_id: {exc}", flush=True)
+    try:
+        from retail.user_alert_list import ensure_user_alerts_list
+
+        ensure_user_alerts_list(repo)
+    except Exception as exc:
+        print(f"cyber-day: ensure alertas_usuarios: {exc}", flush=True)
     if hasattr(repo, "get_app_setting") and not repo.get_app_setting(ACTIVE_LIST_SETTING):
         first = coll.find_one({}, sort=[("created_at", 1), ("slug", 1)]) or {}
         set_active_list(repo, str(first.get("slug") or CYBER_LIST_ID))
@@ -889,13 +896,19 @@ def ensure_default_list(repo: Any) -> dict[str, Any]:
 def list_meta_view(doc: dict[str, Any], *, products_count: int = 0, run: dict[str, Any] | None = None) -> dict[str, Any]:
     slug = str(doc.get("slug") or doc.get("list_id") or "")
     progress = progress_view(run or default_run(slug), product_total=products_count) if run is not None else None
+    from retail.user_alert_list import USER_ALERTS_SOURCE, is_user_alerts_list
+
+    system = bool(doc.get("system")) or is_user_alerts_list(slug)
+    source = doc.get("source") or (USER_ALERTS_SOURCE if system and is_user_alerts_list(slug) else None)
     return {
         "slug": slug,
         "list_id": slug,
         "name": doc.get("name") or doc.get("title") or slug,
         "title": doc.get("title") or doc.get("name") or slug,
         "products_count": products_count,
-        "source": doc.get("source"),
+        "source": source,
+        "system": system,
+        "is_user_alert": is_user_alerts_list(slug),
         "created_at": _iso(doc.get("created_at")),
         "updated_at": _iso(doc.get("updated_at")),
         "run": progress,
@@ -1001,6 +1014,14 @@ def delete_list(repo: Any, list_id: str | None = None) -> dict[str, Any]:
     meta = lists_collection(repo).find_one({"slug": lid})
     if not meta:
         raise CyberDayError(f"No existe la lista «{lid}».")
+    from retail.user_alert_list import USER_ALERTS_TITLE, is_user_alerts_list
+
+    if bool(meta.get("system")) or is_user_alerts_list(lid):
+        raise CyberDayError(
+            f"La lista «{USER_ALERTS_TITLE}» es del sistema y no se puede eliminar."
+            if is_user_alerts_list(lid)
+            else f"La lista «{lid}» es del sistema y no se puede eliminar."
+        )
     if lists_collection(repo).count_documents({}) <= 1:
         raise CyberDayError("No podés eliminar la única lista. Creá otra antes.")
     run = load_run(repo, lid)
@@ -1316,7 +1337,7 @@ def product_row_view(row: dict[str, Any]) -> dict[str, Any]:
     )
     discount = discount_insight(last_price, last_normal, min_normal=min_normal)
     advice = row.get("buy_advice") if isinstance(row.get("buy_advice"), dict) else None
-    return {
+    view = {
         "id": str(row.get("id") or row.get("_id") or ""),
         "n": row.get("n"),
         "order": row.get("order"),
@@ -1356,6 +1377,13 @@ def product_row_view(row: dict[str, Any]) -> dict[str, Any]:
         "last_change_at": _iso(row.get("last_change_at")),
         "list_id": row.get("list_id") or CYBER_LIST_ID,
     }
+    list_id = str(view.get("list_id") or "")
+    if row.get("alert_key") or row.get("watchers") or row.get("source") == "user_alerts":
+        from retail.user_alert_list import enrich_user_alert_row_fields, is_user_alerts_list
+
+        if is_user_alerts_list(list_id) or row.get("alert_key") or row.get("watchers"):
+            view.update(enrich_user_alert_row_fields(row))
+    return view
 
 
 def catalog_matches_for_query(repo: Any, query: str) -> list[dict[str, Any]]:
@@ -1744,6 +1772,15 @@ def import_products(
             "source": source,
         })
         existing_meta = {"slug": lid, "name": lid, "title": lid}
+    from retail.user_alert_list import USER_ALERTS_TITLE, is_user_alerts_list
+
+    if is_user_alerts_list(lid) or (
+        bool(existing_meta.get("system")) and str(existing_meta.get("source") or "") == "user_alerts"
+    ):
+        raise CyberDayError(
+            f"La lista «{USER_ALERTS_TITLE}» no admite import destructivo. "
+            "Las filas se sincronizan desde Activar alerta en la ficha."
+        )
     unique = dedupe_items(items)
     if not unique:
         raise CyberDayError("La lista importada está vacía.")
@@ -2815,9 +2852,21 @@ def process_one(repo: Any, *, delay: float = 0.0, list_id: str | None = None) ->
     touch_worker(repo, lid)
 
     try:
-        if not query:
+        from retail.user_alert_list import (
+            collect_user_alert_matches,
+            is_user_alerts_list,
+            notify_user_alert_change,
+        )
+
+        user_alerts = is_user_alerts_list(lid)
+        if not query and not user_alerts:
             raise CyberDayError("Query vacía.")
-        matches = collect_query_matches(repo, query, list_id=lid)
+        if user_alerts:
+            matches = collect_user_alert_matches(repo, item)
+        else:
+            if not query:
+                raise CyberDayError("Query vacía.")
+            matches = collect_query_matches(repo, query, list_id=lid)
         fresh = refresh_top_matches(repo, matches, list_id=lid) if matches else []
         tracked = fresh or matches
         current_sigs, changes, summary = detect_changes(
@@ -2834,7 +2883,11 @@ def process_one(repo: Any, *, delay: float = 0.0, list_id: str | None = None) ->
             if best_change and not _offer_change_covers_best(changes, best_change):
                 notify_queue.append(best_change)
             for change in notify_queue:
-                sent = notify_cyber_change(repo, change)
+                # Alertas usuarios: solo watchers (prefs). Sin broadcast a todos.
+                if user_alerts:
+                    sent = notify_user_alert_change(repo, change, item=item)
+                else:
+                    sent = notify_cyber_change(repo, change)
                 notified += sent
                 changed += 1
                 run["last_change"] = {
@@ -3140,6 +3193,11 @@ def main() -> None:
     parser.add_argument("--once", action="store_true")
     parser.add_argument("--healthcheck", action="store_true")
     parser.add_argument("--seed", action="store_true", help="Carga seed si la colección está vacía")
+    parser.add_argument(
+        "--backfill-user-alerts",
+        action="store_true",
+        help="Sincroniza price_alerts activos → lista Cyber alertas_usuarios",
+    )
     parser.add_argument("--delay", type=float, default=DEFAULT_DELAY)
     parser.add_argument(
         "--list-id",
@@ -3158,6 +3216,13 @@ def main() -> None:
     if not hasattr(repo, "cyber_day_products"):
         repo.cyber_day_products = repo.db["cyber_day_products"]
     try:
+        if args.backfill_user_alerts:
+            from retail.user_alert_list import backfill_from_price_alerts, ensure_user_alerts_list
+
+            ensure_user_alerts_list(repo)
+            result = backfill_from_price_alerts(repo)
+            print(result, flush=True)
+            return
         if args.seed or args.healthcheck or args.once:
             ensure_seed(repo, CYBER_DAY_LIST_ID or CYBER_LIST_ID)
         if args.healthcheck:

@@ -1034,8 +1034,11 @@ async def activate_price_alert(request: Request) -> dict:
         user = current_user(request, repo)
         if not user:
             raise HTTPException(status_code=401, detail="Entra para activar una alerta de precio.")
-        if not str(user.get("email") or "").strip():
-            raise HTTPException(status_code=400, detail="Tu cuenta no tiene correo para avisar.")
+        from retail.user_alert_list import add_user_alert, user_can_activate_alert
+
+        ok, detail = user_can_activate_alert(user)
+        if not ok:
+            raise HTTPException(status_code=400, detail=detail)
         document = repo.product_detail(store_id, product_id) or {}
         repo.save_price_alert(
             {
@@ -1049,6 +1052,17 @@ async def activate_price_alert(request: Request) -> dict:
                 "watch_changes": True,
             }
         )
+        try:
+            add_user_alert(
+                repo,
+                user,
+                store=store_id,
+                product_id=product_id,
+                document=document,
+            )
+        except Exception as exc:
+            # La alerta de precio ya quedó; no tumbar la ficha por sync Cyber.
+            print(f"price-alert: sync alertas_usuarios falló: {exc}", flush=True)
         try:
             from retail.funnel_stats import record_funnel_event
 
@@ -1069,6 +1083,24 @@ def deactivate_price_alert(request: Request, store: str = Query(...), id: str = 
         if not user:
             raise HTTPException(status_code=401, detail="Entra para activar una alerta de precio.")
         repo.delete_price_alert(user["id"], store_id, product_id)
+        try:
+            from retail.user_alert_list import remove_user_alert
+
+            document = {}
+            if hasattr(repo, "product_detail"):
+                try:
+                    document = repo.product_detail(store_id, product_id) or {}
+                except Exception:
+                    document = {}
+            remove_user_alert(
+                repo,
+                user,
+                store=store_id,
+                product_id=product_id,
+                document=document,
+            )
+        except Exception as exc:
+            print(f"price-alert: remove alertas_usuarios falló: {exc}", flush=True)
         return {"active": False, "email": user.get("email") or ""}
     finally:
         repo.close()

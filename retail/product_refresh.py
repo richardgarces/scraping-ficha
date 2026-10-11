@@ -174,4 +174,4 @@ def launch_product_refresh(repo_factory, store: str, product_id: str) -> dict[st
 
     thread = threading.Thread(target=_run, name=f"price-refresh-{store}-{product_id}", daemon=True)
     thread.start()
-    return {"ok": True, "queued": True, "detail": "Actualización encolada."}
+    return {"ok": True, "queued": True, "detail": "Actualizando…"}

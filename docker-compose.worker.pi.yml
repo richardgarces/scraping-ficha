@@ -1,7 +1,8 @@
 # Orange Pi (192.168.1.90): Cyber Day workers → BMAX Mongo/Redis.
-# Ops: ./cyber-pi.sh start --parallel 3|2
-#   parallel 3 → 3 contenedores pineados (1 lista c/u)
-#   parallel 2 → 2 pineados + 1 secuencial (CYBER_DAY_EXCLUDE_LIST_IDS de los pines)
+# Ops: ./cyber-pi.sh start --parallel 4|3|2
+#   parallel 4 → 4 pines (junio / oct / cambio / alertas_usuarios)
+#   parallel 3 → 3 contenedores pineados (1 lista c/u; sin alertas)
+#   parallel 2 → 2 pineados + 1 secuencial (CYBER_DAY_EXCLUDE_LIST_IDS de los pines + alertas)
 # Mantener BMAX/soyo precios-cyber-worker* parados.
 
 x-cyber-common: &cyber-common
@@ -24,6 +25,7 @@ x-cyber-common: &cyber-common
     CYBER_DAY_HOST_STATS_SECONDS: ${CYBER_DAY_HOST_STATS_SECONDS:-15}
   volumes:
     - ./retail/cyber_day.py:/app/retail/cyber_day.py:ro
+    - ./retail/user_alert_list.py:/app/retail/user_alert_list.py:ro
     - ./retail/host_stats.py:/app/retail/host_stats.py:ro
     - ./data/cyber_day_sonic.json:/app/data/cyber_day_sonic.json:ro
     - ./output:/app/output
@@ -33,7 +35,7 @@ x-cyber-common: &cyber-common
   mem_limit: 384m
 
 services:
-  # --- Pines (parallel 3 usa los 3; parallel 2 usa junio+oct) ---
+  # --- Pines (parallel 4 = 3 + alertas; parallel 3 usa junio/oct/cambio; parallel 2 usa junio+oct) ---
   cyber-junio2026:
     <<: *cyber-common
     hostname: precios-cyber-pi
@@ -76,7 +78,22 @@ services:
       retries: 4
       start_period: 40s
 
-  # --- Secuencial del resto (solo parallel 2): excluye los 2 pines dedicados ---
+  # Lista sistema alertas_usuarios (Activar alerta → sync). Solo parallel 4 / start alertas.
+  cyber-alertas:
+    <<: *cyber-common
+    hostname: precios-cyber-pi
+    container_name: precios-cyber-worker-pi-alertas
+    environment:
+      <<: *cyber-env
+      CYBER_DAY_LIST_ID: alertas_usuarios
+    healthcheck:
+      test: ["CMD", "python", "-m", "retail.cyber_day", "--healthcheck", "--list-id", "alertas_usuarios"]
+      interval: 30s
+      timeout: 12s
+      retries: 4
+      start_period: 40s
+
+  # --- Secuencial del resto (solo parallel 2): excluye pines + alertas_usuarios ---
   cyber-sequential:
     <<: *cyber-common
     hostname: precios-cyber-pi
@@ -84,7 +101,7 @@ services:
     environment:
       <<: *cyber-env
       CYBER_DAY_MULTI_LIST_MODE: sequential
-      CYBER_DAY_EXCLUDE_LIST_IDS: cyber_junio2026,cyber_oct2026
+      CYBER_DAY_EXCLUDE_LIST_IDS: cyber_junio2026,cyber_oct2026,alertas_usuarios
     healthcheck:
       test: ["CMD", "python", "-m", "retail.cyber_day", "--healthcheck"]
       interval: 30s

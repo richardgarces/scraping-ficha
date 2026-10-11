@@ -947,3 +947,105 @@ document.addEventListener("submit", (event) => {
   event.stopImmediatePropagation();
   location.href = `/?q=${encodeURIComponent(query)}&quick=0`;
 }, true);
+
+/** Botón compacto Activar alerta / Alerta activa (fichas en listados). */
+function priceAlertButtonHtml({ store, productId, name = "" } = {}, active = false) {
+  if (!store || !productId) return "";
+  return `<button type="button" class="secondary price-alert-btn${active ? " current" : ""}" data-price-alert="${active ? "off" : "on"}" data-store="${attr(store)}" data-id="${attr(productId)}" data-name="${attr(name || "")}" aria-pressed="${active ? "true" : "false"}">${active ? "Alerta activa" : "Activar alerta"}</button>`;
+}
+
+function setPriceAlertButtonState(button, active) {
+  if (!button) return;
+  button.dataset.priceAlert = active ? "off" : "on";
+  button.classList.toggle("current", Boolean(active));
+  button.textContent = active ? "Alerta activa" : "Activar alerta";
+  button.setAttribute("aria-pressed", active ? "true" : "false");
+}
+
+function syncPriceAlertButtons(store, productId, active) {
+  const keyStore = String(store || "");
+  const keyId = String(productId || "");
+  document.querySelectorAll("[data-price-alert][data-store][data-id]").forEach((button) => {
+    if (button.dataset.store === keyStore && button.dataset.id === keyId) {
+      setPriceAlertButtonState(button, active);
+    }
+  });
+}
+
+async function hydratePriceAlertButtons(root = document) {
+  const scope = root && root.querySelectorAll ? root : document;
+  const buttons = [...scope.querySelectorAll("[data-price-alert][data-store][data-id]")].filter(
+    (button) => button.dataset.store && button.dataset.id
+  );
+  if (!buttons.length) return;
+  const user = await ensureUser();
+  if (!user) return;
+  const keys = new Map();
+  buttons.forEach((button) => {
+    const key = `${button.dataset.store}\u0000${button.dataset.id}`;
+    if (!keys.has(key)) keys.set(key, button);
+  });
+  await Promise.all(
+    [...keys.entries()].map(async ([key, sample]) => {
+      const params = new URLSearchParams({ store: sample.dataset.store, id: sample.dataset.id });
+      const response = await fetch(`/api/price-alert?${params}`);
+      if (!response.ok) return;
+      const payload = await response.json().catch(() => ({}));
+      if (!payload.logged_in) return;
+      syncPriceAlertButtons(sample.dataset.store, sample.dataset.id, Boolean(payload.active));
+    })
+  ).catch(() => {});
+}
+
+document.addEventListener("click", async (event) => {
+  const button = event.target.closest("[data-price-alert]");
+  if (!button || button.disabled) return;
+  const store = button.dataset.store;
+  const id = button.dataset.id;
+  if (!store || !id) return;
+  const user = await ensureUser();
+  if (!user) {
+    location.href = loginHref("inscribir");
+    return;
+  }
+  button.disabled = true;
+  const turnOff = button.dataset.priceAlert === "off";
+  const params = new URLSearchParams({ store, id });
+  try {
+    const response = turnOff
+      ? await fetch(`/api/price-alert?${params}`, { method: "DELETE" })
+      : await fetch("/api/price-alert", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            store,
+            product_id: id,
+            name: button.dataset.name || "",
+          }),
+        });
+    const data = await response.json().catch(() => ({}));
+    if (response.status === 401) {
+      location.href = loginHref("inscribir");
+      return;
+    }
+    if (!response.ok) {
+      const detail = typeof data.detail === "string" ? data.detail : "No se pudo guardar la alerta.";
+      if (typeof flash === "function") flash(detail);
+      else button.title = detail;
+      button.disabled = false;
+      return;
+    }
+    const active = Boolean(data.active ?? !turnOff);
+    if (typeof mountPriceAlert === "function" && button.closest(".price-alert")) {
+      await mountPriceAlert({ store, product_id: id });
+    } else {
+      syncPriceAlertButtons(store, id, active);
+    }
+  } catch (error) {
+    const detail = error.message || "No se pudo guardar la alerta.";
+    if (typeof flash === "function") flash(detail);
+    else button.title = detail;
+  } finally {
+    button.disabled = false;
+  }
+});

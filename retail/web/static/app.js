@@ -925,7 +925,7 @@ function searchDealCard(row) {
         })}
         ${hints}
         ${reason ? `<p class="deal-reason"><span>Motivo</span> ${attr(reason)}</p>` : ""}
-        <button type="button" class="watch-btn" data-code="${attr(row.compare_code)}" data-name="${attr(row.name)}" data-price="${row.price ?? ""}" data-store="${attr(row.store)}" data-id="${attr(row.product_id)}" data-following="false" aria-pressed="false">Seguir cambios</button>
+        ${typeof priceAlertButtonHtml === "function" ? priceAlertButtonHtml({ store: row.store, productId: row.product_id, name: row.name }) : ""}
       </div>
     </article>`;
 }
@@ -961,7 +961,7 @@ function resultCard(group) {
           <p class="result-price">${money(group.lowest_price)}<span>${best}</span></p>
         </div>
         <div class="result-actions">
-          <button type="button" class="watch-btn" data-code="${attr(group.code)}" data-name="${attr(group.name)}" data-price="${group.lowest_price ?? ""}" data-store="${attr((ficha || first).store)}" data-id="${attr((ficha || first).product_id)}" data-following="false" aria-pressed="false">Seguir cambios</button>
+          ${typeof priceAlertButtonHtml === "function" ? priceAlertButtonHtml({ store: (ficha || first).store, productId: (ficha || first).product_id, name: group.name }) : ""}
           ${ficha ? `<a class="ghost" href="${productUrl(ficha)}">Ficha</a>` : ""}
         </div>
       </div>
@@ -992,7 +992,9 @@ function renderTable() {
       ? `<div class="deal-grid">${paged.items.map(searchDealCard).join("")}</div>`
       : "<p class='panel empty-results'>Ningún resultado con esos filtros.</p>";
     renderPager(paged.total);
-  hydrateFollowingButtons();
+    if (typeof hydratePriceAlertButtons === "function") {
+      hydratePriceAlertButtons($("results")).catch(() => {});
+    }
     focusFirstResult();
     return;
   }
@@ -1005,102 +1007,10 @@ function renderTable() {
     ? `<div class="result-list">${paged.items.map(resultCard).join("")}</div>`
     : "<p class='panel empty-results'>Ningún resultado con esos filtros.</p>";
   renderPager(paged.total);
-  hydrateFollowingButtons();
+  if (typeof hydratePriceAlertButtons === "function") {
+    hydratePriceAlertButtons($("results")).catch(() => {});
+  }
   focusFirstResult();
-}
-
-function setWatchButtonState(button, following) {
-  button.dataset.following = following ? "true" : "false";
-  button.setAttribute("aria-pressed", following ? "true" : "false");
-  button.textContent = following ? "Siguiendo cambios ✓" : "Seguir cambios";
-}
-
-function showWatchError(button, message) {
-  let error = button.parentElement && button.parentElement.querySelector(".watch-error");
-  if (!error) {
-    error = document.createElement("span");
-    error.className = "watch-error";
-    error.setAttribute("role", "alert");
-    button.insertAdjacentElement("afterend", error);
-  }
-  error.textContent = message || "No se pudo actualizar el seguimiento.";
-}
-
-async function hydrateFollowingButtons() {
-  const buttons = [...document.querySelectorAll(".watch-btn[data-store][data-id]")]
-    .filter((button) => button.dataset.store && button.dataset.id);
-  const keys = new Map();
-  buttons.forEach((button) => {
-    const key = `${button.dataset.store}\u0000${button.dataset.id}`;
-    if (!keys.has(key)) keys.set(key, button);
-  });
-  await Promise.all([...keys.entries()].map(async ([key, sample]) => {
-    const params = new URLSearchParams({ store: sample.dataset.store, id: sample.dataset.id });
-    const response = await fetch(`/api/price-alert?${params}`);
-    if (!response.ok) return;
-    const payload = await response.json();
-    if (!payload.logged_in) return;
-    buttons
-      .filter((button) => `${button.dataset.store}\u0000${button.dataset.id}` === key)
-      .forEach((button) => setWatchButtonState(button, Boolean(payload.active)));
-  })).catch(() => {});
-}
-
-async function followProduct(button) {
-  if (button.dataset.busy === "true") return;
-  const user = await ensureUser();
-  if (!user) {
-    location.href = loginHref("inscribir");
-    return;
-  }
-  const wasFollowing = button.dataset.following === "true";
-  const nextFollowing = !wasFollowing;
-  const exactProduct = button.dataset.store && button.dataset.id;
-  if (wasFollowing && !exactProduct) {
-    showWatchError(button, "No se pudo identificar este seguimiento.");
-    return;
-  }
-  button.dataset.busy = "true";
-  button.disabled = true;
-  setWatchButtonState(button, nextFollowing);
-  try {
-    const params = new URLSearchParams({ store: button.dataset.store || "", id: button.dataset.id || "" });
-    const response = await fetch(wasFollowing ? `/api/price-alert?${params}` : (exactProduct ? "/api/price-alert" : "/api/watches"), {
-      method: wasFollowing ? "DELETE" : "POST",
-      headers: wasFollowing ? undefined : { "Content-Type": "application/json" },
-      body: wasFollowing ? undefined : JSON.stringify(exactProduct
-        ? {
-            store: button.dataset.store,
-            product_id: button.dataset.id,
-            name: button.dataset.name,
-          }
-        : {
-            query: currentQuery,
-            compare_code: button.dataset.code,
-            name: button.dataset.name,
-            current_price: button.dataset.price || null,
-            watch_changes: true,
-          }),
-    });
-    const payload = await response.json().catch(() => ({}));
-    if (response.status === 401) {
-      setWatchButtonState(button, wasFollowing);
-      location.href = loginHref("inscribir");
-      return;
-    }
-    if (!response.ok) {
-      setWatchButtonState(button, wasFollowing);
-      showWatchError(button, typeof payload.detail === "string" ? payload.detail : "No se pudo actualizar el seguimiento.");
-      return;
-    }
-    setWatchButtonState(button, Boolean(payload.active ?? nextFollowing));
-  } catch (_error) {
-    setWatchButtonState(button, wasFollowing);
-    showWatchError(button, "No se pudo actualizar el seguimiento.");
-  } finally {
-    delete button.dataset.busy;
-    button.disabled = false;
-  }
 }
 
 function cacheLabel(cache) {
@@ -1530,11 +1440,6 @@ $("results").addEventListener("click", (event) => {
     applyResultFocus(focusBtn.dataset.resultFocus);
     return;
   }
-  const button = event.target.closest(".watch-btn");
-  if (!button) return;
-  followProduct(button).catch((error) => {
-    button.textContent = error.message;
-  });
 });
 
 $("history").addEventListener("click", (event) => {

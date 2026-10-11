@@ -75,12 +75,36 @@
   let currentListName = "";
   let currentListsCount = 0;
   let currentRunStatus = "idle";
+  let currentListIsSystem = false;
+  let currentListIsUserAlert = false;
   let loadReady = false;
   let editingQueryN = null;
   let savingQueryN = null;
   let currentProducts = [];
   /** @type {{ key: string, dir: "asc"|"desc", type: string }} */
   let sortState = { key: "n", dir: "asc", type: "num" };
+
+  function isUserAlertsList(slug) {
+    return String(slug || "").trim().toLowerCase() === "alertas_usuarios";
+  }
+
+  function tableColspan() {
+    return currentListIsUserAlert ? 18 : 16;
+  }
+
+  function syncUserAlertColumns() {
+    document.querySelectorAll(".cyber-user-alert-col").forEach((node) => {
+      node.hidden = !currentListIsUserAlert;
+    });
+    const hint = el("cyber-import-hint");
+    if (hint && currentListIsUserAlert) {
+      hint.dataset.userAlert = "1";
+      hint.innerHTML = "Lista sistema <strong>Alertas usuarios</strong>: las filas vienen de «Activar alerta» en la ficha (no import destructivo). Columnas <strong>Agregó</strong> / <strong>Usuarios</strong> muestran el primer watcher y el conteo.";
+    } else if (hint && hint.dataset.userAlert === "1") {
+      delete hint.dataset.userAlert;
+      hint.innerHTML = 'Reimportar <strong>reemplaza las queries</strong> de la lista activa (mismo slug/nombre). Campos: n, query, category (+ matches, precios, tiendas, link en export). Podés editar la <strong>Query</strong> inline o <strong>eliminar</strong> una fila (también con el loop en curso). Clic en el encabezado ordena la columna. Cada lista es independiente y aparece en <a href="/cron">Cron / lotes</a>. Para armar una lista desde productos con cambios recientes: <a href="/cambios-precio">Cambios de precio</a>.';
+    }
+  }
 
   const ADVICE_RANK = { comprar: 0, esperar: 1, observar: 2 };
 
@@ -151,12 +175,18 @@
     const body = el("cyber-products-body");
     if (!wrap || !body) return;
     wrap.hidden = false;
+    syncUserAlertColumns();
     syncSortHeaders();
     const sorted = sortProducts(rows);
+    const cols = tableColspan();
     if (!sorted.length) {
-      body.innerHTML = `<tr><td colspan="16" class="muted">Sin filas en la lista. Importá CSV/JSON o creá la lista con seed.</td></tr>`;
+      const emptyMsg = currentListIsUserAlert
+        ? "Sin alertas aún. Se llenan cuando un usuario pulsa «Activar alerta» en una ficha."
+        : "Sin filas en la lista. Importá CSV/JSON o creá la lista con seed.";
+      body.innerHTML = `<tr><td colspan="${cols}" class="muted">${emptyMsg}</td></tr>`;
       return;
     }
+    const queryReadonly = usingSeedFallback || currentListIsUserAlert;
     body.innerHTML = sorted.map((row) => {
       const n = row.n ?? (row.order != null ? row.order + 1 : "");
       const query = row.query || row.name || "";
@@ -174,6 +204,14 @@
         ? `<a href="${escapeHtml(evoHref)}">Informe</a>`
         : "—";
       const changeAt = formatLastChange(row.last_change_at);
+      const watchers = Array.isArray(row.watchers) ? row.watchers : [];
+      const watcherTip = watchers.map((w) => w.label || w.email || w.user_id || "").filter(Boolean).join(", ");
+      const agregoCell = currentListIsUserAlert
+        ? `<td title="${escapeHtml(watcherTip || "")}">${escapeHtml(row.first_watcher_label || "—")}</td>`
+        : "";
+      const usuariosCell = currentListIsUserAlert
+        ? `<td title="${escapeHtml(watcherTip || "")}">${escapeHtml(row.watcher_count != null ? row.watcher_count : watchers.length || 0)}</td>`
+        : "";
       const deleteCell = usingSeedFallback
         ? `<td class="cyber-row-actions muted">—</td>`
         : `<td class="cyber-row-actions">
@@ -196,9 +234,11 @@
             data-original="${escapeHtml(query)}"
             value="${escapeHtml(query)}"
             aria-label="Query ${escapeHtml(n)}"
-            ${usingSeedFallback ? "disabled" : ""}
+            ${queryReadonly ? "disabled" : ""}
           >
         </td>
+        ${agregoCell}
+        ${usuariosCell}
         <td>${escapeHtml(row.category || "—")}</td>
         ${priceCellHtml(row)}
         ${discountCellHtml(row)}
@@ -429,11 +469,21 @@
     setButtonEnabled(el("cyber-continue"), hasList && paused);
     // Reiniciar con confirm: habilitado si hay lista (también en curso).
     setButtonEnabled(el("cyber-restart"), hasList);
-    // Eliminar: requiere Parar primero; no borrar la única lista.
+    // Eliminar: requiere Parar primero; no borrar la única lista ni listas sistema.
     setButtonEnabled(
       el("cyber-delete-list"),
-      !usingSeedFallback && Boolean(currentListId) && !running && !paused && listCount > 1,
+      !usingSeedFallback
+        && Boolean(currentListId)
+        && !running
+        && !paused
+        && listCount > 1
+        && !currentListIsSystem
+        && !currentListIsUserAlert,
     );
+    const importBtn = el("cyber-import");
+    if (importBtn) {
+      setButtonEnabled(importBtn, !currentListIsUserAlert && !usingSeedFallback);
+    }
   }
 
   async function loadSeedFallback(message) {
@@ -505,7 +555,8 @@
       const name = row.name || row.title || slug;
       const count = row.products_count != null ? ` (${row.products_count})` : "";
       const status = row.run?.status ? ` · ${STATUS_LABEL[row.run.status] || row.run.status}` : "";
-      return `<option value="${escapeHtml(slug)}"${slug === active ? " selected" : ""}>${escapeHtml(name)}${escapeHtml(count)}${escapeHtml(status)}</option>`;
+      const badge = row.is_user_alert || isUserAlertsList(slug) ? " · usuarios" : "";
+      return `<option value="${escapeHtml(slug)}"${slug === active ? " selected" : ""}>${escapeHtml(name)}${escapeHtml(count)}${escapeHtml(status)}${escapeHtml(badge)}</option>`;
     }).join("");
     currentListId = select.value || active || "";
   }
@@ -525,6 +576,9 @@
 
     const listMeta = payload?.list || {};
     currentListName = listMeta.name || listMeta.title || currentListId || "";
+    currentListIsSystem = Boolean(listMeta.system) || isUserAlertsList(currentListId);
+    currentListIsUserAlert = Boolean(listMeta.is_user_alert) || isUserAlertsList(currentListId);
+    syncUserAlertColumns();
     const nameEl = el("cyber-name");
     const slugEl = el("cyber-slug");
     if (slugEl) slugEl.textContent = currentListId || "—";
@@ -875,6 +929,10 @@
       showFlash(usingSeedFallback
         ? "Estás en modo seed local (solo lectura). Recargá cuando la API responda."
         : "Todavía cargando el estado…", false);
+      return;
+    }
+    if (currentListIsSystem || currentListIsUserAlert) {
+      showFlash("Esta lista es del sistema y no se puede eliminar.", false);
       return;
     }
     if (currentRunStatus === "running" || currentRunStatus === "paused") {

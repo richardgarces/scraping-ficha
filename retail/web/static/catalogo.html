@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#258fdf">
   <title>Catálogo</title>
   <script>(function(){var m=localStorage.getItem("retail-theme");if(m==="day"||m==="night"){document.documentElement.dataset.theme=m;return;}var h=new Date().getHours();document.documentElement.dataset.theme=(h>=7&&h<19)?"day":"night";})();</script>
-  <link rel="stylesheet" href="/static/styles.css?v=77-pager">
+  <link rel="stylesheet" href="/static/styles.css?v=106-card-alert">
 </head>
 <body>
   <header class="top">
@@ -68,8 +68,8 @@
         <label>Precio hasta <input id="max_price" type="number" min="0" step="10000" placeholder="Sin límite"></label>
         <label>Ordenar por
           <select id="sort">
-            <option value="price" selected>Precio menor</option>
-            <option value="updated">Actualizado</option>
+            <option value="updated" selected>Actualizado</option>
+            <option value="price">Precio menor</option>
             <option value="price_desc">Precio mayor</option>
             <option value="name">Nombre</option>
           </select>
@@ -91,8 +91,8 @@
       <button type="button" id="next" class="secondary" aria-label="Ir a la página siguiente">Siguiente</button>
     </section>
   </main>
-  <script src="/static/prices.js?v=36"></script>
+  <script src="/static/prices.js?v=106-card-alert"></script>
   <script src="/static/pagination.js?v=1"></script>
-  <script src="/static/catalogo.js?v=10-scroll"></script>
+  <script src="/static/catalogo.js?v=13-sort-updated"></script>
 </body>
 </html>

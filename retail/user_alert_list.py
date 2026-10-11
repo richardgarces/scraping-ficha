@@ -87,7 +87,6 @@ def _watcher_label(entry: dict[str, Any] | None) -> str:
 def ensure_user_alerts_list(repo: Any) -> dict[str, Any]:
     """Crea la lista sistema vacía si no existe."""
     from retail.cyber_day import (
-        CyberDayError,
         default_run,
         lists_collection,
         products_collection,
@@ -312,7 +311,9 @@ def add_user_alert(
         again = coll.find_one({"list_id": USER_ALERTS_LIST_ID, "alert_key": key})
         if again:
             return add_user_alert(repo, user, store=store, product_id=product_id, document=document)
-        raise CyberDayErrorFromUserAlerts(str(exc)) from exc
+        from retail.cyber_day import CyberDayError
+
+        raise CyberDayError(f"No se pudo agregar alerta de usuario: {exc}") from exc
 
     from retail.cyber_day import load_run, save_run
 
@@ -327,10 +328,6 @@ def add_user_alert(
     _boost_catalog(repo, anchor_store, anchor_id, doc.get("catalog_id"))
     _auto_start_if_idle(repo)
     return {"ok": True, "created": True, "alert_key": key, "watcher_count": 1, "n": n}
-
-
-class CyberDayErrorFromUserAlerts(RuntimeError):
-    pass
 
 
 def remove_user_alert(
@@ -556,3 +553,235 @@ def enrich_user_alert_row_fields(row: dict[str, Any]) -> dict[str, Any]:
         "anchor_product_id": row.get("anchor_product_id") or row.get("product_id"),
         "is_user_alert": True,
     }
+
+
+def _watcher_users_for_change(
+    repo: Any,
+    change: dict[str, Any],
+    *,
+    item: dict[str, Any] | None,
+) -> list[dict[str, Any]]:
+    """Usuarios a avisar: watchers de la fila + price_alerts del SKU (dedupe)."""
+    seen: dict[str, dict[str, Any]] = {}
+
+    def add_user(user: dict[str, Any] | None, *, fallback_id: str = "", fallback_email: str = "") -> None:
+        if not user and not fallback_id:
+            return
+        uid = str((user or {}).get("id") or (user or {}).get("_id") or fallback_id or "").strip()
+        if not uid or uid in seen:
+            return
+        payload = dict(user or {})
+        payload.setdefault("id", uid)
+        if fallback_email and not payload.get("email"):
+            payload["email"] = fallback_email
+        seen[uid] = payload
+
+    for entry in (item or {}).get("watchers") or []:
+        if not isinstance(entry, dict):
+            continue
+        uid = str(entry.get("user_id") or "").strip()
+        if not uid:
+            continue
+        user = {}
+        if hasattr(repo, "find_user_by_id"):
+            try:
+                user = repo.find_user_by_id(uid) or {}
+            except Exception:
+                user = {}
+        add_user(
+            {**user, "id": uid} if user else {"id": uid},
+            fallback_id=uid,
+            fallback_email=str(entry.get("email") or ""),
+        )
+
+    store = str(change.get("store") or "").strip()
+    product_id = str(change.get("product_id") or "").strip()
+    if store and product_id and hasattr(repo, "price_alerts_for"):
+        try:
+            for alert in repo.price_alerts_for([(store, product_id)]) or []:
+                uid = str(alert.get("user_id") or "").strip()
+                if not uid:
+                    continue
+                user = {}
+                if hasattr(repo, "find_user_by_id"):
+                    try:
+                        user = repo.find_user_by_id(uid) or {}
+                    except Exception:
+                        user = {}
+                add_user(
+                    {**user, "id": uid} if user else {"id": uid},
+                    fallback_id=uid,
+                    fallback_email=str(alert.get("email") or ""),
+                )
+        except Exception as exc:
+            print(f"user-alerts: price_alerts_for falló: {exc}", flush=True)
+
+    return list(seen.values())
+
+
+def _user_wants_watch_channel(user: dict[str, Any], channel: str) -> bool:
+    from retail.notification_preferences import normalize_preferences
+
+    prefs = normalize_preferences(user.get("notification_preferences"))
+    kinds = set(prefs.get("kinds") or [])
+    if kinds and "watch" not in kinds:
+        return False
+    channels = set(prefs.get("channels") or [])
+    # Sin prefs de canal: permitir todos los canales disponibles (histórico).
+    if not channels:
+        return True
+    return channel in channels
+
+
+def notify_user_alert_change(
+    repo: Any,
+    change: dict[str, Any],
+    *,
+    item: dict[str, Any] | None = None,
+) -> int:
+    """Notifica solo a watchers según prefs (push/email/telegram). Sin broadcast.
+
+    El canal admin de Telegram sigue opcional (una vez); no se fanea a todos
+    los usuarios aprobados como ``notify_cyber_change``.
+    """
+    from retail.price_alerts import price_change_message
+    from retail.short_links import attach_short_url
+
+    sent = 0
+    store = str(change.get("store") or "")
+    product_id = str(change.get("product_id") or "")
+    price = int(change.get("price") or 0)
+    previous = change.get("previous_price")
+    try:
+        previous_i = int(previous) if previous is not None else None
+    except (TypeError, ValueError):
+        previous_i = None
+    entity_key = f"user_alert:{store}:{product_id}"
+    admin_entity = f"cyber-user-alert:{store}:{product_id}"
+
+    payload = {**change}
+    attach_short_url(payload, repo)
+    subject, body = price_change_message({**change, "short_url": payload.get("short_url")})
+    image_url = change.get("image_url") or payload.get("image_url")
+
+    # Admin Telegram (una vez), sin fan-out a usuarios.
+    try:
+        from retail.batch.alerts import _secret, _telegram_text
+
+        bot_token = _secret("TELEGRAM_BOT_TOKEN", "telegram_bot_token").strip()
+        if bot_token:
+            query = str(
+                change.get("query")
+                or (item or {}).get("query")
+                or (item or {}).get("name")
+                or ""
+            ).strip()
+            prefix = f"Alertas usuarios · {query}\n\n" if query else "Alertas usuarios · cambio\n\n"
+            text = prefix + body
+            claimed = True
+            if hasattr(repo, "claim_user_notification_send"):
+                claimed = repo.claim_user_notification_send(
+                    "cyber_day", "telegram", admin_entity, price,
+                )
+            if claimed:
+                if _telegram_text(text, image_url=image_url):
+                    sent += 1
+                elif hasattr(repo, "release_user_notification_send"):
+                    repo.release_user_notification_send(
+                        "cyber_day", "telegram", admin_entity, price,
+                    )
+    except Exception as exc:
+        print(f"user-alerts: admin telegram falló: {exc}", flush=True)
+
+    users = _watcher_users_for_change(repo, change, item=item)
+    if not users:
+        return sent
+
+    try:
+        from retail.batch.rules import load_rules
+
+        system_channels = set(load_rules().get("channels") or [])
+    except Exception:
+        system_channels = {"email", "telegram", "push"}
+
+    for user in users:
+        user_id = str(user.get("id") or user.get("_id") or "").strip()
+        if not user_id:
+            continue
+        if str(user.get("status") or "approved") not in {"", "approved"}:
+            continue
+
+        def claim(channel: str) -> bool:
+            if hasattr(repo, "claim_price_alert_send") and store and product_id and previous_i is not None:
+                try:
+                    return repo.claim_price_alert_send(
+                        user_id, store, product_id, previous_i, price, channel=channel,
+                    )
+                except Exception:
+                    pass
+            if hasattr(repo, "claim_user_notification_send"):
+                try:
+                    return repo.claim_user_notification_send(user_id, channel, entity_key, price)
+                except Exception:
+                    return False
+            return True
+
+        # Email
+        if "email" in system_channels and _user_wants_watch_channel(user, "email"):
+            email = str(user.get("email") or "").strip()
+            if email:
+                try:
+                    from retail.batch.alerts import send_email
+                    from retail.batch.alerts import product_email_html
+                    from retail.offer_screenshot import is_local_image
+
+                    direction = (
+                        "Bajó de precio"
+                        if previous_i is not None and price < previous_i
+                        else "Subió de precio"
+                    )
+                    if claim("email") and send_email(
+                        email,
+                        subject,
+                        body,
+                        log_skip=True,
+                        image_url=image_url if is_local_image(image_url) else None,
+                        html=product_email_html(
+                            {
+                                **payload,
+                                "message": body.split("\n", 1)[0],
+                                "saving": max(0, (previous_i or price) - price),
+                            },
+                            eyebrow="Producto que sigues",
+                            heading=direction,
+                        ),
+                    ):
+                        sent += 1
+                except Exception as exc:
+                    print(f"user-alerts: email falló ({user_id}): {exc}", flush=True)
+
+        # Telegram
+        if "telegram" in system_channels and _user_wants_watch_channel(user, "telegram"):
+            if user.get("telegram_chat_id") or user.get("telegram_username"):
+                try:
+                    from retail.batch.alerts import send_to_user
+
+                    if claim("telegram") and send_to_user(user, body, image_url=image_url):
+                        sent += 1
+                except Exception as exc:
+                    print(f"user-alerts: telegram falló ({user_id}): {exc}", flush=True)
+
+        # Push
+        if "push" in system_channels and _user_wants_watch_channel(user, "push"):
+            if user.get("push_subscriptions"):
+                try:
+                    from retail.web_push import send_user_push
+
+                    if claim("push") and send_user_push(
+                        user, payload, repo=repo, tag=entity_key,
+                    ):
+                        sent += 1
+                except Exception as exc:
+                    print(f"user-alerts: push falló ({user_id}): {exc}", flush=True)
+
+    return sent

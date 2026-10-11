@@ -74,13 +74,16 @@ En el Orange Pi (`192.168.1.90`) el scrape Cyber vive en `docker-compose.worker.
 
 | Modo | Contenedores | Cuándo |
 |------|--------------|--------|
-| **`--parallel 3`** (default) | 3 pines: junio / oct / cambio | Carga holgada |
-| **`--parallel 2`** | 2 pines (junio+oct) + 1 **secuencial** del resto (`CYBER_DAY_EXCLUDE_LIST_IDS`) | CPU/RAM alta → bajar a 2 |
+| **`--parallel 4`** | 4 pines: junio / oct / cambio / **alertas** | Tras deploy del 4.º worker |
+| **`--parallel 3`** (default) | 3 pines: junio / oct / cambio | Carga holgada (sin alertas) |
+| **`--parallel 2`** | 2 pines (junio+oct) + 1 **secuencial** del resto (`CYBER_DAY_EXCLUDE_LIST_IDS` incluye `alertas_usuarios`) | CPU/RAM alta → bajar a 2 |
 
 ```bash
 ssh richard@192.168.1.90
 cd ~/precios
 ./cyber-pi.sh start --parallel 3    # o: CYBER_DAY_MAX_PARALLEL=3 ./cyber-pi.sh start
+./cyber-pi.sh start --parallel 4    # + worker alertas_usuarios (cuando código esté en Pi)
+./cyber-pi.sh start alertas         # solo el 4.º pin
 ./cyber-pi.sh start --parallel 2    # fallback: 2 pines + secuencial
 ./cyber-pi.sh status|logs|stop|restart
 ```
@@ -89,12 +92,13 @@ cd ~/precios
 |----------|-----|
 | `cyber-junio2026` | pin `cyber_junio2026` |
 | `cyber-oct2026` | pin `cyber_oct2026` |
-| `cyber-cambio-ultimo-jes` | pin `cyber_cambio_ultimo_jes` (solo parallel 3) |
-| `cyber-sequential` | multi-lista secuencial excluyendo junio+oct (solo parallel 2) |
+| `cyber-cambio-ultimo-jes` | pin `cyber_cambio_ultimo_jes` (parallel 3/4) |
+| `cyber-alertas` | pin `alertas_usuarios` → contenedor `precios-cyber-worker-pi-alertas` (parallel 4) |
+| `cyber-sequential` | multi-lista secuencial excluyendo junio+oct+`alertas_usuarios` (solo parallel 2) |
 
 Cada pin solo toca su cursor/heartbeat. El secuencial no pelea con los pines gracias a `CYBER_DAY_EXCLUDE_LIST_IDS`.
 
-Los workers reportan CPU/RAM/disco/temp/potencia del host a Mongo (`cyber_day_host_stats:{ip}` vía `retail.host_stats`); `GET /api/admin/cyber-day` expone `worker_hosts` (dedupe por IP, etiqueta **Orange Pi**) y `/cyber-day` muestra el panel **Host scrape**. Vista de los tres hosts (BMAX / soyo / Orange Pi): `/hosts` y `GET /api/admin/hosts`. En BMAX/soyo: `bash scripts/install-host-stats-cron.sh` (cron cada minuto → `python -m retail.host_stats --once`).
+Los workers reportan CPU/RAM/disco/temp/potencia del host a Mongo (`cyber_day_host_stats:{ip}` vía `retail.host_stats`); `GET /api/admin/cyber-day` expone `worker_hosts` (dedupe por IP, etiqueta **Orange Pi**) y `/cyber-day` muestra el panel **Host scrape**. Vista de los tres hosts (BMAX / soyo / Orange Pi): `/hosts` y `GET /api/admin/hosts`. En BMAX/soyo/Orange Pi: `bash scripts/install-host-stats-cron.sh` (cron cada minuto → `scripts/host-stats-report.sh` → `python -m retail.host_stats --once`). En el Pi el wrapper hace `docker exec` a un `precios-cyber-worker-pi-*` e inyecta temp del host (`cpu-thermal`); mantener `~/precios/retail/host_stats.py` al día (volumen ro del compose) para historial Tendencias.
 
 **Potencia (W) en `/hosts`:** el wrapper `scripts/host-stats-report.sh` inyecta `HOST_STATS_POWER_W` (historial `pwr`). Fuentes por host:
 
@@ -102,7 +106,7 @@ Los workers reportan CPU/RAM/disco/temp/potencia del host a Mongo (`cyber_day_ho
 |------|--------|--------|
 | **soyo** (N150) | Intel RAPL `package-0` | `energy_uj` es root-only; el cron usa `docker … nsenter` al sysfs del host (usuario en grupo `docker`). Opcional: hacer legible RAPL (más rápido, sin contenedor). |
 | **BMAX** (Ryzen 5825U) | RAPL `package-0` (preferido); fallback `amdgpu` `power1_input` (PPT, µW) | Mismo esquema nsenter; `amdgpu` ya es world-readable. |
-| **Orange Pi** | — | Suele no exponer RAPL/hwmon power; la UI muestra **sin sensor**. |
+| **Orange Pi** | — (potencia) / `cpu-thermal` (temp) | Sin RAPL/hwmon power → **sin sensor** de W. Temp vía cron + `HOST_STATS_TEMP_C` desde sysfs del host. |
 
 Opcional (una vez, con sudo) para leer RAPL sin Docker:
 
@@ -121,8 +125,28 @@ Local / manual:
 
 ```bash
 CYBER_DAY_LIST_ID=cyber_junio2026 python -m retail.cyber_day
-CYBER_DAY_EXCLUDE_LIST_IDS=cyber_junio2026,cyber_oct2026 python -m retail.cyber_day
+CYBER_DAY_LIST_ID=alertas_usuarios python -m retail.cyber_day
+CYBER_DAY_EXCLUDE_LIST_IDS=cyber_junio2026,cyber_oct2026,alertas_usuarios python -m retail.cyber_day
+python -m retail.cyber_day --backfill-user-alerts   # one-shot: price_alerts → lista
 ```
+
+## Lista sistema «Alertas usuarios» (`alertas_usuarios`)
+
+Lista fija (`system: true`, `source: user_alerts`) creada en bootstrap. No se borra ni admite import destructivo.
+
+| Campo | Valor |
+|-------|--------|
+| **list_id** | `alertas_usuarios` |
+| **identidad de fila** | `compare_code` si hay; si no `store:product_id` |
+| **alta/baja** | `POST`/`DELETE` `/api/price-alert` → sync watchers |
+| **columnas UI** | **Agregó** (primer watcher) · **Usuarios** (conteo) |
+| **process** | ancla `store/product_id` + peers `by_compare_code` |
+| **notify** | solo watchers según prefs (push/email/telegram); **sin** broadcast a todos |
+
+Backfill: `python -m retail.cyber_day --backfill-user-alerts` (o tras deploy en Pi con el worker ya arriba).
+
+**Deploy Pi (cuando tests verdes):** sync código a `~/precios`, luego `./cyber-pi.sh start --parallel 4` (o `./cyber-pi.sh start alertas` si ya corrés parallel 3). No arrancar el 4.º worker hasta tener `retail/user_alert_list.py` en el host (volumen ro del compose).
+
 ## Seed
 
 Si `cyber_day_products` está vacío, carga automática del JSON oficial (100 ítems). Reimport opcional desde el panel.

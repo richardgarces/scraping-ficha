@@ -35,17 +35,20 @@ def test_real_offer_filter_requires_a_measurable_saving() -> None:
 
 
 def test_search_cards_toggle_price_alerts_and_restore_after_error() -> None:
-    script = Path("retail/web/static/app.js").read_text(encoding="utf-8")
-    toggle = script[script.index("function setWatchButtonState"):script.index("function cacheLabel")]
-    assert 'method: wasFollowing ? "DELETE" : "POST"' in toggle
-    assert "setWatchButtonState(button, nextFollowing)" in toggle
-    assert toggle.count("setWatchButtonState(button, wasFollowing)") >= 2
-    assert 'button.dataset.busy === "true"' in toggle
-    assert 'button.disabled = true' in toggle
-    assert 'button.disabled = false' in toggle
-    assert 'setAttribute("aria-pressed"' in toggle
-    assert 'showWatchError(button' in toggle
-    assert "hydrateFollowingButtons()" in script
+    prices = Path("retail/web/static/prices.js").read_text(encoding="utf-8")
+    app = Path("retail/web/static/app.js").read_text(encoding="utf-8")
+    catalog = Path("retail/web/static/catalogo.js").read_text(encoding="utf-8")
+    assert "function priceAlertButtonHtml" in prices
+    assert "function hydratePriceAlertButtons" in prices
+    assert 'method: "DELETE"' in prices
+    assert 'method: "POST"' in prices
+    assert "Activar alerta" in prices
+    assert "Alerta activa" in prices
+    assert "loginHref(\"inscribir\")" in prices
+    assert "hydratePriceAlertButtons($(\"results\"))" in app
+    assert "priceAlertButtonHtml({" in app
+    assert "priceAlertButtonHtml({" in catalog
+    assert "hydratePriceAlertButtons($(\"grid\"))" in catalog
 
 
 def test_deal_cards_show_precio_normal_when_published() -> None:
@@ -61,9 +64,9 @@ def test_deal_cards_show_precio_normal_when_published() -> None:
     assert "publishedNormal(row)" in app
     assert "dealPricesBlock({" in hoy
     assert ".deal-prices.has-normal" in styles
-    assert "app.js?v=59" in index
-    assert "prices.js?v=36" in index
-    assert "styles.css?v=78-precio-normal" in index
+    assert "app.js?v=60-card-alert" in index
+    assert "prices.js?v=106-card-alert" in index
+    assert "styles.css?v=106-card-alert" in index
 
 
 def test_product_page_has_contextual_back_link() -> None:
@@ -121,8 +124,13 @@ def test_product_price_charts_show_every_calendar_day():
     assert ".price-chart-scroll .chart" in styles
     assert "max-width: none" in styles
     assert "overflow-x: auto" in styles
-    assert 'producto.js?v=38' in page
-    assert 'styles.css?v=80' in page
+    assert 'producto.js?v=47-oferta-only' in page
+    assert 'styles.css?v=96-oferta-only' in page
+    assert "Solo precio oferta" in page
+    assert "chart-offer-area" in script
+    assert "chart-discount-band" not in script.split("function renderCharts()")[-1].split("const FORECAST_TRENDS")[0]
+    assert "Precio oferta" in script.split("function renderCharts()")[-1].split("const FORECAST_TRENDS")[0]
+    assert "Normal (línea discontinua)" not in script.split("function renderCharts()")[-1].split("const FORECAST_TRENDS")[0]
 
 
 def test_product_other_stores_panel_is_collapsible_and_open_by_default() -> None:
@@ -196,7 +204,7 @@ def test_product_forecast_panel_is_admin_only_and_collapsed_by_default() -> None
     assert "panel.hidden = false" not in script.split("async function loadForecast")[1].split("$(\"windows\")")[0]
     assert "panel.open = false" in script
     assert "panel.open = true" not in script
-    assert "producto.js?v=38" in page
+    assert "producto.js?v=47-oferta-only" in page
 
 
 def test_timesfm_offer_summary_is_admin_only() -> None:

@@ -532,7 +532,28 @@ html[data-theme="day"] .offer-toggle-chip[aria-pressed="true"] .offer-toggle-mar
 .simple-pager #next { grid-column: 3; justify-self: start; }
 .simple-pager button[hidden] { display: none; }
 .deal-ctas { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
-.deal .watch-btn { width: 100%; margin-top: 4px; }
+.deal .price-alert-btn { width: 100%; margin-top: 4px; }
+.card-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 4px;
+}
+.card-footer .price-alert-btn {
+  margin-left: auto;
+  padding: 6px 10px;
+  font-size: 12px;
+  border-radius: 10px;
+  white-space: nowrap;
+}
+.result-actions .price-alert-btn {
+  padding: 8px 12px;
+  font-size: 13px;
+  font-weight: 700;
+  border-radius: 12px;
+}
 .summary.stats { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; color: var(--text); }
 html:not(.is-admin) #summary[data-technical-summary] { display: none !important; }
 .stat {
@@ -927,8 +948,7 @@ td.down, td.down-again, td.up, td.up-again { font-weight: 700; }
 .nav a.current, .nav summary.current, .nav-menu[open] > summary { background: var(--accent-dim); color: var(--accent); }
 .nav [hidden] { display: none !important; }
 html:not(.is-authed) [data-logout],
-html:not(.is-authed) [data-auth],
-html:not(.is-authed) .watch-btn { display: none !important; }
+html:not(.is-authed) [data-auth] { display: none !important; }
 html.is-authed [data-login] { display: none !important; }
 .nav-menu > summary::before,
 .nav a[data-login-mode="entrar"]::before { mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><circle cx='12' cy='8' r='3.2' fill='black'/><path d='M5.2 19c1.3-3.2 3.6-5 6.8-5s5.5 1.8 6.8 5' fill='none' stroke='black' stroke-width='2' stroke-linecap='round'/></svg>"); -webkit-mask-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><circle cx='12' cy='8' r='3.2' fill='black'/><path d='M5.2 19c1.3-3.2 3.6-5 6.8-5s5.5 1.8 6.8 5' fill='none' stroke='black' stroke-width='2' stroke-linecap='round'/></svg>"); }
@@ -1418,6 +1438,16 @@ button.secondary:hover { border-color: color-mix(in srgb, var(--accent) 40%, var
   background: color-mix(in srgb, var(--saving) 42%, transparent);
   border: 1.5px solid var(--saving);
 }
+.price-chart-legend i.marker-min,
+.price-chart-legend i.marker-now {
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  background: transparent;
+  border: 2.5px solid var(--saving);
+  box-sizing: border-box;
+}
+.price-chart-legend i.marker-now { border-color: var(--accent); }
 .chart-series.offer { stroke: var(--accent); }
 .chart-series.offer.discounted { stroke: var(--saving); }
 .chart-series.normal {
@@ -1425,6 +1455,10 @@ button.secondary:hover { border-color: color-mix(in srgb, var(--accent) 40%, var
   stroke-dasharray: 7 5;
   stroke-width: 2.75;
   opacity: .98;
+}
+.chart-offer-area {
+  fill: color-mix(in srgb, var(--accent) 14%, transparent);
+  stroke: none;
 }
 .chart-discount-band {
   fill: color-mix(in srgb, var(--saving) 34%, transparent);
@@ -3726,7 +3760,7 @@ input[type="checkbox"], input[type="radio"] { width: 18px; height: 18px; accent-
   .deal-saving { font-size: 18px; }
   .deal-ctas { justify-content: stretch; }
   .deal-ctas > * { flex: 1 1 auto; justify-content: center; }
-  .deal .watch-btn { min-height: 40px; }
+  .deal .price-alert-btn { min-height: 40px; }
   .filter-bar { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
   .filter-bar .filter, .filter-bar .filter-q, .filter-bar .filter-sm { min-width: 0; }
   .filter-bar .filter-q { grid-column: 1 / -1; }

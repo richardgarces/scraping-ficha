@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # Ops Cyber Day en Orange Pi: workers pineados + opcional secuencial del resto.
 #
-#   ./cyber-pi.sh start --parallel 3     # 3 pines (default)
-#   ./cyber-pi.sh start --parallel 2     # 2 pines + 1 secuencial (resto)
+#   ./cyber-pi.sh start --parallel 4     # 4 pines (junio+oct+cambio+alertas)
+#   ./cyber-pi.sh start --parallel 3     # 3 pines (default; sin alertas)
+#   ./cyber-pi.sh start --parallel 2     # 2 pines + 1 secuencial (resto; excluye alertas)
+#   ./cyber-pi.sh start alertas          # solo worker alertas_usuarios
 #   ./cyber-pi.sh start                  # usa CYBER_DAY_MAX_PARALLEL o 3
 #   ./cyber-pi.sh stop|restart|status|logs
 #
@@ -10,22 +12,25 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 COMPOSE=(docker compose -f docker-compose.worker.pi.yml)
+PINNED4=(cyber-junio2026 cyber-oct2026 cyber-cambio-ultimo-jes cyber-alertas)
 PINNED3=(cyber-junio2026 cyber-oct2026 cyber-cambio-ultimo-jes)
 PINNED2=(cyber-junio2026 cyber-oct2026)
 SEQ_SERVICE=cyber-sequential
-ALL_SERVICES=("${PINNED3[@]}" "$SEQ_SERVICE")
+ALL_SERVICES=("${PINNED4[@]}" "$SEQ_SERVICE")
 LEGACY_CONTAINER=precios-cyber-worker-pi
 STATE_FILE=.cyber-pi-parallel
 
 usage() {
   cat <<'EOF'
 Usage:
-  ./cyber-pi.sh start [--parallel 2|3] [servicio]
+  ./cyber-pi.sh start [--parallel 2|3|4] [servicio]
   ./cyber-pi.sh stop|restart|status|logs [servicio|all]
-  ./cyber-pi.sh start --parallel 2   # 2 pines + secuencial (resto)
+  ./cyber-pi.sh start --parallel 2   # 2 pines + secuencial (resto; excluye alertas_usuarios)
   ./cyber-pi.sh start --parallel 3   # 3 pines (default)
+  ./cyber-pi.sh start --parallel 4   # 4 pines (+ alertas_usuarios)
+  ./cyber-pi.sh start alertas        # solo precios-cyber-worker-pi-alertas
 
-Env: CYBER_DAY_MAX_PARALLEL=2|3 (default 3 si no se pasa --parallel)
+Env: CYBER_DAY_MAX_PARALLEL=2|3|4 (default 3 si no se pasa --parallel)
 EOF
   exit 1
 }
@@ -42,8 +47,9 @@ services_for_parallel() {
   case "$n" in
     2) echo "${PINNED2[*]} $SEQ_SERVICE" ;;
     3) echo "${PINNED3[*]}" ;;
+    4) echo "${PINNED4[*]}" ;;
     *)
-      echo "parallel debe ser 2 o 3 (got: $n)" >&2
+      echo "parallel debe ser 2, 3 o 4 (got: $n)" >&2
       exit 1
       ;;
   esac
@@ -56,6 +62,7 @@ resolve_one() {
     1|junio|cyber-junio2026|cyber_junio2026) echo "cyber-junio2026" ;;
     2|oct|cyber-oct2026|cyber_oct2026) echo "cyber-oct2026" ;;
     3|cambio|cyber-cambio-ultimo-jes|cyber_cambio_ultimo_jes) echo "cyber-cambio-ultimo-jes" ;;
+    4|alertas|cyber-alertas|alertas_usuarios|cyber_alertas) echo "cyber-alertas" ;;
     seq|sequential|cyber-sequential) echo "cyber-sequential" ;;
     *)
       echo "Servicio desconocido: $sel" >&2
@@ -134,7 +141,7 @@ if [[ -z "$parallel" ]]; then
   parallel="$(read_parallel)"
 fi
 case "$parallel" in
-  2|3) ;;
+  2|3|4) ;;
   *)
     echo "parallel inválido: $parallel" >&2
     exit 1

@@ -142,6 +142,8 @@
             <tr>
               <th><button type="button" class="cyber-sort" data-sort="n" data-type="num">#</button></th>
               <th><button type="button" class="cyber-sort" data-sort="query" data-type="text">Query</button></th>
+              <th class="cyber-user-alert-col" hidden><button type="button" class="cyber-sort" data-sort="first_watcher_label" data-type="text">Agregó</button></th>
+              <th class="cyber-user-alert-col" hidden><button type="button" class="cyber-sort" data-sort="watcher_count" data-type="num">Usuarios</button></th>
               <th><button type="button" class="cyber-sort" data-sort="category" data-type="text">Categoría</button></th>
               <th><button type="button" class="cyber-sort" data-sort="last_price" data-type="num">Mejor precio</button></th>
               <th><button type="button" class="cyber-sort" data-sort="discount_pct" data-type="num">Descuento</button></th>
@@ -159,13 +161,13 @@
             </tr>
           </thead>
           <tbody id="cyber-products-body">
-            <tr><td colspan="16" class="muted">Cargando lista…</td></tr>
+            <tr><td colspan="18" class="muted">Cargando lista…</td></tr>
           </tbody>
         </table>
       </div>
     </section>
   </main>
   <script src="/static/prices.js?v=37"></script>
-  <script src="/static/cyber-day.js?v=28"></script>
+  <script src="/static/cyber-day.js?v=29-alertas"></script>
 </body>
 </html>

@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#258fdf">
   <title>Ficha de producto</title>
   <script>(function(){var m=localStorage.getItem("retail-theme");if(m==="day"||m==="night"){document.documentElement.dataset.theme=m;return;}var h=new Date().getHours();document.documentElement.dataset.theme=(h>=7&&h<19)?"day":"night";})();</script>
-  <link rel="stylesheet" href="/static/styles.css?v=95-forecast-rows">
+  <link rel="stylesheet" href="/static/styles.css?v=96-oferta-only">
 </head>
 <body>
   <header class="top">
@@ -82,7 +82,7 @@
             <div class="price-history-heading">
               <div>
                 <h3 id="combined-chart-title">Evolución del precio</h3>
-                <p class="muted">Cada punto es una observación real. No rellenamos días sin medición.</p>
+                <p class="muted">Solo precio oferta. Cada punto es una observación real; no rellenamos días sin medición.</p>
               </div>
               <div class="price-chart-legend" id="chart-legend" aria-label="Leyenda"></div>
             </div>
@@ -186,8 +186,8 @@
       <div class="related-row" id="related"></div>
     </section>
   </main>
-  <script src="/static/prices.js?v=36"></script>
+  <script src="/static/prices.js?v=106-card-alert"></script>
   <script src="/static/price-history.js?v=1"></script>
-  <script src="/static/producto.js?v=43-sodimac-sku-url"></script>
+  <script src="/static/producto.js?v=47-oferta-only"></script>
 </body>
 </html>

@@ -52,7 +52,10 @@ function card(item) {
       <p class="price">${money(item.price)} ${discountBadge(item)}</p>
       ${priceLadder(item)}
       <p>${rating}</p>
-      ${item.url ? `<a class="muted" href="${attr(item.url)}" target="_blank" rel="noreferrer">ir a la tienda</a>` : ""}
+      <div class="card-footer">
+        ${item.url ? `<a class="muted" href="${attr(item.url)}" target="_blank" rel="noreferrer">ir a la tienda</a>` : "<span></span>"}
+        ${typeof priceAlertButtonHtml === "function" ? priceAlertButtonHtml({ store: item.store, productId: item.product_id, name: item.name }) : ""}
+      </div>
     </article>`;
 }
 
@@ -75,7 +78,7 @@ function updateFilterSummary() {
   if ($("store").value) active.push("tienda");
   if ($("brand").value) active.push("marca");
   if ($("min_price").value || $("max_price").value) active.push("precio");
-  if ($("sort").value && $("sort").value !== "price") active.push("orden");
+  if ($("sort").value && $("sort").value !== "updated") active.push("orden");
   if ($("only_offers").checked) active.push("solo ofertas");
   $("catalog-filter-count").textContent = active.length
     ? `${active.length} ${active.length === 1 ? "filtro activo" : "filtros activos"}`
@@ -108,6 +111,9 @@ async function load({ scrollToTop = false } = {}) {
     : "Todavía no hay productos guardados. Corre una búsqueda o el batch.";
   $("grid").innerHTML = items.length ? items.map(card).join("") : "<p class='panel muted'>Sin resultados con esos filtros.</p>";
   saveProductTrail(items);
+  if (typeof hydratePriceAlertButtons === "function") {
+    hydratePriceAlertButtons($("grid")).catch(() => {});
+  }
   const pager = RetailPager.render(data.page, totalPages);
   page = pager.page;
   updateFilterSummary();
