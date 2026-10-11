@@ -23,7 +23,7 @@ def test_usuarios_page_and_api_require_admin(anonymous_repo):
     assert ">Usuarios</a>" in home
     html = (STATIC / "usuarios.html").read_text()
     js = (STATIC / "usuarios.js").read_text()
-    assert "usuarios.js?v=2" in html
+    assert "usuarios.js?v=3" in html
     assert "function $(id)" not in js
     assert "/api/admin/users" in js
     assert 'href="/usuarios"' in html

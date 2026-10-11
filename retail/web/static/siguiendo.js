@@ -65,7 +65,11 @@ async function json(url, options) {
     throw new Error("Entra con tu cuenta para seguir productos.");
   }
   if (!response.ok) {
-    throw new Error(typeof payload.detail === "string" ? payload.detail : response.statusText);
+    const detail = payload.detail;
+    const message = typeof detail === "string"
+      ? detail
+      : (detail && detail.message) || response.statusText;
+    throw new Error(message);
   }
   return payload;
 }
@@ -483,9 +487,74 @@ $("watches").addEventListener("click", async (event) => {
   }
 });
 
+function fmtMembershipDate(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return date.toLocaleString("es-CL", {
+    timeZone: "America/Santiago",
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
+}
+
+async function loadMembership() {
+  const panel = $("membership-panel");
+  if (!panel) return;
+  try {
+    const data = await json("/api/account/membership");
+    const membership = data.membership || {};
+    const quota = data.quota || {};
+    const role = data.user?.role || "user";
+    const summary = $("membership-summary");
+    const quotaEl = $("membership-quota");
+    if (role === "admin") {
+      summary.textContent = "Cuenta administrador: sin límite práctico de alertas.";
+      quotaEl.textContent = `Alertas activas: ${quota.count ?? 0}.`;
+      $("promo-form").hidden = true;
+      return;
+    }
+    $("promo-form").hidden = false;
+    if (membership.active) {
+      const until = fmtMembershipDate(membership.expires_at);
+      const source = membership.source === "gift" || membership.source === "promo"
+        ? " (regalo)"
+        : membership.source === "admin"
+          ? " (otorgada por admin)"
+          : "";
+      summary.textContent = `Membresía mensual activa${source}${until ? ` hasta ${until}` : ""}.`;
+    } else {
+      summary.textContent = "Cuenta gratuita. Activa la membresía o canjea un mes de regalo para seguir más productos.";
+    }
+    quotaEl.textContent = `Alertas: ${quota.count ?? 0} de ${quota.limit ?? 3}.`;
+  } catch (error) {
+    $("membership-summary").textContent = error.message || "No se pudo cargar la membresía.";
+  }
+}
+
+$("promo-form")?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  try {
+    const data = await saving(form, () => json("/api/account/membership/promo", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code: $("promo-code").value.trim() }),
+    }));
+    if (data === undefined) return;
+    $("promo-code").value = "";
+    flash(data.message || "Membresía de regalo activada.", true, form);
+    await loadMembership();
+  } catch (error) {
+    flash(error.message || "No se pudo canjear el código.", false, form);
+  }
+});
+
 async function ready() {
   const user = await ensureUser();
   $("guest-box").hidden = Boolean(user);
+  $("membership-panel").hidden = !user;
   $("watch-panel").hidden = !user;
   $("watch-list").hidden = !user;
   $("notification-panel").hidden = !user;
@@ -495,7 +564,10 @@ async function ready() {
     render([]);
     return;
   }
-  await Promise.all([load(), loadNotifications(), loadStorePreferences(), loadPushState()]);
+  await Promise.all([load(), loadNotifications(), loadStorePreferences(), loadPushState(), loadMembership()]);
+  if (location.hash === "#membresia") {
+    $("membership-panel")?.scrollIntoView({ block: "start" });
+  }
 }
 
 ready().catch((error) => flash(error.message, false));

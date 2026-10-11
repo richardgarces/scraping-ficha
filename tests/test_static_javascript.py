@@ -124,9 +124,19 @@ def test_product_price_charts_show_every_calendar_day():
     assert ".price-chart-scroll .chart" in styles
     assert "max-width: none" in styles
     assert "overflow-x: auto" in styles
-    assert 'producto.js?v=47-oferta-only' in page
-    assert 'styles.css?v=96-oferta-only' in page
+    assert 'producto.js?v=50-chart-labels' in page
+    assert 'styles.css?v=98-chart-labels' in page
+    assert 'data-days="180"' in page
+    assert 'data-days="365"' in page
+    assert 'data-days="730"' in page
+    assert "6 meses" in page
+    assert "1 año" in page
+    assert "2 años" in page
     assert "Solo precio oferta" in page
+    assert "const domainMin = 0;" in script
+    assert "function chartValueLabelIndexes" in script
+    assert "chart-value-label" in script
+    assert ".chart-value-label" in styles
     assert "chart-offer-area" in script
     assert "chart-discount-band" not in script.split("function renderCharts()")[-1].split("const FORECAST_TRENDS")[0]
     assert "Precio oferta" in script.split("function renderCharts()")[-1].split("const FORECAST_TRENDS")[0]
@@ -204,7 +214,29 @@ def test_product_forecast_panel_is_admin_only_and_collapsed_by_default() -> None
     assert "panel.hidden = false" not in script.split("async function loadForecast")[1].split("$(\"windows\")")[0]
     assert "panel.open = false" in script
     assert "panel.open = true" not in script
-    assert "producto.js?v=47-oferta-only" in page
+    assert "producto.js?v=52-cheaper-internal" in page
+
+
+def test_product_others_dedupe_by_store_keeps_cheapest() -> None:
+    script = Path("retail/web/static/producto.js").read_text(encoding="utf-8")
+    assert "function cheapestPerStore(others)" in script
+    assert "function otherStoreKey(item)" in script
+    assert "function findOtherRowByStore(item)" in script
+    assert "data-store=" in script
+    assert "cheapestPerStore(others)" in script
+    # Misma tienda (marca), no seller: marketplace bajo Paris → una fila.
+    assert "display_store || item?.store" in script or "display_store || item.store" in script
+
+
+def test_cheaper_elsewhere_chip_links_to_internal_ficha() -> None:
+    script = Path("retail/web/static/producto.js").read_text(encoding="utf-8")
+    assert "function cheaperElsewhereLink(item)" in script
+    assert "cheaperElsewhereLink(cheaper)" in script
+    assert "cheaperElsewhereLink(item)" in script
+    helper = script.split("function cheaperElsewhereLink(item)")[1].split("function markCheaper")[0]
+    assert "productUrl(item)" in helper
+    assert "target=\"_blank\"" not in helper
+    assert "item.url" not in helper
 
 
 def test_timesfm_offer_summary_is_admin_only() -> None:

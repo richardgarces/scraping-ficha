@@ -750,6 +750,41 @@ def retailer_key(store: str | None) -> str:
     return store_family(sid) or sid or ""
 
 
+def store_offer_key(row: dict[str, Any]) -> str:
+    """Marca/tienda pública para deduplicar ofertas (no familia Cencosud/Falabella)."""
+    return normalize_store_id(row.get("display_store") or row.get("store"))
+
+
+def collapse_cheapest_per_store(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Una fila por tienda: la oferta más barata (sellers de marketplace incluidos).
+
+    En la ficha «Precios en otras tiendas» varios avisos de Paris (Paris vs
+    Mobile Tech, etc.) deben verse como una sola fila con el menor precio.
+    No usa retailer_key: Paris y Easy siguen separados.
+    """
+    buckets: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    leftovers: list[dict[str, Any]] = []
+    for row in rows:
+        key = store_offer_key(row)
+        if not key:
+            leftovers.append(row)
+            continue
+        buckets[key].append(row)
+
+    def _price_sort_key(row: dict[str, Any]) -> tuple[bool, float]:
+        price = row.get("price")
+        if isinstance(price, (int, float)):
+            return (False, float(price))
+        return (True, 10**12)
+
+    collapsed: list[dict[str, Any]] = []
+    for group in buckets.values():
+        group.sort(key=_price_sort_key)
+        collapsed.append(dict(group[0]))
+    collapsed.sort(key=_price_sort_key)
+    return collapsed + leftovers
+
+
 def collapse_variants(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Una fila por aviso, la variante más barata, con el rango de las demás.
 

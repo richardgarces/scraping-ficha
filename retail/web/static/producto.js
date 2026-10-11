@@ -210,13 +210,7 @@ function renderCard(data) {
     ? `<p class="customer-rating" aria-label="Evaluación de clientes: ${score.toFixed(1)} de 5">★ ${score.toFixed(1)} de 5${Number.isFinite(reviews) && reviews > 0 ? ` · ${reviews.toLocaleString("es-CL")} evaluaciones` : ""}</p>`
     : "";
   const cheaper = data.cheapest && data.cheapest.store !== item.store ? data.cheapest : null;
-  const cheapest = cheaper
-    ? `<p class="cheapest">${
-        cheaper.url
-          ? `<a class="store-offer" href="${attr(cheaper.url)}" target="_blank" rel="noreferrer">Más barato en ${storeLogo(cheaper.display_store || cheaper.store, cheaper.store_title || cheaper.store)} · ${money(cheaper.price)}</a>`
-          : `Más barato en ${storeLogo(cheaper.display_store || cheaper.store, cheaper.store_title || cheaper.store)} · ${money(cheaper.price)}`
-      }</p>`
-    : "";
+  const cheapest = cheaper ? `<p class="cheapest">${cheaperElsewhereLink(cheaper)}</p>` : "";
   const fresh = typeof updatedAgo === "function" && item.updated_at
     ? `<p class="muted" id="price-freshness">${attr(updatedAgo(item.updated_at))}</p>`
     : `<p class="muted" id="price-freshness" hidden></p>`;
@@ -855,16 +849,66 @@ function chartPointLabel(point) {
   return `${chartDateLabel(point.day, true)} · Precio oferta: ${money(point.offer)}`;
 }
 
+/** Índices con etiqueta visible: inicio, actual, mín/máx globales y cambios relevantes. */
+function chartValueLabelIndexes(observations) {
+  const offerIndexes = observations
+    .map((point, index) => (point.offer != null ? index : -1))
+    .filter((index) => index >= 0);
+  if (!offerIndexes.length) return [];
+
+  const labeled = new Set([offerIndexes[0], offerIndexes[offerIndexes.length - 1]]);
+  let minIndex = offerIndexes[0];
+  let maxIndex = offerIndexes[0];
+  for (const index of offerIndexes) {
+    if (observations[index].offer < observations[minIndex].offer) minIndex = index;
+    if (observations[index].offer > observations[maxIndex].offer) maxIndex = index;
+  }
+  labeled.add(minIndex);
+  labeled.add(maxIndex);
+
+  const maxPrice = Math.max(...offerIndexes.map((index) => observations[index].offer));
+  const threshold = Math.max(Math.round(maxPrice * 0.01), 1000);
+  for (let rank = 0; rank < offerIndexes.length; rank += 1) {
+    const index = offerIndexes[rank];
+    const price = observations[index].offer;
+    if (rank > 0) {
+      const prev = observations[offerIndexes[rank - 1]].offer;
+      if (Math.abs(price - prev) >= threshold) labeled.add(index);
+    }
+    if (rank > 0 && rank < offerIndexes.length - 1) {
+      const prev = observations[offerIndexes[rank - 1]].offer;
+      const next = observations[offerIndexes[rank + 1]].offer;
+      const localMin = price <= prev && price <= next;
+      const localMax = price >= prev && price >= next;
+      if ((localMin || localMax) && (Math.abs(price - prev) >= threshold || Math.abs(price - next) >= threshold)) {
+        labeled.add(index);
+      }
+    }
+  }
+  return [...labeled].sort((left, right) => left - right);
+}
+
+function chartValueLabelMarkup(point, index, total, x, y, plotTop) {
+  const above = y - plotTop >= 22;
+  const labelY = above ? y - 12 : y + 18;
+  const anchor = index === 0 ? "start" : index === total - 1 ? "end" : "middle";
+  return `<text class="chart-value-label" x="${x.toFixed(1)}" y="${labelY.toFixed(1)}" text-anchor="${anchor}">${money(point.offer)}</text>`;
+}
+
 function mountChartPointInteractions(container, observations) {
   const tooltip = $("chart-tooltip");
   for (const target of container.querySelectorAll("[data-chart-point]")) {
     const show = () => {
       const point = observations[Number(target.dataset.chartPoint)];
       if (point && tooltip) tooltip.textContent = chartPointLabel(point);
+      target.classList.add("is-hot");
     };
+    const hide = () => target.classList.remove("is-hot");
     target.addEventListener("click", show);
     target.addEventListener("focus", show);
+    target.addEventListener("blur", hide);
     target.addEventListener("mouseenter", show);
+    target.addEventListener("mouseleave", hide);
   }
 }
 
@@ -898,13 +942,12 @@ function renderCharts() {
     return;
   }
   const width = 760;
-  const height = 300;
-  const plot = { left: 88, right: 22, top: 28, bottom: 52 };
-  const rawMin = Math.min(...allPrices);
+  const height = 320;
+  const plot = { left: 88, right: 28, top: 36, bottom: 52 };
   const rawMax = Math.max(...allPrices);
-  const spread = Math.max(rawMax - rawMin, Math.round(rawMax * 0.06), 1);
-  const domainMin = Math.max(0, rawMin - spread * 0.18);
-  const domainMax = rawMax + spread * 0.14;
+  // Eje Y desde $0 para que la altura del área refleje el precio real (no un recorte cerca del mínimo).
+  const domainMin = 0;
+  const domainMax = Math.max(rawMax * 1.08, rawMax + 1);
   const toX = (index) => plot.left + index * (width - plot.left - plot.right) / Math.max(observations.length - 1, 1);
   const toY = (price) => plot.top + (domainMax - price) * (height - plot.top - plot.bottom) / (domainMax - domainMin);
   const offerCoords = offerRows.map((point) => {
@@ -926,12 +969,19 @@ function renderCharts() {
     const anchor = chartAxisAnchor(index, observations.length);
     return `<text class="axis" x="${toX(index).toFixed(1)}" y="${height - 16}" text-anchor="${anchor}">${chartDateLabel(observations[index].day, spanYears)}</text>`;
   }).join("");
+  const labelIndexes = new Set(chartValueLabelIndexes(observations));
   const points = observations.map((point, index) => {
     if (point.offer == null) return "";
     const label = chartPointLabel(point);
-    return `<g class="chart-hit" data-chart-point="${index}" tabindex="0" role="button" aria-label="${attr(label)}">
-      <circle class="chart-touch-target" cx="${toX(index).toFixed(1)}" cy="${toY(point.offer).toFixed(1)}" r="18"/>
-      <circle class="chart-series chart-point offer" cx="${toX(index).toFixed(1)}" cy="${toY(point.offer).toFixed(1)}" r="4.5"><title>${label}</title></circle>
+    const x = toX(index);
+    const y = toY(point.offer);
+    const valueLabel = labelIndexes.has(index)
+      ? chartValueLabelMarkup(point, index, observations.length, x, y, plot.top)
+      : "";
+    return `<g class="chart-hit${labelIndexes.has(index) ? " has-value-label" : ""}" data-chart-point="${index}" tabindex="0" role="button" aria-label="${attr(label)}">
+      <circle class="chart-touch-target" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="20"/>
+      <circle class="chart-series chart-point offer" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="4.5"><title>${label}</title></circle>
+      ${valueLabel}
     </g>`;
   }).join("");
   const currentIndex = observations.length - 1;
@@ -1141,6 +1191,39 @@ document.querySelector(".chart-mode")?.addEventListener("click", (event) => {
   applyChartMode();
 });
 
+function otherStoreKey(item) {
+  return String(item?.display_store || item?.store || "").trim().toLowerCase();
+}
+
+/** Misma tienda (marca): una sola fila, la más barata — sellers de marketplace incluidos. */
+function cheapestPerStore(others) {
+  const best = new Map();
+  for (const item of others || []) {
+    if (!item) continue;
+    const key = otherStoreKey(item);
+    if (!key) continue;
+    const prev = best.get(key);
+    if (!prev) {
+      best.set(key, item);
+      continue;
+    }
+    const prevPrice = prev.price == null ? Number.POSITIVE_INFINITY : Number(prev.price);
+    const nextPrice = item.price == null ? Number.POSITIVE_INFINITY : Number(item.price);
+    if (nextPrice < prevPrice) best.set(key, item);
+  }
+  return [...best.values()].sort(
+    (left, right) => (Number(left.price) || 1e15) - (Number(right.price) || 1e15),
+  );
+}
+
+function sortOtherRows() {
+  const body = $("others");
+  if (!body) return;
+  const rows = [...body.querySelectorAll("tr")];
+  rows.sort((left, right) => (Number(left.dataset.price) || 1e15) - (Number(right.dataset.price) || 1e15));
+  rows.forEach((row) => body.appendChild(row));
+}
+
 function otherRow(item) {
   const stats = item.stats || {};
   const ficha = `<a class="deal-cta" href="${attr(productUrl(item))}">Ver ficha</a>`;
@@ -1148,7 +1231,7 @@ function otherRow(item) {
     ? `<a class="deal-cta offer" href="${attr(item.url)}" target="_blank" rel="noreferrer">Ver oferta</a>`
     : "";
   return `
-    <tr class="${item.url ? "click-offer" : ""}" data-offer="${attr(`${item.store || ""}:${item.product_id || ""}`)}" data-price="${item.price ?? ""}" ${item.url ? `data-url="${attr(item.url)}"` : ""}>
+    <tr class="${item.url ? "click-offer" : ""}" data-store="${attr(otherStoreKey(item))}" data-offer="${attr(`${item.store || ""}:${item.product_id || ""}`)}" data-price="${item.price ?? ""}" ${item.url ? `data-url="${attr(item.url)}"` : ""}>
       <td>${storeNameLink(item)}${soldBy(item)}</td>
       <td class="price">${money(item.price)}</td>
       <td class="muted">${stats.median ? money(stats.median) : "—"}</td>
@@ -1157,32 +1240,30 @@ function otherRow(item) {
 }
 
 function renderOthers(others) {
-  if (!others.length) return;
+  const rows = cheapestPerStore(others);
+  if (!rows.length) return;
   $("others-panel").hidden = false;
-  $("others").innerHTML = others.map(otherRow).join("");
+  $("others").innerHTML = rows.map(otherRow).join("");
 }
 
-function findOtherRow(item) {
-  const key = `${item.store || ""}:${item.product_id || ""}`;
-  return [...$("others").querySelectorAll("tr[data-offer]")].find((row) => row.dataset.offer === key);
+function findOtherRowByStore(item) {
+  const key = otherStoreKey(item);
+  if (!key) return null;
+  return [...$("others").querySelectorAll("tr[data-store]")].find((row) => row.dataset.store === key);
 }
 
 function upsertOtherRow(item) {
-  const existing = findOtherRow(item);
+  const existing = findOtherRowByStore(item);
   if (existing) {
     const prev = Number(existing.dataset.price);
-    if (item.price != null && (Number.isNaN(prev) || item.price < prev)) {
-      existing.dataset.price = String(item.price);
-      const cell = existing.querySelector(".price");
-      if (cell) cell.textContent = money(item.price);
-    }
+    if (item.price == null || (!Number.isNaN(prev) && item.price >= prev)) return;
+    existing.outerHTML = otherRow(item);
+    sortOtherRows();
     return;
   }
   $("others-panel").hidden = false;
   $("others").insertAdjacentHTML("beforeend", otherRow(item));
-  const rows = [...$("others").querySelectorAll("tr")];
-  rows.sort((left, right) => (Number(left.dataset.price) || 1e15) - (Number(right.dataset.price) || 1e15));
-  rows.forEach((row) => $("others").appendChild(row));
+  sortOtherRows();
 }
 
 function noticeSeen(store, id, offer) {
@@ -1234,12 +1315,18 @@ function demoteBuyAdviceForCheaper(item) {
   }
 }
 
+function cheaperElsewhereLink(item) {
+  /** Chip «Más barato en X»: siempre a la ficha interna, no a la URL externa. */
+  const label = `Más barato en ${storeLogo(item.display_store || item.store, item.store_title || item.store)} · ${money(item.price)}`;
+  if (item.store && item.product_id) {
+    return `<a class="store-offer" href="${attr(productUrl(item))}">${label}</a>`;
+  }
+  return label;
+}
+
 function markCheaper(item) {
   const head = $("card")?.querySelector(".product-head div");
   if (!head || item?.price == null) return;
-  const html = item.url
-    ? `<a class="store-offer" href="${attr(item.url)}" target="_blank" rel="noreferrer">Más barato en ${storeLogo(item.display_store || item.store, item.store_title || item.store)} · ${money(item.price)}</a>`
-    : `Más barato en ${storeLogo(item.display_store || item.store, item.store_title || item.store)} · ${money(item.price)}`;
   let line = head.querySelector(".cheapest");
   if (!line) {
     line = document.createElement("p");
@@ -1248,7 +1335,7 @@ function markCheaper(item) {
     if (cta) cta.before(line);
     else head.appendChild(line);
   }
-  line.innerHTML = html;
+  line.innerHTML = cheaperElsewhereLink(item);
   demoteBuyAdviceForCheaper(item);
 }
 

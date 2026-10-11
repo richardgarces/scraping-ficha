@@ -62,7 +62,7 @@
         </div>
         <button type="button" class="secondary" id="reload">Actualizar</button>
       </div>
-      <p class="muted">Correo, nombre, fecha de alta, si tienen Telegram y cuántas alertas de precio tienen. No se muestran claves ni tokens.</p>
+      <p class="muted">Correo, nombre, rol (usuario / de pago / admin), membresía, Telegram y alertas. «1 mes regalo» extiende la membresía 30 días. No se muestran claves ni tokens.</p>
       <div class="table-wrap">
         <table class="results">
           <thead>
@@ -72,18 +72,20 @@
               <th>Alta</th>
               <th>Rol</th>
               <th>Estado</th>
+              <th>Membresía</th>
               <th>Telegram</th>
               <th>Alertas</th>
+              <th></th>
             </tr>
           </thead>
           <tbody id="users-body">
-            <tr><td colspan="7" class="muted">Cargando…</td></tr>
+            <tr><td colspan="9" class="muted">Cargando…</td></tr>
           </tbody>
         </table>
       </div>
     </section>
   </main>
-  <script src="/static/prices.js?v=36"></script>
-  <script src="/static/usuarios.js?v=2"></script>
+  <script src="/static/prices.js?v=37"></script>
+  <script src="/static/usuarios.js?v=3"></script>
 </body>
 </html>

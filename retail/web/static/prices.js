@@ -1029,9 +1029,30 @@ document.addEventListener("click", async (event) => {
       return;
     }
     if (!response.ok) {
-      const detail = typeof data.detail === "string" ? data.detail : "No se pudo guardar la alerta.";
+      const raw = data.detail;
+      const detail = typeof raw === "string"
+        ? raw
+        : (raw && raw.message) || "No se pudo guardar la alerta.";
+      const upgrade = raw && typeof raw === "object" && (raw.code === "alert_limit" || raw.upgrade);
+      const path = (raw && raw.upgrade_path) || "/siguiendo#membresia";
+      button.title = detail;
+      if (upgrade) {
+        const host = button.closest(".price-alert, .product-card, li, article") || button.parentElement;
+        if (host) {
+          let note = host.querySelector(".price-alert-limit");
+          if (!note) {
+            note = document.createElement("p");
+            note.className = "muted price-alert-note price-alert-limit";
+            button.insertAdjacentElement("afterend", note);
+          }
+          const safe = String(detail)
+            .replaceAll("&", "&amp;")
+            .replaceAll("<", "&lt;")
+            .replaceAll(">", "&gt;");
+          note.innerHTML = `${safe} <a href="${path}">Mejorar cuenta</a>`;
+        }
+      }
       if (typeof flash === "function") flash(detail);
-      else button.title = detail;
       button.disabled = false;
       return;
     }

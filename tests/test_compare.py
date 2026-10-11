@@ -360,6 +360,37 @@ def test_categories_endpoint_answers():
         assert "items" in response.json()
 
 
+def test_collapse_cheapest_per_store_keeps_one_paris_marketplace_offer():
+    from retail.compare import collapse_cheapest_per_store
+
+    salida = collapse_cheapest_per_store(
+        [
+            {"store": "paris", "display_store": "paris", "product_id": "a", "seller": "Paris", "price": 891990},
+            {"store": "paris", "display_store": "paris", "product_id": "b", "seller": "Mobile Tech", "price": 899990},
+            {"store": "paris", "display_store": "paris", "product_id": "c", "seller": "Mobile Tech", "price": 899990},
+            {"store": "ripley", "display_store": "ripley", "product_id": "d", "seller": "Ripley", "price": 920000},
+        ]
+    )
+    assert len(salida) == 2
+    paris = next(row for row in salida if row["store"] == "paris")
+    assert paris["price"] == 891990
+    assert paris["seller"] == "Paris"
+    assert any(row["store"] == "ripley" for row in salida)
+
+
+def test_collapse_cheapest_per_store_keeps_paris_and_easy_apart():
+    """Paris y Easy son Cencosud, pero en la ficha se muestran como tiendas distintas."""
+    from retail.compare import collapse_cheapest_per_store
+
+    salida = collapse_cheapest_per_store(
+        [
+            {"store": "paris", "product_id": "1", "price": 100},
+            {"store": "easy", "product_id": "2", "price": 90},
+        ]
+    )
+    assert {row["store"] for row in salida} == {"paris", "easy"}
+
+
 def test_collapse_mirrors_joins_falabella_and_sodimac():
     from retail.compare import collapse_mirrors
 

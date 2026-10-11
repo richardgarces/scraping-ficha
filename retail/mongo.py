@@ -3540,16 +3540,19 @@ class ProductRepository:
     def _public_user(item: dict[str, Any] | None) -> dict[str, Any] | None:
         if not item:
             return None
+        from retail.membership import membership_public, normalize_role
+
         created = item.get("created_at")
         approved = item.get("approved_at")
         return {
             "id": str(item.get("_id") or item.get("id") or ""),
             "email": item.get("email"),
             "name": item.get("name") or "",
-            "role": item.get("role") or "user",
+            "role": normalize_role(item.get("role")),
             "status": item.get("status") or "pending",
             "created_at": created.isoformat() if hasattr(created, "isoformat") else created,
             "approved_at": approved.isoformat() if hasattr(approved, "isoformat") else approved,
+            "membership": membership_public(item),
         }
 
     def find_user_by_email(self, email: str) -> dict[str, Any] | None:
@@ -3761,6 +3764,7 @@ class ProductRepository:
             count = max(0, int(price_alerts or 0))
         except (TypeError, ValueError):
             count = 0
+        membership = public.get("membership") or {}
         return {
             "id": public["id"],
             "email": public.get("email") or "",
@@ -3770,6 +3774,11 @@ class ProductRepository:
             "created_at": public.get("created_at"),
             "has_telegram": ProductRepository._user_has_telegram(item),
             "price_alerts": count,
+            "membership": membership,
+            "membership_active": bool(membership.get("active")),
+            "membership_expires_at": membership.get("expires_at"),
+            "membership_source": membership.get("source"),
+            "alert_limit": membership.get("alert_limit"),
         }
 
     def _price_alert_counts(self) -> dict[str, int]:
@@ -3885,6 +3894,16 @@ class ProductRepository:
         if user_id:
             query["user_id"] = user_id
         return self.watches.delete_one(query).deleted_count > 0
+
+    def count_price_alerts(self, user_id: str) -> int:
+        """Alertas activas del usuario (cupo de membresía)."""
+        clean = str(user_id or "").strip()
+        if not clean:
+            return 0
+        try:
+            return int(self.price_alerts.count_documents({"user_id": clean, "active": {"$ne": False}}))
+        except Exception:
+            return 0
 
     def get_price_alert(self, user_id: str, store: str, product_id: str) -> dict[str, Any] | None:
         found = self.price_alerts.find_one(

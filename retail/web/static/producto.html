@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#258fdf">
   <title>Ficha de producto</title>
   <script>(function(){var m=localStorage.getItem("retail-theme");if(m==="day"||m==="night"){document.documentElement.dataset.theme=m;return;}var h=new Date().getHours();document.documentElement.dataset.theme=(h>=7&&h<19)?"day":"night";})();</script>
-  <link rel="stylesheet" href="/static/styles.css?v=96-oferta-only">
+  <link rel="stylesheet" href="/static/styles.css?v=98-chart-labels">
 </head>
 <body>
   <header class="top">
@@ -75,6 +75,9 @@
               <button type="button" class="secondary" data-days="7">7 días</button>
               <button type="button" class="secondary" data-days="30">30 días</button>
               <button type="button" class="secondary current" data-days="90">90 días</button>
+              <button type="button" class="secondary" data-days="180">6 meses</button>
+              <button type="button" class="secondary" data-days="365">1 año</button>
+              <button type="button" class="secondary" data-days="730">2 años</button>
               <button type="button" class="secondary" data-days="0">Todo</button>
             </div>
           </div>
@@ -188,6 +191,6 @@
   </main>
   <script src="/static/prices.js?v=106-card-alert"></script>
   <script src="/static/price-history.js?v=1"></script>
-  <script src="/static/producto.js?v=47-oferta-only"></script>
+  <script src="/static/producto.js?v=52-cheaper-internal"></script>
 </body>
 </html>

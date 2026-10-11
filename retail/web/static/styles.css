@@ -1467,7 +1467,26 @@ button.secondary:hover { border-color: color-mix(in srgb, var(--accent) 40%, var
 .chart-grid { stroke: var(--line); stroke-width: 1; }
 .chart-touch-target { fill: transparent; cursor: pointer; }
 .chart-hit:focus { outline: none; }
-.chart-hit:focus .chart-point { stroke: var(--text); stroke-width: 3; }
+.chart-hit:focus .chart-point,
+.chart-hit:hover .chart-point,
+.chart-hit.is-hot .chart-point { stroke: var(--text); stroke-width: 3; }
+.chart-value-label {
+  fill: var(--text);
+  font-size: 11px;
+  font-weight: 650;
+  paint-order: stroke fill;
+  stroke: color-mix(in srgb, var(--panel) 88%, transparent);
+  stroke-width: 4px;
+  stroke-linejoin: round;
+  pointer-events: none;
+  transition: font-size .14s ease, font-weight .14s ease;
+}
+.chart-hit:hover .chart-value-label,
+.chart-hit:focus .chart-value-label,
+.chart-hit.is-hot .chart-value-label {
+  font-size: 15px;
+  font-weight: 800;
+}
 .chart-marker { fill: none; stroke-width: 2.5; pointer-events: none; }
 .chart-marker.minimum { stroke: var(--saving); }
 .chart-marker.current { stroke: var(--accent); }
@@ -1483,8 +1502,8 @@ button.secondary:hover { border-color: color-mix(in srgb, var(--accent) 40%, var
 @media (max-width: 780px) {
   .price-history-grid { grid-template-columns: 1fr; }
   .chart-controls { align-items: stretch; }
-  #windows { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); width: 100%; gap: 6px; }
-  #windows .secondary { min-width: 0; padding-inline: 5px; white-space: nowrap; }
+  #windows { display: grid; grid-template-columns: repeat(auto-fill, minmax(4.6rem, 1fr)); width: 100%; gap: 6px; }
+  #windows .secondary { min-width: 0; padding-inline: 5px; white-space: nowrap; font-size: 12px; }
   .chart-mode { width: 100%; }
   .chart-mode .secondary { flex: 1 1 50%; }
   .price-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -3710,7 +3729,7 @@ input[type="checkbox"], input[type="radio"] { width: 18px; height: 18px; accent-
   .product-head h2 { font-size: clamp(21px, 6vw, 28px); line-height: 1.15; }
   .product-cta > * { flex: 1 1 145px; justify-content: center; margin-top: 0; }
   .chart-controls { gap: 10px; }
-  #windows { display: grid; grid-template-columns: repeat(4, 1fr); width: 100%; margin-bottom: 0; gap: 6px; }
+  #windows { display: grid; grid-template-columns: repeat(auto-fill, minmax(4.6rem, 1fr)); width: 100%; margin-bottom: 0; gap: 6px; }
   #windows button { min-width: 0; padding: 8px 5px; font-size: 12px; }
   .price-history-card { padding: 12px; }
   .chart .axis { font-size: 12px; }

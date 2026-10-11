@@ -8,7 +8,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import RedirectResponse, Response, StreamingResponse
 
 from retail import thumbs
-from retail.compare import is_catalog_mirror, same_product_pack
+from retail.compare import collapse_cheapest_per_store, is_catalog_mirror, same_product_pack
 from retail.commercial import conditions_compatible, landed_price, shipping_comparable
 from retail.ficha_extra import (
     description_of,
@@ -192,6 +192,9 @@ def product(store: str = Query(...), id: str = Query(...)) -> dict:
             and same_product_identity(document, item)
             and conditions_compatible(document.get("condition"), item.get("condition"))
         ]
+        # Una fila por marca/tienda: marketplace (p. ej. varios sellers en Paris)
+        # deja solo la oferta más barata.
+        others = collapse_cheapest_per_store(others)
         priced = [item for item in [card, *others] if item.get("price")]
         use_total = shipping_comparable(priced)
         cheapest = min(
@@ -957,6 +960,14 @@ async def create_watch(request: Request) -> dict:
     repo = _repo_or_404()
     try:
         user = current_user(request, repo, required=True)
+        from retail.membership import alert_quota, limit_error_detail
+
+        # Mismo cupo que «Activar alerta» (cuenta price_alerts activos).
+        store_id = str(body.get("store") or "").strip().lower() or None
+        product_id = str(body.get("product_id") or "").strip() or None
+        quota = alert_quota(repo, user, store=store_id, product_id=product_id)
+        if not quota["can_add"]:
+            raise HTTPException(status_code=403, detail=limit_error_detail(quota))
         # Seguimiento: por defecto cualquier cambio (sube o baja), sin umbral.
         watch_changes = bool(body.get("watch_changes", True))
         if not target and not drop:
@@ -1015,11 +1026,23 @@ def price_alert_status(request: Request, store: str = Query(...), id: str = Quer
         user = current_user(request, repo)
         if not user:
             return {"logged_in": False, "active": False}
+        from retail.membership import alert_quota
+
         found = repo.get_price_alert(user["id"], store_id, product_id)
+        quota = alert_quota(repo, user, store=store_id, product_id=product_id)
         return {
             "logged_in": True,
             "active": bool(found),
             "email": user.get("email") or "",
+            "quota": {
+                "count": quota["count"],
+                "limit": quota["limit"],
+                "tier": quota["tier"],
+                "can_add": quota["can_add"],
+                "upgrade": quota["upgrade"],
+                "upgrade_path": quota["upgrade_path"],
+            },
+            "membership": quota.get("membership"),
         }
     finally:
         repo.close()
@@ -1034,11 +1057,15 @@ async def activate_price_alert(request: Request) -> dict:
         user = current_user(request, repo)
         if not user:
             raise HTTPException(status_code=401, detail="Entra para activar una alerta de precio.")
-        from retail.user_alert_list import add_user_alert, user_can_activate_alert
+        from retail.membership import check_can_activate_alert
+        from retail.user_alert_list import add_user_alert
 
-        ok, detail = user_can_activate_alert(user)
+        ok, detail = check_can_activate_alert(
+            repo, user, store=store_id, product_id=product_id,
+        )
         if not ok:
-            raise HTTPException(status_code=400, detail=detail)
+            status = 403 if isinstance(detail, dict) and detail.get("code") == "alert_limit" else 400
+            raise HTTPException(status_code=status, detail=detail)
         document = repo.product_detail(store_id, product_id) or {}
         repo.save_price_alert(
             {
@@ -1069,7 +1096,22 @@ async def activate_price_alert(request: Request) -> dict:
             record_funnel_event("follow", source="price_alert")
         except Exception:
             pass
-        return {"active": True, "email": user.get("email") or ""}
+        from retail.membership import alert_quota
+
+        quota = alert_quota(repo, user, store=store_id, product_id=product_id)
+        return {
+            "active": True,
+            "email": user.get("email") or "",
+            "quota": {
+                "count": quota["count"],
+                "limit": quota["limit"],
+                "tier": quota["tier"],
+                "can_add": quota["can_add"],
+                "upgrade": quota["upgrade"],
+                "upgrade_path": quota["upgrade_path"],
+            },
+            "membership": quota.get("membership"),
+        }
     finally:
         repo.close()
 

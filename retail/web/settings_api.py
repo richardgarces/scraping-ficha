@@ -284,6 +284,64 @@ def admin_users(request: Request) -> dict:
     return {"users": users, "total": len(users)}
 
 
+@router.post("/api/admin/users/{user_id}/role")
+async def admin_set_user_role(user_id: str, request: Request) -> dict:
+    """Cambia rol: user | paid | admin. paid sin membresía otorga 1 mes."""
+    from retail.membership import set_user_role
+
+    actor = current_user(request, admin=True)
+    body = await request.json()
+    repo = connect_repo()
+    if repo is None:
+        raise HTTPException(status_code=503, detail="MongoDB no está disponible.")
+    try:
+        try:
+            user = set_user_role(
+                repo,
+                user_id,
+                str(body.get("role") or ""),
+                actor_id=(actor or {}).get("id"),
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"user": user}
+    finally:
+        repo.close()
+
+
+@router.post("/api/admin/users/{user_id}/membership/gift")
+async def admin_gift_membership(user_id: str, request: Request) -> dict:
+    """Otorga 1 mes de regalo (o N meses) de membresía de pago."""
+    from retail.membership import grant_gift_month
+
+    actor = current_user(request, admin=True)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    months = body.get("months", 1) if isinstance(body, dict) else 1
+    try:
+        months = int(months)
+    except (TypeError, ValueError):
+        months = 1
+    repo = connect_repo()
+    if repo is None:
+        raise HTTPException(status_code=503, detail="MongoDB no está disponible.")
+    try:
+        try:
+            user = grant_gift_month(
+                repo,
+                user_id,
+                months=months,
+                actor_id=(actor or {}).get("id"),
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"user": user, "message": f"Se otorgó {months} mes{'es' if months != 1 else ''} de regalo."}
+    finally:
+        repo.close()
+
+
 @router.get("/api/admin/stats")
 def admin_stats(request: Request) -> dict:
     """Peticiones de la app por día, hora y origen. No cuenta archivos estáticos ni esta misma ruta."""

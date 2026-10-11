@@ -43,12 +43,15 @@ class FakeUserStore:
     def _public_user(self, item):
         if not item:
             return None
+        from retail.membership import membership_public, normalize_role
+
         return {
             "id": str(item.get("_id") or ""),
             "email": item.get("email"),
             "name": item.get("name") or "",
-            "role": item.get("role") or "user",
+            "role": normalize_role(item.get("role")),
             "status": item.get("status") or "pending",
+            "membership": membership_public(item),
         }
 
 

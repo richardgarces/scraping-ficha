@@ -326,7 +326,79 @@ def me(request: Request) -> dict:
     if store is None:
         return {"user": None}
     try:
-        return {"user": current_user(request, store)}
+        user = current_user(request, store)
+        if not user:
+            return {"user": None}
+        from retail.membership import alert_quota, sync_expired_role
+
+        raw = store.find_user_by_id(str(user.get("id") or "")) or {}
+        if raw:
+            sync_expired_role(store, raw)
+            user = store._public_user(store.find_user_by_id(str(user.get("id") or "")) or raw) or user
+        quota = alert_quota(store, user)
+        if isinstance(user, dict):
+            user = {
+                **user,
+                "alert_count": quota["count"],
+                "alert_limit": quota["limit"],
+            }
+        return {"user": user}
+    finally:
+        store.close()
+
+
+@router.get("/api/account/membership")
+def account_membership(request: Request) -> dict:
+    """Estado de membresía y cupo de alertas para la cuenta actual."""
+    from retail.membership import ALERT_LIMITS, alert_quota, sync_expired_role
+
+    store = repo_or_503()
+    try:
+        user = current_user(request, store, required=True) or {}
+        raw = store.find_user_by_id(str(user.get("id") or "")) or {}
+        if raw:
+            sync_expired_role(store, raw)
+            raw = store.find_user_by_id(str(user.get("id") or "")) or raw
+        public = store._public_user(raw) or user
+        quota = alert_quota(store, public)
+        return {
+            "user": public,
+            "membership": quota.get("membership") or public.get("membership"),
+            "quota": {
+                "count": quota["count"],
+                "limit": quota["limit"],
+                "tier": quota["tier"],
+                "can_add": quota["can_add"],
+                "upgrade": quota["upgrade"],
+                "upgrade_path": quota["upgrade_path"],
+            },
+            "plans": {
+                "free": {"alert_limit": ALERT_LIMITS["user"], "label": "Cuenta gratuita"},
+                "monthly": {"alert_limit": ALERT_LIMITS["paid"], "label": "Membresía mensual"},
+            },
+        }
+    finally:
+        store.close()
+
+
+@router.post("/api/account/membership/promo")
+async def redeem_membership_promo(request: Request) -> dict:
+    """Canjea un código de 1 mes de regalo (p. ej. REGALO1MES)."""
+    from retail.membership import redeem_promo_code
+
+    body = await request.json()
+    store = repo_or_503()
+    try:
+        user = current_user(request, store, required=True) or {}
+        try:
+            updated = redeem_promo_code(store, str(user.get("id") or ""), str(body.get("code") or ""))
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {
+            "user": updated,
+            "membership": (updated or {}).get("membership"),
+            "message": "Listo: tienes 1 mes de membresía de regalo.",
+        }
     finally:
         store.close()
 
