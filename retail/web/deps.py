@@ -22,6 +22,7 @@ ADMIN_HTML_PREFIXES: tuple[str, ...] = (
     "/pronosticos",
     "/cambios-precio",
     "/analisis-producto",
+    "/auditoria-matching",
 )
 
 # Páginas que cualquier cuenta aprobada puede abrir (path sin query).

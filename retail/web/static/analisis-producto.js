@@ -287,5 +287,18 @@
   ensureUser().then((user) => {
     currentUser = user;
     if (user?.role === "admin" && auditPanel) auditPanel.hidden = false;
+    if (user?.role === "admin") {
+      fetch("/api/settings/matching-audit")
+        .then((response) => {
+          if (!response.ok) throw new Error(`No se pudo consultar la configuración (${response.status}).`);
+          return response.json();
+        })
+        .then(({ enabled }) => {
+          document.querySelectorAll('a[href="/auditoria-matching"]').forEach((link) => {
+            link.hidden = !enabled;
+          });
+        })
+        .catch((error) => console.error("Auditoría de matching:", error));
+    }
   }).catch(() => {});
 })();

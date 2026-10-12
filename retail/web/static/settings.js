@@ -125,6 +125,20 @@ function fillScreenshots(setting) {
     : "Sin ajuste guardado: se usa OFFER_SCREENSHOTS del servidor, que está apagado.";
 }
 
+function fillMatchingAudit(setting) {
+  const enabled = Boolean(setting && setting.enabled);
+  const checkbox = $("matching-audit-enabled");
+  const hint = $("matching-audit-hint");
+  const link = $("matching-audit-open");
+  if (checkbox) checkbox.checked = enabled;
+  if (hint) {
+    hint.textContent = enabled
+      ? "Activada desde administración. La página y API internas están disponibles; apagarla no borra las corridas históricas."
+      : "Desactivada por defecto. Mientras esté apagada, la página y la API de auditoría quedan ocultas; las corridas históricas se conservan.";
+  }
+  if (link) link.hidden = !enabled;
+}
+
 function fillSchedule(schedule) {
   $("cron_enabled").checked = Boolean(schedule.enabled);
   $("cron_hour").value = schedule.hour ?? 8;
@@ -308,6 +322,7 @@ async function refresh() {
   fillRules(settings.rules);
   fillChannels(settings.rules, settings.channels);
   fillScreenshots(settings.offer_screenshots);
+  fillMatchingAudit(settings.matching_audit);
   fillSchedule(settings.schedule);
   fillCatalog(settings.catalog, stores);
   fillAlerts(alerts);
@@ -404,6 +419,23 @@ $("screenshots-form")?.addEventListener("submit", async (event) => {
     if (saved === undefined) return;
     fillScreenshots(saved);
     flash(saved.enabled ? "Capturas de oferta activadas." : "Capturas de oferta desactivadas.", true, form);
+  } catch (error) {
+    flash(error.message, false, form);
+  }
+});
+
+$("matching-audit-form")?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  try {
+    const saved = await saving(form, () => json("/api/settings/matching-audit", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: $("matching-audit-enabled").checked }),
+    }));
+    if (saved === undefined) return;
+    fillMatchingAudit(saved);
+    flash(saved.enabled ? "Auditoría de matching activada." : "Auditoría de matching desactivada; el histórico se conserva.", true, form);
   } catch (error) {
     flash(error.message, false, form);
   }

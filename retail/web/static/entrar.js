@@ -17,6 +17,7 @@ const ADMIN_HTML_PREFIXES = [
   "/pronosticos",
   "/cambios-precio",
   "/analisis-producto",
+  "/auditoria-matching",
 ];
 
 function nextPath(user) {

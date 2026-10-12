@@ -37,10 +37,12 @@ from retail.web.insights_api import router as insights_router
 from retail.web.settings_api import router as settings_router
 from retail.web.forecasts_api import router as forecasts_router
 from retail.web.admin_analysis_api import router as admin_analysis_router
+from retail.web.matching_audit_api import router as matching_audit_router
 from retail.web.push_api import router as push_router
 from retail.web.reviews_api import router as reviews_router
 from retail.web.quotes_api import router as quotes_router
 from retail.offer_screenshot import offer_shot_media_type, offer_shot_path
+from retail.matching_audit import matching_audit_status
 from retail.web.anti_scraping import (
     VISITOR_COOKIE,
     VISITOR_MAX_AGE,
@@ -57,10 +59,10 @@ app.include_router(settings_router)
 app.include_router(insights_router)
 app.include_router(forecasts_router)
 app.include_router(admin_analysis_router)
+app.include_router(matching_audit_router)
 app.include_router(push_router)
 app.include_router(reviews_router)
 app.include_router(quotes_router)
-app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
 
 @app.get("/favicon.ico", include_in_schema=False)
@@ -310,6 +312,26 @@ def analisis_producto(request: Request):
     if gate is not None:
         return gate
     return FileResponse(STATIC / "analisis-producto.html")
+
+
+@app.get("/auditoria-matching")
+@app.get("/static/matching-audit.html", include_in_schema=False)
+def auditoria_matching(request: Request):
+    gate = require_admin_html(request, next_path="/auditoria-matching")
+    if gate is not None:
+        return gate
+    repo = connect_repo()
+    if repo is None:
+        raise HTTPException(status_code=503, detail="MongoDB no está disponible.")
+    try:
+        if not matching_audit_status(repo)["enabled"]:
+            raise HTTPException(status_code=404, detail="La auditoría de matching está desactivada.")
+    finally:
+        repo.close()
+    return FileResponse(STATIC / "matching-audit.html")
+
+
+app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
 
 @app.get("/hoy")

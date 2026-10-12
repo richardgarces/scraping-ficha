@@ -5,7 +5,7 @@ import subprocess
 import pytest
 
 
-@pytest.mark.parametrize("script", ["app.js", "analisis-producto.js", "catalogo.js", "comparar.js", "cron.js", "producto.js", "prices.js"])
+@pytest.mark.parametrize("script", ["app.js", "analisis-producto.js", "matching-audit.js", "catalogo.js", "comparar.js", "cron.js", "producto.js", "prices.js"])
 def test_product_page_javascript_has_valid_syntax(script: str) -> None:
     node = shutil.which("node")
     if node is None:

@@ -72,6 +72,11 @@ def test_ofertas_and_history_are_admin_only(anonymous_repo):
     quotes = client.get("/cotizaciones", follow_redirects=False)
     assert quotes.status_code == 303
     assert quotes.headers["location"].startswith("/entrar")
+    matching_audit = client.get("/auditoria-matching", follow_redirects=False)
+    assert matching_audit.status_code == 303
+    assert matching_audit.headers["location"].startswith("/entrar")
+    matching_api = client.get("/api/admin/matching-audit/runs")
+    assert matching_api.status_code == 401
     history = client.get("/api/history")
     assert history.status_code == 200
     assert history.json() == []
@@ -259,6 +264,9 @@ def test_logged_in_admin_redirects_from_entrar_to_admin_pages(monkeypatch):
         def close(self):
             return None
 
+        def get_app_setting(self, key):
+            return {"enabled": True} if key == "matching_audit" else None
+
     admin = {"id": "9", "role": "admin", "status": "approved"}
     monkeypatch.setattr("retail.web.deps.connect_repo", lambda: Store())
     monkeypatch.setattr("retail.web.deps.current_user", lambda *args, **kwargs: admin)
@@ -270,6 +278,7 @@ def test_logged_in_admin_redirects_from_entrar_to_admin_pages(monkeypatch):
         "/cambios-precio",
         "/tiendas",
         "/analisis-producto",
+        "/auditoria-matching",
         "/cotizaciones",
         "/cron",
     ):
@@ -279,6 +288,9 @@ def test_logged_in_admin_redirects_from_entrar_to_admin_pages(monkeypatch):
     analysis = client.get("/analisis-producto")
     assert analysis.status_code == 200
     assert "Análisis de producto" in analysis.text
+    audit = client.get("/auditoria-matching")
+    assert audit.status_code == 200
+    assert "Auditoría de matching" in audit.text
     from retail.web.deps import ADMIN_HTML_PREFIXES
 
     js = Path("retail/web/static/entrar.js").read_text(encoding="utf-8")

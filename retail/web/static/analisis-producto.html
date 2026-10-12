@@ -38,6 +38,7 @@
           <a href="/siguiendo">Siguiendo</a>
           <a href="/cron" data-admin hidden>Cron / lotes</a>
           <a href="/analisis-producto" class="current" data-admin hidden>Análisis de producto</a>
+          <a href="/auditoria-matching" hidden>Auditoría de matching</a>
           <a href="/estadisticas" data-admin hidden>Estadísticas</a>
           <a href="/pronosticos" data-admin hidden>Pronósticos</a>
           <a href="/usuarios" data-admin hidden>Usuarios</a>
@@ -75,6 +76,7 @@
     </section>
     <section class="panel" data-admin hidden id="identity-audit-panel">
       <h2>Auditoría de identidad (≥80%)</h2>
+      <p><a id="matching-audit-link" class="btn secondary" href="/auditoria-matching" hidden>Abrir auditoría de consultas y resultados</a></p>
       <p class="muted">Muestreo de pares que el sistema une con confianza alta. Marca <strong>Incorrecto</strong> para forzar override (separación) o <strong>Confirmar</strong> para registrar que el par está bien.</p>
       <div class="analysis-search">
         <button id="identity-audit-sample" type="button" class="secondary">Muestrear pares</button>

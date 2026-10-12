@@ -240,6 +240,11 @@ class ProductRepository:
         self.search_results = self.db["search_results"]
         self.real_offer_jobs = self.db["real_offer_jobs"]
         self.daily_real_offers = self.db["daily_real_offers"]
+        self.matching_audit_runs = self.db["matching_audit_runs"]
+        self.matching_audit_items = self.db["matching_audit_items"]
+        self.matching_audit_reviews = self.db["matching_audit_reviews"]
+        self.offer_verification_runs = self.db["offer_verification_runs"]
+        self.offer_verification_checks = self.db["offer_verification_checks"]
         self.quote_miss_jobs = self.db["quote_miss_jobs"]
         self.cyber_day_products = self.db["cyber_day_products"]
         self.cyber_day_lists = self.db["cyber_day_lists"]
@@ -571,6 +576,37 @@ class ProductRepository:
             )
         except OperationFailure:
             pass
+        self.matching_audit_runs.create_index(
+            [("created_at", DESCENDING)],
+            name="matching_audit_run_created",
+        )
+        self.matching_audit_items.create_index(
+            [("run_id", ASCENDING), ("status", ASCENDING), ("category", ASCENDING), ("store", ASCENDING)],
+            name="matching_audit_item_queue",
+        )
+        self.matching_audit_items.create_index(
+            [("run_id", ASCENDING), ("search_id", ASCENDING), ("store", ASCENDING), ("product_id", ASCENDING)],
+            unique=True,
+            name="matching_audit_item_unique",
+        )
+        self.matching_audit_reviews.create_index(
+            [("run_id", ASCENDING), ("item_id", ASCENDING), ("reviewer_id", ASCENDING)],
+            unique=True,
+            name="matching_audit_review_unique",
+        )
+        self.offer_verification_runs.create_index(
+            [("started_at", DESCENDING)],
+            name="offer_verification_run_started",
+        )
+        self.offer_verification_checks.create_index(
+            [("run_id", ASCENDING), ("store", ASCENDING), ("product_id", ASCENDING)],
+            unique=True,
+            name="offer_verification_check_unique",
+        )
+        self.offer_verification_checks.create_index(
+            [("store", ASCENDING), ("checked_at", DESCENDING)],
+            name="offer_verification_check_store_date",
+        )
         with _INDEX_LOCK:
             _INDEXED_DATABASES.add(index_key)
 

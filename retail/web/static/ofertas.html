@@ -114,6 +114,19 @@
       </form>
     </section>
 
+    <section class="panel" id="matching-audit-setting">
+      <h2>Auditoría de matching</h2>
+      <form id="matching-audit-form" class="form-grid">
+        <label class="check span">
+          <input type="checkbox" id="matching-audit-enabled">
+          Habilitar la auditoría interna de matching
+        </label>
+        <p id="matching-audit-hint" class="muted span">Desactivada por defecto. Mientras esté apagada, la página y la API de auditoría quedan ocultas; las corridas históricas se conservan.</p>
+        <p class="span"><a id="matching-audit-open" class="btn secondary" href="/auditoria-matching" hidden>Abrir etiquetado y arbitraje</a></p>
+        <button type="submit">Guardar estado de auditoría</button>
+      </form>
+    </section>
+
     <section class="panel" id="pruebas-aviso">
       <h2>Pruebas de aviso</h2>
       <p class="muted">Un mensaje por clic. Telegram usa el chat guardado. El correo va al destinatario de abajo; puedes cambiarlo. El push usa los dispositivos de tu cuenta (actívalos en Siguiendo desde el celular).</p>

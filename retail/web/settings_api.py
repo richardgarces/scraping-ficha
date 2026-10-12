@@ -32,6 +32,7 @@ from retail.web.jobs import (
     stop_group_batch,
     stop_store_batch,
 )
+from retail.matching_audit import matching_audit_status, save_matching_audit_enabled
 
 router = APIRouter()
 
@@ -49,6 +50,7 @@ def get_settings(request: Request) -> dict:
             "schedule": schedule_status(repo),
             "catalog": load_catalog(),
             "offer_screenshots": offer_screenshot_status(repo),
+            "matching_audit": matching_audit_status(repo),
         }
     finally:
         repo.close()
@@ -113,6 +115,36 @@ async def put_offer_screenshots(request: Request) -> dict:
         return save_offer_screenshots_enabled(body["enabled"], repo)
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail="No se pudo guardar el ajuste de capturas.") from exc
+    finally:
+        repo.close()
+
+
+@router.put("/api/settings/matching-audit")
+async def put_matching_audit(request: Request) -> dict:
+    repo = connect_repo()
+    if repo is None:
+        raise HTTPException(status_code=503, detail="MongoDB no está disponible.")
+    try:
+        current_user(request, repo, admin=True)
+        body = await request.json()
+        if not isinstance(body, dict) or not isinstance(body.get("enabled"), bool):
+            raise HTTPException(status_code=400, detail="Indica si la auditoría de matching queda activada.")
+        try:
+            return save_matching_audit_enabled(body["enabled"], repo)
+        except RuntimeError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+    finally:
+        repo.close()
+
+
+@router.get("/api/settings/matching-audit")
+def get_matching_audit_setting(request: Request) -> dict:
+    repo = connect_repo()
+    if repo is None:
+        raise HTTPException(status_code=503, detail="MongoDB no está disponible.")
+    try:
+        current_user(request, repo, admin=True)
+        return matching_audit_status(repo)
     finally:
         repo.close()
 
