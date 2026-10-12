@@ -988,6 +988,47 @@ function syncRunButton() {
   }
 }
 
+function runScopeLabel(run) {
+  if (run.tienda) return run.tienda;
+  if (run.grupo) return run.grupo;
+  if (run.job) return run.job;
+  if (run.scope) return run.scope;
+  return "—";
+}
+
+function recentRunAlertsCell(run) {
+  const count = Number(run.alert_count) || 0;
+  if (!count) return `<span class="muted">0</span>`;
+  if (!run.id) return escapeHtml(String(count));
+  const open = openAlerts && openAlerts.runId === run.id;
+  const who = runScopeLabel(run);
+  const label = alertsLabel(count);
+  return `<button type="button" class="drop-count cron-alerts" data-run="${escapeHtml(run.id)}" data-count="${count}" data-who="${escapeHtml(who)}" aria-expanded="${open ? "true" : "false"}" title="Ver las alertas de esta corrida">${escapeHtml(label)}</button>`;
+}
+
+function renderRecentRuns(payload) {
+  const body = $("recent-runs-body");
+  if (!body) return;
+  const runs = payload.recent_runs || [];
+  body.innerHTML = runs.length
+    ? runs
+        .map(
+          (run) => `
+    <tr>
+      <td class="muted">${escapeHtml(formatWhen(run.started_at) || "—")}</td>
+      <td>${escapeHtml(runScopeLabel(run))}</td>
+      <td>${escapeHtml(run.status || "")}</td>
+      <td>${Number(run.processed) || 0} / ${Number(run.items) || 0}</td>
+      <td class="muted">+${Number(run.saved_upserted) || 0} ~${Number(run.saved_modified) || 0}</td>
+      <td class="${run.failed ? "err" : "muted"}">${Number(run.failed) || 0}</td>
+      <td class="muted">${Number(run.without_price) || 0}</td>
+      <td>${recentRunAlertsCell(run)}</td>
+    </tr>`
+        )
+        .join("")
+    : `<tr><td colspan="8" class="muted">Todavía no se ha corrido el batch.</td></tr>`;
+}
+
 function render(payload) {
   lastCronPayload = payload;
   for (const group of payload.groups || []) {
@@ -1049,6 +1090,7 @@ async function refresh() {
   renderBasic(payload);
   renderStoreJobs(payload);
   render(payload);
+  renderRecentRuns(payload);
   restoreAlerts();
   syncRunButton();
   const watching = Date.now() < watchUntil;

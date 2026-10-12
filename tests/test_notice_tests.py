@@ -111,12 +111,18 @@ def test_email_filters_have_compact_responsive_controls():
     js = (STATIC / "siguiendo.js").read_text()
     styles = (STATIC / "styles.css").read_text()
     assert 'class="email-filters"' in html
+    assert 'id="advanced-notification-prefs"' in html
+    assert 'id="advanced-prefs-upgrade"' in html
+    assert 'id="store-preferences-upgrade"' in html
     assert 'id="email-categories-all"' in html
     assert 'id="email-categories-none"' in html
     assert 'class="percent-input"' in html
     assert "refreshEmailCategorySummary" in js
+    assert "hasAdvancedAccountPrefs" in js
+    assert "applyAdvancedPrefsVisibility" in js
     assert ".email-filter-grid" in styles
     assert "grid-template-columns: repeat(3" in styles
+    assert ".membership-upgrade" in styles
     assert 'class="store-preference-overview"' in html
     assert 'id="favorite-store-count"' in html
     assert 'data-store-state=' in js
@@ -124,8 +130,8 @@ def test_email_filters_have_compact_responsive_controls():
     assert 'value="favorite"' in js
     assert 'value="excluded"' in js
     assert '.store-state-control' in styles
-    assert 'src="/static/siguiendo.js?v=' in html
-    assert 'href="/static/styles.css?v=' in html
+    assert 'src="/static/siguiendo.js?v=21-membership-prefs"' in html
+    assert 'href="/static/styles.css?v=84-membership-prefs"' in html
     assert "Celular (push)" in html
     assert "Verificando…" in js
     assert "Verificando la conexión con Telegram…" in js

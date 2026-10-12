@@ -1946,8 +1946,13 @@ class ProductRepository:
         sort: str = "updated",
         page: int = 1,
         size: int = 40,
+        priority_keys: list[tuple[str, str]] | None = None,
     ) -> dict[str, Any]:
-        """Catálogo navegable sobre los productos ya guardados."""
+        """Catálogo navegable sobre los productos ya guardados.
+
+        ``priority_keys`` (store, product_id) — p. ej. alertas activas del usuario —
+        aparecen primero (mismo sort entre ellas) y el resto después.
+        """
         match: dict[str, Any] = catalog_browse_filter(category)
         if text:
             from retail.relevance import fold, tokenize
@@ -1988,68 +1993,125 @@ class ProductRepository:
             "name": [("name", 1)],
         }.get(sort, [("updated_at", -1)])
 
-        skip = max(0, (page - 1) * size)
-        cursor = self.collection.find(
-            match,
-            {
-                "store": 1,
-                "product_id": 1,
-                "sku_id": 1,
-                "name": 1,
-                "brand": 1,
-                "seller": 1,
-                "url": 1,
-                "price": 1,
-                "price_normal": 1,
-                "price_internet": 1,
-                "price_cmr": 1,
-                "price_all_payment": 1,
-                "price_card": 1,
-                "payment_card_name": 1,
-                "installment_count": 1,
-                "installment_total": 1,
-                "financial_cae": 1,
-                "payment_conditions": 1,
-                "condition": 1,
-                "condition_confidence": 1,
-                "shipping_cost": 1,
-                "shipping_free_threshold": 1,
-                "shipping_region": 1,
-                "pickup_available": 1,
-                "stock": 1,
-                "availability": 1,
-                "low_stock": 1,
-                "only_extreme_sizes": 1,
-                "variants": 1,
-                "entity_id": 1,
-                "entity_confidence": 1,
-                "entity_override": 1,
-                "entity_match_method": 1,
-                "discount_percent": 1,
-                "rating": 1,
-                "reviews": 1,
-                "catalog_category": 1,
-                "compare_code": 1,
-                "updated_at": 1,
-                "image_url": 1,
-                "image_urls": 1,
-                "thumbnail.mime": 1,
-                "specifications": 1,
-            },
-        )
-        for field, direction in order:
-            cursor = cursor.sort(field, direction)
-        rows = []
-        for item in cursor.skip(skip).limit(size):
+        projection = {
+            "store": 1,
+            "product_id": 1,
+            "sku_id": 1,
+            "name": 1,
+            "brand": 1,
+            "seller": 1,
+            "url": 1,
+            "price": 1,
+            "price_normal": 1,
+            "price_internet": 1,
+            "price_cmr": 1,
+            "price_all_payment": 1,
+            "price_card": 1,
+            "payment_card_name": 1,
+            "installment_count": 1,
+            "installment_total": 1,
+            "financial_cae": 1,
+            "payment_conditions": 1,
+            "condition": 1,
+            "condition_confidence": 1,
+            "shipping_cost": 1,
+            "shipping_free_threshold": 1,
+            "shipping_region": 1,
+            "pickup_available": 1,
+            "stock": 1,
+            "availability": 1,
+            "low_stock": 1,
+            "only_extreme_sizes": 1,
+            "variants": 1,
+            "entity_id": 1,
+            "entity_confidence": 1,
+            "entity_override": 1,
+            "entity_match_method": 1,
+            "discount_percent": 1,
+            "rating": 1,
+            "reviews": 1,
+            "catalog_category": 1,
+            "compare_code": 1,
+            "updated_at": 1,
+            "image_url": 1,
+            "image_urls": 1,
+            "thumbnail.mime": 1,
+            "specifications": 1,
+        }
+
+        def _public_row(item: dict[str, Any], *, price_alert_active: bool = False) -> dict[str, Any]:
             item.pop("_id", None)
             specs = item.pop("specifications", None) or {}
-            item["comparison_fields"] = sum(1 for value in specs.values() if value not in (None, "", [], {})) if isinstance(specs, dict) else 0
+            item["comparison_fields"] = (
+                sum(1 for value in specs.values() if value not in (None, "", [], {}))
+                if isinstance(specs, dict)
+                else 0
+            )
             item["has_thumb"] = bool(
                 item.pop("thumbnail", None) or item.pop("image_url", None) or item.pop("image_urls", None)
             )
             updated = item.get("updated_at")
             item["updated_at"] = updated.isoformat() if hasattr(updated, "isoformat") else updated
-            rows.append(item)
+            if price_alert_active:
+                item["price_alert_active"] = True
+            return item
+
+        def _sorted_cursor(query: dict[str, Any]):
+            cursor = self.collection.find(query, projection)
+            for field, direction in order:
+                cursor = cursor.sort(field, direction)
+            return cursor
+
+        skip = max(0, (page - 1) * size)
+        wanted = [
+            (str(store_id or "").strip().lower(), str(product_id or "").strip())
+            for store_id, product_id in (priority_keys or [])
+            if str(store_id or "").strip() and str(product_id or "").strip()
+        ]
+        # Deduplicar conservando orden de llegada (alertas más recientes primero).
+        seen_keys: set[tuple[str, str]] = set()
+        unique_keys: list[tuple[str, str]] = []
+        for key in wanted:
+            if key in seen_keys:
+                continue
+            seen_keys.add(key)
+            unique_keys.append(key)
+
+        if not unique_keys:
+            rows = [
+                _public_row(item)
+                for item in _sorted_cursor(match).skip(skip).limit(size)
+            ]
+            return {
+                "total": self.collection.count_documents(match),
+                "page": page,
+                "size": size,
+                "items": rows,
+            }
+
+        priority_or = [{"store": store_id, "product_id": product_id} for store_id, product_id in unique_keys]
+        priority_query: dict[str, Any] = {"$and": [match, {"$or": priority_or}]}
+        priority_rows = [
+            _public_row(item, price_alert_active=True) for item in _sorted_cursor(priority_query)
+        ]
+        # Mantener el orden del sort elegido; el cupo de alertas es pequeño.
+        priority_count = len(priority_rows)
+        rest_query: dict[str, Any] = {"$and": [match, {"$nor": priority_or}]}
+
+        if skip < priority_count:
+            from_priority = priority_rows[skip : skip + size]
+            need = size - len(from_priority)
+            rest: list[dict[str, Any]] = []
+            if need > 0:
+                rest = [_public_row(item) for item in _sorted_cursor(rest_query).limit(need)]
+            rows = from_priority + rest
+        else:
+            rest_skip = skip - priority_count
+            rows = [
+                _public_row(item)
+                for item in _sorted_cursor(rest_query).skip(rest_skip).limit(size)
+            ]
+
         return {
             "total": self.collection.count_documents(match),
             "page": page,
@@ -2241,6 +2303,15 @@ class ProductRepository:
             "timesfm_signal_status": {**timesfm_status, "visible_signals": signals},
         }
 
+    def real_offer_days(self, limit: int = 60) -> list[str]:
+        """Días Chile con marcas reales persistidas (más reciente primero)."""
+        days = [
+            str(day).strip()
+            for day in self.daily_real_offers.distinct("day")
+            if str(day or "").strip()
+        ]
+        return sorted(days, reverse=True)[: max(1, int(limit))]
+
     def real_offers(
         self,
         *,
@@ -2252,16 +2323,24 @@ class ProductRepository:
         category: str | None = None,
         min_gap: float = 0,
         min_super: float = 0,
+        day: str | None = None,
         page: int = 1,
         size: int = 40,
     ) -> dict[str, Any]:
-        """Lee exclusivamente marcas reales del día Chile; no clasifica en request."""
+        """Lee marcas reales de un día Chile (hoy por defecto); no clasifica en request."""
         from retail.offer_forecast_signal import attach_offer_forecast_signals
         from retail.predictive_alerts import predictive_validation_status
         from retail.real_offer_worker import chile_day
         from retail.reales import is_super_offer
 
         timesfm_status = predictive_validation_status(self)
+        today = chile_day()
+        available_days = self.real_offer_days()
+        chosen = str(day or "").strip()
+        # Por defecto (y si el día no es válido) siempre el día Chile actual,
+        # aunque aún no haya marcas: la UI muestra vacío, no otro día.
+        if not chosen or (chosen != today and chosen not in available_days):
+            chosen = today
         selected_kinds = {
             kind for kind, enabled in (
                 ("comparacion", comparacion),
@@ -2273,13 +2352,13 @@ class ProductRepository:
         if not selected_kinds:
             return {
                 "total": 0, "page": page, "size": size, "items": [],
-                "stores": [], "categories": [], "day": chile_day(),
+                "stores": [], "categories": [],
+                "day": chosen, "today": today, "days": available_days,
                 "timesfm_signal_status": timesfm_status,
             }
 
-        today = chile_day()
         rows = list(self.daily_real_offers.aggregate([
-            {"$match": {"day": today, "is_real": True}},
+            {"$match": {"day": chosen, "is_real": True}},
             {
                 "$lookup": {
                     "from": self.collection.name,
@@ -2393,7 +2472,8 @@ class ProductRepository:
             ).sort("generated_at", -1))
             signals = attach_offer_forecast_signals(page_items, forecasts)
         return {
-            "total": len(found), "page": page, "size": size, "day": today,
+            "total": len(found), "page": page, "size": size,
+            "day": chosen, "today": today, "days": available_days,
             "stores": sorted(all_stores), "categories": sorted(all_categories, key=str.casefold),
             "items": page_items,
             "timesfm_signal_status": {**timesfm_status, "visible_signals": signals},
@@ -3252,6 +3332,7 @@ class ProductRepository:
             "source": item.get("source"),
             "grupo": item.get("grupo"),
             "tienda": item.get("tienda") or None,
+            "job": item.get("job"),
             "groups": list(item.get("groups") or []),
             "scope": item.get("scope"),
             "stores": list(stores) if stores else [],
@@ -3788,7 +3869,7 @@ class ProductRepository:
             return counts
         try:
             pipeline = [
-                {"$match": {"active": {"$ne": False}}},
+                {"$match": {"active": True}},
                 {"$group": {"_id": "$user_id", "n": {"$sum": 1}}},
             ]
             for row in alerts.aggregate(pipeline):
@@ -3896,14 +3977,31 @@ class ProductRepository:
         return self.watches.delete_one(query).deleted_count > 0
 
     def count_price_alerts(self, user_id: str) -> int:
-        """Alertas activas del usuario (cupo de membresía)."""
+        """Alertas activas del usuario (cupo de membresía). Solo ``active: True``."""
         clean = str(user_id or "").strip()
         if not clean:
             return 0
         try:
-            return int(self.price_alerts.count_documents({"user_id": clean, "active": {"$ne": False}}))
+            return int(self.price_alerts.count_documents({"user_id": clean, "active": True}))
         except Exception:
             return 0
+
+    def list_price_alerts(self, user_id: str, *, active_only: bool = True) -> list[dict[str, Any]]:
+        """Alertas de precio del usuario (misma fuente que el cupo de membresía)."""
+        clean = str(user_id or "").strip()
+        if not clean:
+            return []
+        query: dict[str, Any] = {"user_id": clean}
+        if active_only:
+            query["active"] = True
+        rows: list[dict[str, Any]] = []
+        try:
+            cursor = self.price_alerts.find(query).sort("updated_at", -1)
+        except Exception:
+            return []
+        for item in cursor:
+            rows.append(self._public_price_alert(item))
+        return rows
 
     def get_price_alert(self, user_id: str, store: str, product_id: str) -> dict[str, Any] | None:
         found = self.price_alerts.find_one(
@@ -3914,6 +4012,21 @@ class ProductRepository:
         return self._public_price_alert(found)
 
     def save_price_alert(self, data: dict[str, Any]) -> dict[str, Any]:
+        target_raw = data.get("target_price")
+        target: int | None = None
+        if target_raw not in (None, ""):
+            try:
+                target = int(target_raw)
+            except (TypeError, ValueError):
+                target = None
+            if target is not None and target <= 0:
+                target = None
+        # Con precio objetivo: solo avisa al alcanzar/cruzar ese umbral.
+        # Sin objetivo: cualquier cambio (comportamiento histórico).
+        if "any_change" in data:
+            any_change = bool(data.get("any_change"))
+        else:
+            any_change = target is None
         document = {
             "user_id": str(data.get("user_id") or ""),
             "email": str(data.get("email") or "").strip(),
@@ -3922,9 +4035,9 @@ class ProductRepository:
             "name": data.get("name") or "",
             "url": data.get("url") or "",
             "active": True,
-            # Sin umbral: avisa ante cualquier cambio (sube o baja).
-            "any_change": bool(data.get("any_change", True)),
-            "watch_changes": bool(data.get("watch_changes", True)),
+            "target_price": target,
+            "any_change": any_change,
+            "watch_changes": bool(data.get("watch_changes", any_change)),
             "updated_at": _now(),
         }
         key = {
@@ -4099,6 +4212,14 @@ class ProductRepository:
     @staticmethod
     def _public_price_alert(item: dict[str, Any]) -> dict[str, Any]:
         created = item.get("created_at")
+        target = item.get("target_price")
+        try:
+            target_price = int(target) if target not in (None, "") else None
+        except (TypeError, ValueError):
+            target_price = None
+        if target_price is not None and target_price <= 0:
+            target_price = None
+        any_change = bool(item.get("any_change", target_price is None))
         return {
             "id": str(item.get("_id") or item.get("id") or ""),
             "user_id": item.get("user_id"),
@@ -4107,6 +4228,8 @@ class ProductRepository:
             "product_id": item.get("product_id"),
             "name": item.get("name") or "",
             "active": bool(item.get("active", True)),
+            "target_price": target_price,
+            "any_change": any_change,
             "created_at": created.isoformat() if hasattr(created, "isoformat") else created,
         }
 

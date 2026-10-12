@@ -43,6 +43,11 @@ function card(item) {
     ? `<a class="product-image-link" href="${fichaUrl}" aria-label="Ver ficha de ${attr(item.name)}">${image}</a>`
     : image;
   const rating = item.rating ? `<span class="muted">★ ${Number(item.rating).toFixed(1)}${item.reviews ? ` (${item.reviews})` : ""}</span>` : "";
+  const fresh = typeof updatedStamp === "function"
+    ? updatedStamp(item.updated_at || item.scraped_at)
+    : typeof updatedAgo === "function"
+      ? updatedAgo(item.updated_at || item.scraped_at)
+      : "";
   return `
     <article class="panel card">
       ${linkedImage}
@@ -52,9 +57,11 @@ function card(item) {
       <p class="price">${money(item.price)} ${discountBadge(item)}</p>
       ${priceLadder(item)}
       <p>${rating}</p>
+      ${fresh ? `<p class="muted deal-fresh">${attr(fresh)}</p>` : ""}
       <div class="card-footer">
+        <a class="muted" href="${attr(fichaUrl)}#others-panel">Comparar tiendas</a>
         ${item.url ? `<a class="muted" href="${attr(item.url)}" target="_blank" rel="noreferrer">ir a la tienda</a>` : "<span></span>"}
-        ${typeof priceAlertButtonHtml === "function" ? priceAlertButtonHtml({ store: item.store, productId: item.product_id, name: item.name }) : ""}
+        ${typeof priceAlertButtonHtml === "function" ? priceAlertButtonHtml({ store: item.store, productId: item.product_id, name: item.name }, Boolean(item.price_alert_active)) : ""}
       </div>
     </article>`;
 }

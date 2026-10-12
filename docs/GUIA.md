@@ -1,6 +1,6 @@
 # Guía de la aplicación
 
-Qué hace, cómo se arma y dónde se configura cada cosa. Para la lista de tiendas, los comandos de scraping por tienda y cómo agregar una nueva fuente, mira el [README](../README.md).
+Qué hace, cómo se arma y dónde se configura cada cosa. Para la lista de tiendas, los comandos de scraping por tienda y cómo agregar una nueva fuente, mira el [README](../README.md). Inventario de capacidades (qué hay / qué falta): [FUNCIONALIDADES_MVP.md](FUNCIONALIDADES_MVP.md).
 
 ## Qué hace
 
@@ -276,15 +276,15 @@ La lista sale del sitemap que declara el `robots.txt` de la tienda, que es la fu
 |---|---|---|
 | `/` | público | Buscar en las tiendas ahora |
 | `/catalogo` | público | Navegar lo ya guardado, sin buscar |
-| `/hoy` | público | Ofertas del día con el ahorro real y el resumen de la corrida |
+| `/hoy` | público | Ofertas del día con el ahorro real |
 | `/producto` | público | Ficha con historial de 7/30/90 días, "¿compro o espero?" y precios de otras tiendas |
 | `/siguiendo` | público (API con login) | Productos seguidos, preferencias y push |
 | `/entrar` | público | Login / inscripción |
-| `/reales` | login | Ofertas reales del día; `?super=1` (alias `/super`) filtra super ofertas |
+| `/reales` | público | Ofertas reales del día; `?super=1` (alias `/super`) filtra super ofertas |
 | `/comparar` | login | Comparación lado a lado |
 | `/tiendas` | admin | Qué tan confiable es el "antes" de cada cadena |
 | `/ofertas` | admin | Reglas, canales, catálogo y cron |
-| `/cron` | admin | Control de lotes |
+| `/cron` | admin | Control de lotes y últimas corridas del batch |
 | `/cyber-day`, `/cyber` | admin | Listas Cyber |
 | `/cyber-day/evolucion` | admin | Evolución de precios Cyber |
 | `/cambios-precio` | admin | Cambios de precio del mes → export Cyber |

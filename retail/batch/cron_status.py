@@ -209,6 +209,7 @@ def build_cron_batch_status(*, repo: Any | None = None, today: str | None = None
     runs_by_grupo: dict[str, dict[str, Any]] = {}
     runs_by_tienda: dict[str, dict[str, Any]] = {}
     basic_run: dict[str, Any] | None = None
+    recent_runs: list[dict[str, Any]] = []
     categories: list[dict[str, Any]] = []
     try:
         if local is not None:
@@ -222,6 +223,9 @@ def build_cron_batch_status(*, repo: Any | None = None, today: str | None = None
             by_job = getattr(local, "latest_batch_run_by_job", None)
             if by_job is not None:
                 basic_run = by_job("scraping_basico")
+            recent_fn = getattr(local, "recent_runs", None)
+            if recent_fn is not None:
+                recent_runs = recent_fn(10)
         categories = list_store_categories(repo=local)
 
         groups: list[dict[str, Any]] = []
@@ -369,6 +373,7 @@ def build_cron_batch_status(*, repo: Any | None = None, today: str | None = None
             "stores": registered,
             "store_jobs": store_jobs,
             "basic_scrape": basic_scrape,
+            "recent_runs": recent_runs,
         }
     finally:
         if close and local is not None:

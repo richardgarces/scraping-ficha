@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#258fdf">
   <title>Ofertas de hoy</title>
   <script>(function(){var m=localStorage.getItem("retail-theme");if(m==="day"||m==="night"){document.documentElement.dataset.theme=m;return;}var h=new Date().getHours();document.documentElement.dataset.theme=(h>=7&&h<19)?"day":"night";})();</script>
-  <link rel="stylesheet" href="/static/styles.css?v=78-precio-normal">
+  <link rel="stylesheet" href="/static/styles.css?v=110-meincart">
 </head>
 <body>
   <header class="top">
@@ -119,21 +119,9 @@
       <span id="page-label" class="muted"></span>
       <button type="button" id="next" class="secondary" aria-label="Ir a la página siguiente">Siguiente</button>
     </section>
-
-    <section class="panel" data-admin hidden>
-      <h2>Últimas corridas del batch</h2>
-      <div class="table-wrap">
-        <table class="results">
-          <thead>
-            <tr><th>Inicio</th><th>Estado</th><th>Procesados</th><th>Guardados</th><th>Fallidos</th><th>Sin precio</th><th>Alertas</th></tr>
-          </thead>
-          <tbody id="runs"></tbody>
-        </table>
-      </div>
-    </section>
   </main>
-  <script src="/static/prices.js?v=36"></script>
+  <script src="/static/prices.js?v=110-meincart"></script>
   <script src="/static/pagination.js?v=1"></script>
-  <script src="/static/hoy.js?v=12-precio-normal"></script>
+  <script src="/static/hoy.js?v=14-no-batch-runs"></script>
 </body>
 </html>

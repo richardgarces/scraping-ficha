@@ -139,7 +139,7 @@ Lista fija (`system: true`, `source: user_alerts`) creada en bootstrap. No se bo
 | **list_id** | `alertas_usuarios` |
 | **identidad de fila** | `compare_code` si hay; si no `store:product_id` |
 | **alta/baja** | `POST`/`DELETE` `/api/price-alert` → sync watchers |
-| **columnas UI** | **Agregó** (primer watcher) · **Usuarios** (conteo) |
+| **columnas UI** | **Query** editable (etiqueta; no cambia ancla) · **Agregó** (primer watcher) · **Usuarios** (conteo) |
 | **process** | ancla `store/product_id` + peers `by_compare_code` |
 | **notify** | solo watchers según prefs (push/email/telegram); **sin** broadcast a todos |
 

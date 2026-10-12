@@ -15,6 +15,7 @@ from retail.membership import (
     check_can_activate_alert,
     effective_tier,
     grant_gift_month,
+    has_advanced_account_prefs,
     membership_active,
     membership_public,
     redeem_promo_code,
@@ -62,16 +63,27 @@ class MemStore:
         return sum(
             1
             for item in self.price_alerts
-            if str(item.get("user_id")) == str(user_id) and item.get("active", True)
+            if str(item.get("user_id")) == str(user_id) and item.get("active") is True
         )
 
+    def list_price_alerts(self, user_id, *, active_only=True):
+        rows = []
+        for item in self.price_alerts:
+            if str(item.get("user_id")) != str(user_id):
+                continue
+            if active_only and item.get("active") is not True:
+                continue
+            rows.append(dict(item))
+        return rows
+
     def get_price_alert(self, user_id, store, product_id):
+
         for item in self.price_alerts:
             if (
                 str(item.get("user_id")) == str(user_id)
                 and item.get("store") == store
                 and item.get("product_id") == product_id
-                and item.get("active", True)
+                and item.get("active") is True
             ):
                 return item
         return None
@@ -133,6 +145,20 @@ def test_admin_role_untouched_by_gift():
     public = grant_gift_month(store, user["_id"], months=1)
     assert public["role"] == "admin"
     assert public["membership"]["tier"] == "admin"
+
+
+def test_count_price_alerts_only_active_for_user():
+    store = MemStore()
+    user = store.insert_user({"email": "a@example.com", "role": "user", "status": "approved"})
+    other = store.insert_user({"email": "b@example.com", "role": "user", "status": "approved"})
+    uid = user["_id"]
+    store.price_alerts.append({"user_id": uid, "store": "lider", "product_id": "p1", "active": True})
+    store.price_alerts.append({"user_id": uid, "store": "lider", "product_id": "p2", "active": False})
+    store.price_alerts.append({"user_id": other["_id"], "store": "lider", "product_id": "p3", "active": True})
+    public = store._public_user(user)
+    quota = alert_quota(store, public)
+    assert quota["count"] == 1
+    assert store.count_price_alerts(uid) == 1
 
 
 def test_quota_blocks_fourth_alert_for_free_user():
@@ -229,7 +255,53 @@ def test_set_role_user_ends_membership():
     assert alert_limit_for(store.find_user_by_id(user["_id"])) == 3
 
 
+def test_list_price_alerts_api_only_own_active(monkeypatch):
+    store = MemStore()
+    user = store.insert_user({
+        "email": "list@example.com",
+        "role": "user",
+        "status": "approved",
+    })
+    other = store.insert_user({
+        "email": "other@example.com",
+        "role": "user",
+        "status": "approved",
+    })
+    uid = str(user["_id"])
+    store.price_alerts.append({
+        "user_id": uid, "store": "lider", "product_id": "a1", "active": True, "name": "A",
+    })
+    store.price_alerts.append({
+        "user_id": uid, "store": "lider", "product_id": "a2", "active": False, "name": "B",
+    })
+    store.price_alerts.append({
+        "user_id": str(other["_id"]), "store": "lider", "product_id": "a3", "active": True, "name": "C",
+    })
+
+    class Repo(MemStore):
+        def __init__(self, base):
+            self.users = base.users
+            self.price_alerts = base.price_alerts
+            self._n = base._n
+
+        def close(self):
+            return None
+
+    repo = Repo(store)
+    public = store._public_user(user) | {"id": uid, "email": "list@example.com"}
+    monkeypatch.setattr("retail.web.insights_api.connect_repo", lambda: repo)
+    monkeypatch.setattr("retail.web.insights_api.current_user", lambda *a, **k: public)
+
+    client = TestClient(app)
+    response = client.get("/api/price-alerts")
+    assert response.status_code == 200
+    rows = response.json()
+    assert len(rows) == 1
+    assert rows[0]["product_id"] == "a1"
+
+
 def test_activate_price_alert_api_enforces_limit(monkeypatch):
+
     store = MemStore()
     user = store.insert_user({
         "email": "limit@example.com",
@@ -279,3 +351,94 @@ def test_activate_price_alert_api_enforces_limit(monkeypatch):
     assert detail["code"] == "alert_limit"
     assert detail["limit"] == 3
     assert detail["upgrade"] is True
+
+
+def test_has_advanced_account_prefs_by_tier():
+    assert has_advanced_account_prefs({"role": "user"}) is False
+    assert has_advanced_account_prefs({
+        "role": "paid",
+        "membership_expires_at": datetime.now(timezone.utc) + timedelta(days=3),
+    }) is True
+    assert has_advanced_account_prefs({
+        "role": "paid",
+        "membership_expires_at": datetime.now(timezone.utc) - timedelta(days=1),
+    }) is False
+    assert has_advanced_account_prefs({"role": "admin"}) is True
+
+
+def test_free_user_cannot_put_advanced_notification_prefs(monkeypatch):
+    store = MemStore()
+    user = store.insert_user({
+        "email": "free@example.com",
+        "role": "user",
+        "status": "approved",
+        "notification_preferences": {"channels": ["email"], "kinds": ["watch"]},
+    })
+    uid = str(user["_id"])
+
+    class Repo(MemStore):
+        def __init__(self, base):
+            self.users = base.users
+            self.price_alerts = base.price_alerts
+            self._n = base._n
+
+        def update_user_fields(self, user_id, fields, *, unset=()):
+            found = self.find_user_by_id(user_id)
+            if not found:
+                return None
+            found.update(fields)
+            for key in unset:
+                found.pop(key, None)
+            return found
+
+        def close(self):
+            return None
+
+    repo = Repo(store)
+    public = store._public_user(user) | {"id": uid}
+    monkeypatch.setattr("retail.web.auth_api.repo_or_503", lambda: repo)
+    monkeypatch.setattr("retail.web.auth_api.current_user", lambda *a, **k: public)
+    monkeypatch.setattr("retail.web.auth_api.list_store_categories", lambda repo=None: [])
+    monkeypatch.setattr(
+        "retail.web.auth_api._predictive_status",
+        lambda *_a, **_k: {"enabled": False, "reason": "test"},
+    )
+
+    client = TestClient(app)
+    denied = client.put(
+        "/api/account/notifications",
+        json={
+            "telegram": "",
+            "preferences": {
+                "channels": ["email"],
+                "kinds": ["watch"],
+                "email_categories": ["tecnologia"],
+                "min_discount_self": 5,
+            },
+        },
+    )
+    assert denied.status_code == 403
+    detail = denied.json()["detail"]
+    assert detail["code"] == "membership_required"
+    assert "email_categories" in detail["keys"]
+
+    allowed = client.put(
+        "/api/account/notifications",
+        json={
+            "telegram": "",
+            "preferences": {"channels": ["email", "push"], "kinds": ["watch", "real"]},
+        },
+    )
+    assert allowed.status_code == 200
+    prefs = allowed.json()["preferences"]
+    assert prefs["channels"] == ["email", "push"]
+    assert prefs["kinds"] == ["watch", "real"]
+    assert prefs["email_categories"] == []
+    assert prefs["min_discount_self"] == 0.0
+
+    store_denied = client.put(
+        "/api/account/store-preferences",
+        json={"favorites": ["falabella"], "excluded": []},
+    )
+    assert store_denied.status_code == 403
+    assert store_denied.json()["detail"]["code"] == "membership_required"

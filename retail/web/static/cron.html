@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#258fdf">
   <title>Cron / lotes</title>
   <script>(function(){var m=localStorage.getItem("retail-theme");if(m==="day"||m==="night"){document.documentElement.dataset.theme=m;return;}var h=new Date().getHours();document.documentElement.dataset.theme=(h>=7&&h<19)?"day":"night";})();</script>
-  <link rel="stylesheet" href="/static/styles.css?v=77">
+  <link rel="stylesheet" href="/static/styles.css?v=110-meincart">
 </head>
 <body>
   <header class="top">
@@ -168,8 +168,35 @@
         </table>
       </div>
     </section>
+    <section class="panel">
+      <div class="cron-head">
+        <div>
+          <h2>Últimas corridas del batch</h2>
+          <p class="muted">Resumen de las corridas recientes: procesados, guardados, fallidos y alertas.</p>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table class="results cron-table">
+          <thead>
+            <tr>
+              <th>Inicio</th>
+              <th>Ámbito</th>
+              <th>Estado</th>
+              <th>Procesados</th>
+              <th>Guardados</th>
+              <th>Fallidos</th>
+              <th>Sin precio</th>
+              <th>Alertas</th>
+            </tr>
+          </thead>
+          <tbody id="recent-runs-body">
+            <tr><td colspan="8" class="muted">Cargando…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
   </main>
   <script src="/static/prices.js?v=36"></script>
-  <script src="/static/cron.js?v=27"></script>
+  <script src="/static/cron.js?v=28-recent-runs"></script>
 </body>
 </html>

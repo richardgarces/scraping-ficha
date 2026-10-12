@@ -1,5 +1,10 @@
 from retail.batch.rules import Alert
-from retail.notification_preferences import alert_kind, normalize_preferences, wants_alert
+from retail.notification_preferences import (
+    advanced_preference_overrides,
+    alert_kind,
+    normalize_preferences,
+    wants_alert,
+)
 
 
 def offer(rule="price_drop_percent", **extra):
@@ -8,6 +13,21 @@ def offer(rule="price_drop_percent", **extra):
         price=100, previous_price=200, message="oferta", url=None,
         compare_code="tv-1", extra=extra,
     )
+
+
+def test_advanced_preference_overrides_detect_paid_only_fields():
+    assert advanced_preference_overrides(None) == []
+    assert advanced_preference_overrides({"channels": ["email"]}) == []
+    assert advanced_preference_overrides({
+        "min_discount_self": 0,
+        "email_categories": [],
+        "email_min_real_discount": "0",
+    }) == []
+    assert advanced_preference_overrides({
+        "email_categories": ["tecnologia"],
+        "min_discount_self": 5,
+        "email_min_real_discount": 10,
+    }) == ["email_categories", "min_discount_self", "email_min_real_discount"]
 
 
 def test_preferences_are_opt_in_and_sanitized():

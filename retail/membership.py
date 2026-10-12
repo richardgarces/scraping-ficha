@@ -96,6 +96,11 @@ def alert_limit_for(document: dict[str, Any] | None, *, now: datetime | None = N
     return int(ALERT_LIMITS.get(effective_tier(document, now=now), ALERT_LIMITS[ROLE_USER]))
 
 
+def has_advanced_account_prefs(document: dict[str, Any] | None, *, now: datetime | None = None) -> bool:
+    """Filtros de correo, umbrales y tiendas preferidas/excluidas: paid vigente o admin."""
+    return effective_tier(document, now=now) in {ROLE_PAID, ROLE_ADMIN}
+
+
 def count_active_price_alerts(repo: Any, user_id: str) -> int:
     user_id = str(user_id or "").strip()
     if not user_id:
@@ -109,7 +114,7 @@ def count_active_price_alerts(repo: Any, user_id: str) -> int:
     if alerts is None:
         return 0
     try:
-        return int(alerts.count_documents({"user_id": user_id, "active": {"$ne": False}}))
+        return int(alerts.count_documents({"user_id": user_id, "active": True}))
     except Exception:
         return 0
 

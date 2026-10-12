@@ -99,7 +99,7 @@
     const hint = el("cyber-import-hint");
     if (hint && currentListIsUserAlert) {
       hint.dataset.userAlert = "1";
-      hint.innerHTML = "Lista sistema <strong>Alertas usuarios</strong>: las filas vienen de «Activar alerta» en la ficha (no import destructivo). Columnas <strong>Agregó</strong> / <strong>Usuarios</strong> muestran el primer watcher y el conteo.";
+      hint.innerHTML = "Lista sistema <strong>Alertas usuarios</strong>: las filas vienen de «Activar alerta» en la ficha (no import destructivo). Podés editar la <strong>Query</strong> inline (solo el nombre mostrado; el match sigue por producto ancla). Columnas <strong>Agregó</strong> / <strong>Usuarios</strong> muestran el primer watcher y el conteo.";
     } else if (hint && hint.dataset.userAlert === "1") {
       delete hint.dataset.userAlert;
       hint.innerHTML = 'Reimportar <strong>reemplaza las queries</strong> de la lista activa (mismo slug/nombre). Campos: n, query, category (+ matches, precios, tiendas, link en export). Podés editar la <strong>Query</strong> inline o <strong>eliminar</strong> una fila (también con el loop en curso). Clic en el encabezado ordena la columna. Cada lista es independiente y aparece en <a href="/cron">Cron / lotes</a>. Para armar una lista desde productos con cambios recientes: <a href="/cambios-precio">Cambios de precio</a>.';
@@ -186,7 +186,7 @@
       body.innerHTML = `<tr><td colspan="${cols}" class="muted">${emptyMsg}</td></tr>`;
       return;
     }
-    const queryReadonly = usingSeedFallback || currentListIsUserAlert;
+    const queryReadonly = usingSeedFallback;
     body.innerHTML = sorted.map((row) => {
       const n = row.n ?? (row.order != null ? row.order + 1 : "");
       const query = row.query || row.name || "";

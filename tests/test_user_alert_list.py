@@ -16,6 +16,7 @@ from retail.cyber_day import (
     process_one,
     product_row_view,
     start_run,
+    update_item,
 )
 from retail.user_alert_list import (
     USER_ALERTS_LIST_ID,
@@ -114,6 +115,57 @@ def test_sync_two_users_one_row_and_last_leave_deletes(repo):
 
     remove_user_alert(repo, u2, store="ripley", product_id="sku-b", document=doc)
     assert coll.count_documents({"list_id": USER_ALERTS_LIST_ID}) == 0
+
+
+def test_update_user_alert_query_keeps_prices(repo):
+    """Editar Query en Alertas usuarios solo cambia la etiqueta; no borra precios."""
+    ensure_user_alerts_list(repo)
+    doc = {
+        "name": "Galaxy S25 Ultra",
+        "compare_code": "CMP-S25U",
+        "category": "Celulares",
+        "store": "falabella",
+        "product_id": "sku-s25",
+    }
+    add_user_alert(
+        repo,
+        {"id": "u1", "email": "a@example.com", "name": "Admin"},
+        store="falabella",
+        product_id="sku-s25",
+        document=doc,
+    )
+    coll = repo.cyber_day_products
+    row = coll.find_one({"list_id": USER_ALERTS_LIST_ID, "alert_key": "CMP-S25U"})
+    assert row is not None
+    coll.update_one(
+        {"_id": row["_id"]},
+        {
+            "$set": {
+                "last_price": 999990,
+                "last_match_count": 3,
+                "best_store": "falabella",
+                "stores_scraped": 2,
+                "resolved": True,
+            }
+        },
+    )
+    result = update_item(
+        repo,
+        int(row["n"]),
+        query="Samsung Galaxy S25 Ultra 512GB",
+        list_id=USER_ALERTS_LIST_ID,
+    )
+    assert result["message"] == "Query actualizada"
+    updated = result["updated"]
+    assert updated["query"] == "Samsung Galaxy S25 Ultra 512GB"
+    assert updated["last_price"] == 999990
+    assert updated["last_match_count"] == 3
+    assert updated["best_store"] == "falabella"
+    fresh = coll.find_one({"_id": row["_id"]})
+    assert fresh["query"] == "Samsung Galaxy S25 Ultra 512GB"
+    assert fresh["name"] == "Samsung Galaxy S25 Ultra 512GB"
+    assert fresh["alert_key"] == "CMP-S25U"
+    assert fresh["last_price"] == 999990
 
 
 def test_dedupe_by_store_product_when_no_compare_code(repo):

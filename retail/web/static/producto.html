@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#258fdf">
   <title>Ficha de producto</title>
   <script>(function(){var m=localStorage.getItem("retail-theme");if(m==="day"||m==="night"){document.documentElement.dataset.theme=m;return;}var h=new Date().getHours();document.documentElement.dataset.theme=(h>=7&&h<19)?"day":"night";})();</script>
-  <link rel="stylesheet" href="/static/styles.css?v=98-chart-labels">
+  <link rel="stylesheet" href="/static/styles.css?v=110-meincart">
 </head>
 <body>
   <header class="top">
@@ -72,9 +72,9 @@
           <h2>Historial de precios</h2>
           <div class="chart-controls">
             <div class="toolbar" id="windows" aria-label="Período del historial">
-              <button type="button" class="secondary" data-days="7">7 días</button>
-              <button type="button" class="secondary" data-days="30">30 días</button>
-              <button type="button" class="secondary current" data-days="90">90 días</button>
+              <button type="button" class="secondary" data-days="7">7d</button>
+              <button type="button" class="secondary" data-days="30">30d</button>
+              <button type="button" class="secondary current" data-days="90">90d</button>
               <button type="button" class="secondary" data-days="180">6 meses</button>
               <button type="button" class="secondary" data-days="365">1 año</button>
               <button type="button" class="secondary" data-days="730">2 años</button>
@@ -115,7 +115,7 @@
         <details class="panel others-panel" id="others-panel" open hidden>
           <summary class="others-title">
             <span class="others-title-main">
-              <h2>Precios en otras tiendas</h2>
+              <h2>Comparación de tiendas</h2>
             </span>
             <span class="others-toggle" aria-hidden="true">
               <span class="others-toggle-label"></span>
@@ -123,8 +123,9 @@
             </span>
           </summary>
           <div class="others-body">
-            <p class="muted product-panel-intro">Compara el mismo producto antes de comprar.</p>
-            <div class="table-wrap">
+            <p class="muted product-panel-intro">Mismo producto en otras cadenas, con fecha de actualización.</p>
+            <div id="others-cards" class="compare-store-grid" aria-label="Comparación visual de tiendas"></div>
+            <div class="table-wrap others-table-wrap">
               <table class="results">
                 <thead><tr><th>Tienda</th><th>Precio</th><th>Habitual</th><th></th></tr></thead>
                 <tbody id="others"></tbody>
@@ -191,6 +192,6 @@
   </main>
   <script src="/static/prices.js?v=106-card-alert"></script>
   <script src="/static/price-history.js?v=1"></script>
-  <script src="/static/producto.js?v=52-cheaper-internal"></script>
+  <script src="/static/producto.js?v=53-chart-ux"></script>
 </body>
 </html>

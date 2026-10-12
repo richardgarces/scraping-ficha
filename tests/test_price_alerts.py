@@ -1,5 +1,64 @@
-from retail.price_alerts import price_change_message, price_deltas
+from retail.price_alerts import alert_matches_change, price_change_message, price_deltas
 from retail.price_alerts import notify_price_changes
+
+
+def test_alert_matches_change_respects_target_price():
+    change = {"previous_price": 500000, "price": 400000}
+    assert alert_matches_change({"any_change": True}, change) is True
+    assert alert_matches_change({"target_price": 350000, "any_change": False}, change) is False
+    assert alert_matches_change({"target_price": 450000, "any_change": False}, change) is True
+    # Objetivo sin any_change explícito: modo umbral.
+    assert alert_matches_change({"target_price": 450000}, change) is True
+    assert alert_matches_change({"target_price": 350000}, change) is False
+
+
+def test_save_price_alert_persists_target_price():
+    from retail.mongo import ProductRepository
+
+    stored = {}
+
+    class Alerts:
+        def update_one(self, key, update, upsert=False):
+            stored["key"] = key
+            stored["doc"] = update["$set"]
+
+            class Result:
+                pass
+
+            return Result()
+
+        def find_one(self, key):
+            return {**stored.get("doc", {}), **key, "_id": "abc"}
+
+    repo = object.__new__(ProductRepository)
+    repo.price_alerts = Alerts()
+    public = repo.save_price_alert(
+        {
+            "user_id": "u1",
+            "email": "a@b.cl",
+            "store": "Falabella",
+            "product_id": "sku",
+            "name": "Home Gym",
+            "target_price": 379990,
+        }
+    )
+    assert stored["doc"]["target_price"] == 379990
+    assert stored["doc"]["any_change"] is False
+    assert public["target_price"] == 379990
+    assert public["any_change"] is False
+
+    public_any = repo.save_price_alert(
+        {
+            "user_id": "u1",
+            "email": "a@b.cl",
+            "store": "falabella",
+            "product_id": "sku",
+            "name": "Home Gym",
+        }
+    )
+    assert stored["doc"]["target_price"] is None
+    assert stored["doc"]["any_change"] is True
+    assert public_any["any_change"] is True
 
 
 def test_delete_price_alert_is_scoped_to_owner():
@@ -96,6 +155,61 @@ def test_price_change_message_is_spanish_and_links_ficha():
     assert "precio de oferta" in body
     assert "bajó" in body
     assert "/producto?store=falabella&id=sku%201" in body
+
+
+def test_notify_skips_watchers_above_target(monkeypatch):
+    sent = []
+
+    def fake_send(to_addr, subject, body, *, log_skip=False, **kwargs):
+        sent.append(to_addr)
+        return True
+
+    monkeypatch.setattr("retail.price_alerts.send_email", fake_send)
+    monkeypatch.setattr(
+        "retail.batch.rules.load_rules",
+        lambda: {"channels": ["email"]},
+    )
+
+    class Repo:
+        price_alerts = object()
+
+        def price_alerts_for(self, keys):
+            return [
+                {
+                    "user_id": "u-target",
+                    "store": "falabella",
+                    "product_id": "p1",
+                    "email": "target@example.com",
+                    "active": True,
+                    "target_price": 300000,
+                    "any_change": False,
+                },
+                {
+                    "user_id": "u-any",
+                    "store": "falabella",
+                    "product_id": "p1",
+                    "email": "any@example.com",
+                    "active": True,
+                    "any_change": True,
+                },
+            ]
+
+        def claim_price_alert_send(self, *args, **kwargs):
+            return True
+
+        def find_user_by_id(self, user_id):
+            emails = {"u-target": "target@example.com", "u-any": "any@example.com"}
+            return {"email": emails[user_id], "status": "approved"}
+
+    change = {
+        "store": "falabella",
+        "product_id": "p1",
+        "name": "Home Gym",
+        "previous_price": 500000,
+        "price": 400000,
+    }
+    assert notify_price_changes(Repo(), [change]) == 1
+    assert sent == ["any@example.com"]
 
 
 def test_notify_sends_once_per_change(monkeypatch):

@@ -305,10 +305,12 @@ def test_new_pages_and_apis_are_wired():
         page = client.get(path)
         assert page.status_code == 200, path
         assert marker in page.text, path
-    for path in ("/reales", "/comparar?store=cugat&id=18221"):
-        denied = client.get(path, follow_redirects=False)
-        assert denied.status_code == 303, path
-        assert denied.headers["location"].startswith("/entrar?next=")
+    reales_page = client.get("/reales", follow_redirects=False)
+    assert reales_page.status_code == 200
+    assert "Ofertas reales" in reales_page.text
+    denied = client.get("/comparar?store=cugat&id=18221", follow_redirects=False)
+    assert denied.status_code == 303
+    assert denied.headers["location"].startswith("/entrar?next=")
     old_super = client.get("/super", follow_redirects=False)
     assert old_super.status_code == 302
     assert old_super.headers["location"] == "/reales?super=1"
@@ -332,7 +334,8 @@ def test_new_pages_and_apis_are_wired():
     assert "% vs otra tienda" in reales
     assert 'id="min-gap"' in reales
     assert "Super ofertas: descuento superior al 50%" in reales
-    assert "reales.js?v=18" in reales
+    assert "reales.js?v=21-reales-day" in reales
+    assert 'id="day-picker-toggle"' in reales
     hoy_js = Path("retail/web/static/hoy.js").read_text()
     assert "esta referencia histórica no es el precio normal publicado" in hoy_js
 

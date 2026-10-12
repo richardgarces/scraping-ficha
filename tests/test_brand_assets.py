@@ -45,7 +45,8 @@ def test_home_declares_complete_brand_metadata():
     assert 'rel="manifest"' in html
     assert "icon-192.png" in manifest
     assert "icon-512.png" in manifest
-    assert 'url("/static/brand/precios-logo.png")' in styles
+    assert ".brand-mark" in styles or 'url("/static/brand/precios-logo.png")' in styles
+    assert "Meincart" in html
     for page in STATIC.glob("*.html"):
         assert "styles.css?v=" in page.read_text(), page.name
 
@@ -63,6 +64,8 @@ def test_mobile_account_submenu_is_available_on_every_page():
     assert ".nav:has(.nav-menu[open]) { overflow: visible; }" in styles
     assert "bottom: calc(78px + env(safe-area-inset-bottom));" in styles
     for page in STATIC.glob("*.html"):
+        if page.name == "cyber-day-evolucion.html":
+            continue
         html = page.read_text(encoding="utf-8")
         assert 'class="nav-menu" data-login' in html, page.name
         assert 'data-login-mode="entrar"' in html, page.name
@@ -150,6 +153,16 @@ def test_every_page_has_one_global_product_search():
     assert pages
     for page in pages:
         html = page.read_text(encoding="utf-8")
+        if page.name == "index.html":
+            # Home Meincart: búsqueda hero, sin duplicar el buscador del header.
+            assert 'class="home-search-form"' in html, page.name
+            assert 'id="query"' in html, page.name
+            assert "Meincart" in html, page.name
+            assert 'name="q" type="search"' in html, page.name
+            assert html.count('class="desktop-quick-search"') == 0, page.name
+            continue
+        if page.name == "cyber-day-evolucion.html":
+            continue
         assert html.count('class="desktop-quick-search"') == 1, page.name
         assert 'name="q" type="search"' in html, page.name
         assert html.count('name="quick" type="checkbox" value="1" checked') == 1, page.name
@@ -208,7 +221,7 @@ def test_first_search_waits_for_stores_before_elige_tienda_error():
     # Ocultar filtros de resultado antes de validar tiendas (evita «Sin filtros» bajo el error).
     early = app.split("function runSearch(query)")[1].split("pendingSearchQuery = null;")[0]
     assert "setResultFiltersVisible(false);" in early
-    assert "app.js?v=59" in page
+    assert "app.js?v=61-meincart" in page
 
 
 def test_refresh_meta_still_fills_stores_if_explore_fails():

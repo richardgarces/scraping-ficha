@@ -1497,6 +1497,9 @@ def update_item(
 
     Al cambiar la query limpia matches/precios; opcionalmente re-enriquece desde
     catálogo. El worker lee la query fresca en la próxima pasada de ese ítem.
+
+    En Alertas usuarios la query es solo etiqueta (match por ancla/alert_key):
+    no se limpian precios ni se re-enriquece por texto.
     """
     lid = resolve_list_id(repo, list_id)
     try:
@@ -1508,6 +1511,13 @@ def update_item(
     item = _find_item_by_n(repo, index, lid)
     if item is None:
         raise CyberDayError(f"No hay ítem #{index} en la lista.")
+
+    from retail.user_alert_list import is_user_alerts_list
+
+    # Alertas usuarios: query es etiqueta; match por ancla/alert_key.
+    label_only = is_user_alerts_list(lid) or bool(item.get("alert_key")) or (
+        str(item.get("source") or "") == "user_alerts"
+    )
 
     patch: dict[str, Any] = {"updated_at": _now(), "list_id": lid}
     query_changed = False
@@ -1525,7 +1535,7 @@ def update_item(
     if query is None and category is None:
         raise CyberDayError("Indicá query o category para actualizar.")
 
-    if query_changed:
+    if query_changed and not label_only:
         patch.update({
             "last_matches": {},
             "last_match_count": 0,
@@ -1552,7 +1562,7 @@ def update_item(
     fresh = products_collection(repo).find_one({"_id": item["_id"]}) or {**item, **patch}
     fresh["id"] = str(fresh.get("_id") or item["_id"])
     fresh.pop("_id", None)
-    if query_changed and enrich:
+    if query_changed and enrich and not label_only:
         view = enrich_row_from_catalog(repo, fresh, persist=True)
     else:
         view = product_row_view(fresh)

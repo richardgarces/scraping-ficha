@@ -918,6 +918,91 @@ def _peers_more_expensive(item: dict[str, Any], peers: list[dict[str, Any]]) -> 
     ]
 
 
+def opportunity_score_for_ficha(
+    product: dict[str, Any],
+    *,
+    others: list[dict[str, Any]] | None = None,
+    cheapest: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    """Puntaje 0–100 alineado con ``offer_score`` de /reales, para la ficha.
+
+    Solo se calcula si hay historial o pares en otras tiendas; no inventa score
+    en frío. Usa las mismas ponderaciones base (mejor mercado, ahorro, identidad,
+    stock, historial, penalización por descuento falso).
+    """
+    price = _int(product.get("price"))
+    if not price:
+        return None
+    stats = product.get("stats") or {}
+    history_points = int(stats.get("points") or len(product.get("history_offer") or product.get("history") or []))
+    peers = [row for row in (others or []) if _int(row.get("price"))]
+    if history_points < 2 and not peers and not stats.get("is_lowest_ever") and not stats.get("is_lowest_at_store"):
+        return None
+
+    market_best = True
+    if cheapest and cheapest.get("store") and (
+        str(cheapest.get("store")) != str(product.get("store") or "")
+        or str(cheapest.get("product_id") or "") != str(product.get("product_id") or "")
+    ):
+        market_best = False
+    elif peers:
+        best_peer = min((_int(row.get("price")) or 10**12) for row in peers)
+        if best_peer < price:
+            market_best = False
+
+    percent = stats.get("percent_vs_median")
+    real_savings = abs(float(percent)) if isinstance(percent, (int, float)) and percent < 0 else 0.0
+    if real_savings <= 0 and (stats.get("is_lowest_ever") or stats.get("is_lowest_at_store")):
+        peak = _int(stats.get("max"))
+        if peak and peak > price:
+            real_savings = round((peak - price) * 100 / peak, 1)
+
+    try:
+        entity_confidence = float(product.get("entity_confidence") or (0.9 if peers else 0.55))
+    except (TypeError, ValueError):
+        entity_confidence = 0.55
+    entity_confidence = max(0.0, min(1.0, entity_confidence))
+
+    stock_score = (
+        0.0
+        if is_agotado(product)
+        else 10.0
+        if product.get("stock") not in (None, "")
+        else 5.0
+    )
+    fake = bool(stats.get("fake_discount"))
+
+    score = round(
+        (40.0 if market_best else 0.0)
+        + 30.0 * min(1.0, real_savings / 30.0)
+        + 15.0 * entity_confidence
+        + stock_score
+        + 5.0 * min(1.0, history_points / 5.0)
+        - (25.0 if fake else 0.0),
+        1,
+    )
+    score = max(0.0, min(100.0, score))
+
+    reasons: list[str] = []
+    if market_best and peers:
+        reasons.append("mejor precio entre tiendas comparadas")
+    elif market_best and (stats.get("is_lowest_ever") or stats.get("is_lowest_at_store")):
+        reasons.append("mínimo histórico en esta tienda")
+    if real_savings >= 10:
+        reasons.append(f"~{real_savings:.0f}% bajo lo habitual")
+    if fake:
+        reasons.append("posible descuento de vitrina")
+    if not reasons:
+        reasons.append(str(stats.get("verdict") or "señales de precio disponibles"))
+
+    return {
+        "offer_score": score,
+        "reason": "; ".join(reasons[:3]),
+        "market_best": market_best,
+        "real_savings_percent": real_savings,
+    }
+
+
 def _card(
     item: dict[str, Any],
     *,

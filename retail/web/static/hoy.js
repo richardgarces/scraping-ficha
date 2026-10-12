@@ -183,6 +183,9 @@ function renderDeals(data) {
     ? rows.map(dealCard).join("")
     : `<p class="panel muted">Sin ofertas.</p>`;
   saveProductTrail(rows);
+  if (typeof hydratePriceAlertButtons === "function") {
+    hydratePriceAlertButtons($("deals")).catch(() => {});
+  }
   const pager = RetailPager.render(data.page || 1, totalPages);
   page = pager.page;
 }
@@ -204,13 +207,18 @@ function dealCard(item) {
       : `<span class="deal-name">${attr(item.name)}</span>`;
   const cta = ficha
     ? `<a class="deal-cta" href="${attr(ficha)}">Ver ficha</a>`
-    : item.url
-      ? `<a class="deal-cta" href="${attr(item.url)}" target="_blank" rel="noreferrer">Ver oferta</a>`
-      : "";
+    : "";
+  const storeLink = item.url
+    ? `<a class="deal-cta" href="${attr(item.url)}" target="_blank" rel="noreferrer">ir a la tienda</a>`
+    : "";
   const analysis = item.analysis_discount_pct
     ? `<p class="muted">${Number(item.analysis_discount_pct).toLocaleString("es-CL")}% bajo su precio habitual (${money(item.analysis_reference_price)}); esta referencia histórica no es el precio normal publicado.</p>`
     : "";
-  const fresh = typeof updatedAgo === "function" ? updatedAgo(item.updated_at || item.created_at) : "";
+  const fresh = typeof updatedStamp === "function"
+    ? updatedStamp(item.updated_at || item.created_at)
+    : typeof updatedAgo === "function"
+      ? updatedAgo(item.updated_at || item.created_at)
+      : "";
   return `
     <article class="panel deal">
       ${image}
@@ -219,7 +227,7 @@ function dealCard(item) {
         <p class="muted">${attr(item.category || "")}${fresh ? ` · ${attr(fresh)}` : ""}</p>
         <div class="deal-meta">
           ${storeLogo(item.display_store || item.store, item.store_title || item.store)}
-          ${cta}
+          <div class="deal-ctas">${cta}${storeLink}</div>
         </div>
         ${dealPricesBlock({
           price: item.price,
@@ -228,27 +236,9 @@ function dealCard(item) {
         })}
         <p class="deal-reason"><span>Motivo</span> ${attr(ruleLabel(item.rule))}</p>
         ${analysis}
+        ${typeof priceAlertButtonHtml === "function" ? priceAlertButtonHtml({ store: item.store, productId: item.product_id, name: item.name }) : ""}
       </div>
     </article>`;
-}
-
-function renderRuns(runs) {
-  $("runs").innerHTML = (runs || []).length
-    ? runs
-        .map(
-          (run) => `
-          <tr>
-            <td class="muted">${(run.started_at || "").replace("T", " ").slice(0, 16)}</td>
-            <td>${run.status || ""}</td>
-            <td>${run.processed || 0} / ${run.items || 0}</td>
-            <td class="muted">+${run.saved_upserted || 0} ~${run.saved_modified || 0}</td>
-            <td class="${run.failed ? "err" : "muted"}">${run.failed || 0}</td>
-            <td class="muted">${run.without_price || 0}</td>
-            <td>${run.alert_count || 0}</td>
-          </tr>`
-        )
-        .join("")
-    : `<tr><td colspan="7" class="muted">Todavía no se ha corrido el batch.</td></tr>`;
 }
 
 function params() {
@@ -284,7 +274,6 @@ async function load(keepFilters = false) {
     fillSelect($("rule"), facets.rules || [], $("rule").value, "todos", RULES);
   }
   renderDeals(data);
-  renderRuns(data.runs);
   updateFilterBadge("today-filters", "today-filter-count");
   } finally {
     if (typeof setQuickSearchBusy === "function") setQuickSearchBusy(false);

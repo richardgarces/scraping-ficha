@@ -169,11 +169,11 @@ def test_siguiendo_nav_is_hidden_until_login():
     assert home.text.index("Cuenta") < home.text.index("Inscribirse")
 
 
-def test_real_and_super_offers_require_login():
+def test_real_offers_are_public_and_compare_still_requires_login():
     client = TestClient(app)
     reales = client.get("/reales", follow_redirects=False)
-    assert reales.status_code == 303
-    assert reales.headers["location"].startswith("/entrar?next=/reales")
+    assert reales.status_code == 200
+    assert "Ofertas reales" in reales.text
     super_page = client.get("/super", follow_redirects=False)
     assert super_page.status_code == 302
     assert super_page.headers["location"] == "/reales?super=1"
@@ -184,7 +184,7 @@ def test_real_and_super_offers_require_login():
     assert comparar.status_code == 303
     comparar_next = parse_qs(urlsplit(comparar.headers["location"]).query)["next"][0]
     assert comparar_next == "/comparar?store=cugat&id=18221"
-    for path in ("/api/reales", "/api/super", "/api/stores-report", "/api/stores-drops?store=falabella"):
+    for path in ("/api/stores-report", "/api/stores-drops?store=falabella"):
         denied = client.get(path)
         assert denied.status_code in {401, 503}
         assert denied.status_code != 200
@@ -192,21 +192,20 @@ def test_real_and_super_offers_require_login():
         assert "stores" not in body
         assert "items" not in body
         if denied.status_code == 401:
-            assert "Inicia sesión" in body["detail"]
+            assert "Inicia sesión" in body["detail"] or "administrador" in body["detail"].casefold()
     stores_api = client.get("/api/stores-report")
     if stores_api.status_code == 401:
         assert "administrador" in stores_api.json()["detail"].casefold()
     drops_api = client.get("/api/stores-drops?store=falabella")
     if drops_api.status_code == 401:
         assert "administrador" in drops_api.json()["detail"].casefold()
-    for path in ("/", "/hoy", "/catalogo"):
+    for path in ("/", "/hoy", "/catalogo", "/reales"):
         assert client.get(path).status_code == 200
-    entrar = client.get("/entrar?next=/reales")
+    entrar = client.get("/entrar?next=/comparar")
     assert entrar.status_code == 200
-    assert "entrar.js?v=16" in entrar.text
     js = Path("retail/web/static/entrar.js").read_text()
-    assert "Inicia sesión para ver ofertas reales." in js
-    assert "Inicia sesión para ver super ofertas." in js
+    assert "Inicia sesión para ver ofertas reales." not in js
+    assert "Inicia sesión para comparar productos." in js
     assert "Solo administradores pueden ver el ranking de tiendas." in js
     assert '"/tiendas"' in js
     assert '"/pronosticos"' in js

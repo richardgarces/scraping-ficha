@@ -38,17 +38,43 @@ def test_search_cards_toggle_price_alerts_and_restore_after_error() -> None:
     prices = Path("retail/web/static/prices.js").read_text(encoding="utf-8")
     app = Path("retail/web/static/app.js").read_text(encoding="utf-8")
     catalog = Path("retail/web/static/catalogo.js").read_text(encoding="utf-8")
+    hoy = Path("retail/web/static/hoy.js").read_text(encoding="utf-8")
+    reales = Path("retail/web/static/reales.js").read_text(encoding="utf-8")
+    hoy_page = Path("retail/web/static/hoy.html").read_text(encoding="utf-8")
+    reales_page = Path("retail/web/static/reales.html").read_text(encoding="utf-8")
     assert "function priceAlertButtonHtml" in prices
     assert "function hydratePriceAlertButtons" in prices
     assert 'method: "DELETE"' in prices
     assert 'method: "POST"' in prices
     assert "Activar alerta" in prices
     assert "Alerta activa" in prices
+    assert "readPriceAlertTarget" in prices
+    assert "target_price" in prices
     assert "loginHref(\"inscribir\")" in prices
+    producto = Path("retail/web/static/producto.js").read_text(encoding="utf-8")
+    assert "price-alert-target" in producto
+    siguiendo = Path("retail/web/static/siguiendo.js").read_text(encoding="utf-8")
+    assert "alertThresholdLabel" in siguiendo
     assert "hydratePriceAlertButtons($(\"results\"))" in app
     assert "priceAlertButtonHtml({" in app
+    assert "searchDealEffectiveCost" in app
+    assert "Total c/ despacho" in app
     assert "priceAlertButtonHtml({" in catalog
     assert "hydratePriceAlertButtons($(\"grid\"))" in catalog
+    assert "priceAlertButtonHtml({" in hoy
+    assert "hydratePriceAlertButtons($(\"deals\"))" in hoy
+    assert "ir a la tienda" in hoy
+    assert "priceAlertButtonHtml({" in reales
+    assert "hydratePriceAlertButtons($(\"deals\"))" in reales
+    assert "ir a la tienda" in reales
+    assert "hoy.js?v=14-no-batch-runs" in hoy_page
+    assert "prices.js?v=110-meincart" in hoy_page
+    assert "reales.js?v=21-reales-day" in reales_page
+    assert "prices.js?v=107-reales-day" in reales_page
+    assert 'id="day"' in reales_page
+    assert 'id="day-today"' in reales_page
+    assert "setAvailableDays" in reales
+    assert 'query.set("day"' in reales
 
 
 def test_deal_cards_show_precio_normal_when_published() -> None:
@@ -64,9 +90,9 @@ def test_deal_cards_show_precio_normal_when_published() -> None:
     assert "publishedNormal(row)" in app
     assert "dealPricesBlock({" in hoy
     assert ".deal-prices.has-normal" in styles
-    assert "app.js?v=60-card-alert" in index
-    assert "prices.js?v=106-card-alert" in index
-    assert "styles.css?v=106-card-alert" in index
+    assert "app.js?v=61-meincart" in index
+    assert "prices.js?v=110-meincart" in index
+    assert "styles.css?v=110-meincart" in index
 
 
 def test_product_page_has_contextual_back_link() -> None:
@@ -124,19 +150,28 @@ def test_product_price_charts_show_every_calendar_day():
     assert ".price-chart-scroll .chart" in styles
     assert "max-width: none" in styles
     assert "overflow-x: auto" in styles
-    assert 'producto.js?v=50-chart-labels' in page
-    assert 'styles.css?v=98-chart-labels' in page
+    assert 'producto.js?v=53-chart-ux' in page
+    assert 'styles.css?v=110-meincart' in page
+    assert 'data-days="7"' in page
+    assert 'data-days="30"' in page
+    assert 'data-days="90"' in page
     assert 'data-days="180"' in page
     assert 'data-days="365"' in page
     assert 'data-days="730"' in page
+    assert ">7d<" in page
+    assert ">30d<" in page
+    assert ">90d<" in page
     assert "6 meses" in page
     assert "1 año" in page
     assert "2 años" in page
+    assert "Todo" in page
     assert "Solo precio oferta" in page
     assert "const domainMin = 0;" in script
     assert "function chartValueLabelIndexes" in script
     assert "chart-value-label" in script
     assert ".chart-value-label" in styles
+    assert "nearestLabeled" in script
+    assert "has-value-label" in script
     assert "chart-offer-area" in script
     assert "chart-discount-band" not in script.split("function renderCharts()")[-1].split("const FORECAST_TRENDS")[0]
     assert "Precio oferta" in script.split("function renderCharts()")[-1].split("const FORECAST_TRENDS")[0]
@@ -214,7 +249,7 @@ def test_product_forecast_panel_is_admin_only_and_collapsed_by_default() -> None
     assert "panel.hidden = false" not in script.split("async function loadForecast")[1].split("$(\"windows\")")[0]
     assert "panel.open = false" in script
     assert "panel.open = true" not in script
-    assert "producto.js?v=52-cheaper-internal" in page
+    assert "producto.js?v=53-chart-ux" in page
 
 
 def test_product_others_dedupe_by_store_keeps_cheapest() -> None:

@@ -8,6 +8,35 @@ from retail.batch.rules import Alert
 ALLOWED_CHANNELS = {"email", "telegram", "push"}
 ALLOWED_KINDS = {"common", "real", "super", "watch", "predictive"}
 
+# Preferencias de cuenta solo para membresía (paid/admin).
+ADVANCED_PREF_KEYS = (
+    "min_discount_self",
+    "min_discount_other_stores",
+    "email_categories",
+    "email_min_real_discount",
+)
+
+
+def advanced_preference_overrides(raw: Any) -> list[str]:
+    """Claves avanzadas presentes en el payload con valor distinto del default."""
+    data = raw if isinstance(raw, dict) else {}
+    found: list[str] = []
+    if "email_categories" in data:
+        values = data.get("email_categories") or []
+        if isinstance(values, str):
+            values = [part for part in values.split(",") if part.strip()]
+        if isinstance(values, (list, tuple)) and any(str(item).strip() for item in values):
+            found.append("email_categories")
+    for key in ("min_discount_self", "min_discount_other_stores", "email_min_real_discount"):
+        if key not in data:
+            continue
+        try:
+            if float(data.get(key) or 0) > 0:
+                found.append(key)
+        except (TypeError, ValueError):
+            found.append(key)
+    return found
+
 
 def normalize_preferences(raw: Any) -> dict[str, Any]:
     data = raw if isinstance(raw, dict) else {}

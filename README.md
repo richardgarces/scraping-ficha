@@ -7,6 +7,9 @@ Para qué sirve la aplicación y cómo configurarla: **[docs/GUIA.md](docs/GUIA.
 La arquitectura de identidad, condición, despacho, pagos y stock está descrita
 en **[docs/inteligencia_comercial.md](docs/inteligencia_comercial.md)**.
 
+Inventario de funcionalidades (qué hay / qué falta / MVP):
+**[docs/FUNCIONALIDADES_MVP.md](docs/FUNCIONALIDADES_MVP.md)**.
+
 El piloto de **[cotizaciones comparadas](docs/COTIZACIONES.md)** conecta listas
 CSV y documentos de scraping/Docling con el catálogo, revisión de equivalencias
 y comparación de costos. Disponible en `/cotizaciones` solo para administradores.

@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#258fdf">
   <title>Siguiendo</title>
   <script>(function(){var m=localStorage.getItem("retail-theme");if(m==="day"||m==="night"){document.documentElement.dataset.theme=m;return;}var h=new Date().getHours();document.documentElement.dataset.theme=(h>=7&&h<19)?"day":"night";})();</script>
-  <link rel="stylesheet" href="/static/styles.css?v=83-notice-kind">
+  <link rel="stylesheet" href="/static/styles.css?v=110-meincart">
 </head>
 <body>
   <header class="top">
@@ -77,7 +77,7 @@
           <button type="submit">Canjear 1 mes de regalo</button>
         </div>
       </form>
-      <p class="muted">Cuenta gratuita: hasta 3 alertas. Membresía mensual: hasta 20. El administrador no tiene cupo práctico.</p>
+      <p class="muted">Cuenta gratuita: hasta 3 alertas. Membresía mensual: hasta 20.</p>
     </section>
 
     <section class="panel" id="watch-panel" hidden>
@@ -129,44 +129,50 @@
           <label><input type="checkbox" name="notice-kind" value="predictive"> Alertas predictivas y anticipadas experimentales</label>
         </fieldset>
         <p id="predictive-status" class="muted span notice-status"></p>
-        <fieldset class="email-filters">
-          <legend>Filtros exclusivos del correo</legend>
-          <p class="muted email-filter-intro">Personaliza únicamente los mensajes que llegan a tu correo. Telegram conserva sus propios filtros.</p>
-          <div class="email-filter-grid">
-            <section class="email-category-panel" aria-labelledby="email-category-title">
-              <div class="email-filter-heading">
-                <div>
-                  <h3 id="email-category-title">Categorías de interés</h3>
-                  <p id="email-category-count" class="muted">Todas las categorías</p>
+        <div id="advanced-notification-prefs" hidden>
+          <fieldset class="email-filters">
+            <legend>Filtros exclusivos del correo</legend>
+            <p class="muted email-filter-intro">Personaliza únicamente los mensajes que llegan a tu correo. Telegram conserva sus propios filtros.</p>
+            <div class="email-filter-grid">
+              <section class="email-category-panel" aria-labelledby="email-category-title">
+                <div class="email-filter-heading">
+                  <div>
+                    <h3 id="email-category-title">Categorías de interés</h3>
+                    <p id="email-category-count" class="muted">Todas las categorías</p>
+                  </div>
+                  <div class="category-actions">
+                    <button id="email-categories-all" type="button" class="secondary">Todas</button>
+                    <button id="email-categories-none" type="button" class="secondary">Ninguna</button>
+                  </div>
                 </div>
-                <div class="category-actions">
-                  <button id="email-categories-all" type="button" class="secondary">Todas</button>
-                  <button id="email-categories-none" type="button" class="secondary">Ninguna</button>
+                <div id="email-categories" class="choice-grid"></div>
+                <p class="muted email-filter-help">Sin categorías seleccionadas se consideran todas.</p>
+              </section>
+              <section class="email-discount-panel" aria-labelledby="email-discount-title">
+                <div class="email-discount-icon" aria-hidden="true">%</div>
+                <h3 id="email-discount-title">Descuento real mínimo</h3>
+                <p class="muted">Solo enviaremos ofertas reales que alcancen este porcentaje.</p>
+                <label for="email-min-real-discount">Porcentaje mínimo</label>
+                <div class="percent-input">
+                  <input id="email-min-real-discount" type="number" min="0" max="100" step="1" value="0">
+                  <span>%</span>
                 </div>
-              </div>
-              <div id="email-categories" class="choice-grid"></div>
-              <p class="muted email-filter-help">Sin categorías seleccionadas se consideran todas.</p>
-            </section>
-            <section class="email-discount-panel" aria-labelledby="email-discount-title">
-              <div class="email-discount-icon" aria-hidden="true">%</div>
-              <h3 id="email-discount-title">Descuento real mínimo</h3>
-              <p class="muted">Solo enviaremos ofertas reales que alcancen este porcentaje.</p>
-              <label for="email-min-real-discount">Porcentaje mínimo</label>
-              <div class="percent-input">
-                <input id="email-min-real-discount" type="number" min="0" max="100" step="1" value="0">
-                <span>%</span>
-              </div>
-              <p class="muted email-filter-help">Se compara con el historial del producto o con otras tiendas. Usa 0 para no exigir un mínimo adicional.</p>
-            </section>
-          </div>
-        </fieldset>
-        <label>Descuento mínimo vs. su propio historial (%)
-          <input id="min-discount-self" type="number" min="0" max="100" step="1" value="0">
-        </label>
-        <label>Descuento mínimo vs. otras tiendas (%)
-          <input id="min-discount-stores" type="number" min="0" max="100" step="1" value="0">
-        </label>
-        <p class="muted span">Los mínimos se aplican a ofertas generales. En “Productos que sigo” avisamos ante cualquier cambio de precio.</p>
+                <p class="muted email-filter-help">Se compara con el historial del producto o con otras tiendas. Usa 0 para no exigir un mínimo adicional.</p>
+              </section>
+            </div>
+          </fieldset>
+          <label>Descuento mínimo vs. su propio historial (%)
+            <input id="min-discount-self" type="number" min="0" max="100" step="1" value="0">
+          </label>
+          <label>Descuento mínimo vs. otras tiendas (%)
+            <input id="min-discount-stores" type="number" min="0" max="100" step="1" value="0">
+          </label>
+          <p class="muted span">Los mínimos se aplican a ofertas generales. En “Productos que sigo” avisamos ante cualquier cambio, o al llegar a tu precio objetivo si lo configuraste.</p>
+        </div>
+        <div id="advanced-prefs-upgrade" class="span membership-upgrade" hidden>
+          <p><strong>Personalización avanzada</strong> (filtros de correo, umbrales de descuento y tiendas preferidas) está incluida en la membresía.</p>
+          <p class="auth-actions"><a class="btn secondary" href="#membresia">Ver membresía</a></p>
+        </div>
         <button type="submit">Guardar mis notificaciones</button>
       </form>
     </section>
@@ -196,6 +202,13 @@
       </form>
     </section>
 
+    <section class="panel" id="store-preferences-upgrade" hidden>
+      <p class="eyebrow">Resultados personalizados</p>
+      <h2>Mis tiendas</h2>
+      <p class="muted">Con la membresía puedes marcar tiendas preferidas (aparecen primero) y excluidas (no se consultan ni se muestran).</p>
+      <p class="auth-actions"><a class="btn secondary" href="#membresia">Ver membresía</a></p>
+    </section>
+
     <section class="panel" id="password-panel" hidden>
       <p class="eyebrow">Seguridad</p>
       <h2>Cambiar clave</h2>
@@ -208,10 +221,12 @@
     </section>
 
     <section class="panel" id="watch-list" hidden>
+      <h2>Mis alertas de precio</h2>
+      <p class="muted">Estas alertas cuentan para el cupo de la membresía. Quítalas aquí o con «Alerta activa» en la ficha del producto.</p>
       <div class="table-wrap">
         <table class="results">
           <thead>
-            <tr><th>Producto</th><th>Búsqueda</th><th>Aviso</th><th>Último aviso</th><th></th></tr>
+            <tr><th>Producto</th><th>Tienda</th><th>Aviso</th><th></th></tr>
           </thead>
           <tbody id="watches"></tbody>
         </table>
@@ -219,6 +234,6 @@
     </section>
   </main>
   <script src="/static/prices.js?v=37"></script>
-  <script src="/static/siguiendo.js?v=20"></script>
+  <script src="/static/siguiendo.js?v=22-price-alerts-list"></script>
 </body>
 </html>

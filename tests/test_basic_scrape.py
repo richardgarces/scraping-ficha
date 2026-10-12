@@ -42,11 +42,16 @@ def test_cron_page_has_basic_scrape_button():
 
     html = Path("retail/web/static/cron.html").read_text()
     js = Path("retail/web/static/cron.js").read_text()
+    hoy = Path("retail/web/static/hoy.html").read_text()
     assert "Scraping básico" in html
     assert 'id="basic-scrape-run"' in html
     assert 'src="/static/cron.js?v=' in html
+    assert "Últimas corridas del batch" in html
+    assert 'id="recent-runs-body"' in html
+    assert "Últimas corridas del batch" not in hoy
     assert "Acciones" in html
     assert "groupActionsCell" in js
+    assert "renderRecentRuns" in js
     assert "Iniciar ahora" in js
     assert "/api/admin/cron-batches/" in js
     assert "/api/admin/basic-scrape" in js
@@ -360,6 +365,7 @@ def test_cron_status_keeps_basic_scrape_apart(monkeypatch):
     assert payload["any_running"] is True
     assert payload["groups"] == []
     assert payload["store_jobs"] == []
+    assert payload["recent_runs"] == []
     assert payload["basic_scrape"]["progress"]["new"] == 2
     assert payload["basic_scrape"]["progress"]["updated"] == 1
     assert payload["basic_scrape"]["progress"]["processed"] == 1

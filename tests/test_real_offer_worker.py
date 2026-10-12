@@ -82,6 +82,20 @@ def test_worker_marks_real_and_reales_reads_today_marker_without_recalculation(r
     assert found["total"] == 1
     assert found["items"][0]["price"] == 6000
     assert found["day"] == chile_day()
+    assert found["today"] == chile_day()
+    assert chile_day() in found["days"]
+
+    other_day = "2026-01-15"
+    marker = dict(repo.daily_real_offers.find_one({}) or {})
+    marker.pop("_id", None)
+    marker["day"] = other_day
+    repo.daily_real_offers.insert_one(marker)
+    assert other_day in repo.real_offer_days()
+    past = repo.real_offers(day=other_day)
+    assert past["day"] == other_day
+    assert past["today"] == chile_day()
+    # Día inválido cae a hoy (Chile), no al más reciente.
+    assert repo.real_offers(day="1999-01-01")["day"] == chile_day()
 
     # Si el producto cambia después de evaluarlo, no se mezcla el precio nuevo
     # con la marca vieja.

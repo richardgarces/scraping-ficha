@@ -98,6 +98,66 @@ def test_explore_categories_include_counts_optional(repo):
     assert all(int(row["count"]) > 0 for row in rows)
 
 
+def test_browse_priority_keys_appear_first(repo):
+    """Alertas activas (priority_keys) encabezan el catálogo pese al sort por updated."""
+    repo.collection.insert_many(
+        [
+            {
+                "store": "ripley",
+                "product_id": "old",
+                "name": "Producto viejo",
+                "price": 1000,
+                "updated_at": "2026-01-01T12:00:00Z",
+            },
+            {
+                "store": "falabella",
+                "product_id": "mid",
+                "name": "Producto medio",
+                "price": 2000,
+                "updated_at": "2026-06-01T12:00:00Z",
+            },
+            {
+                "store": "lider",
+                "product_id": "new",
+                "name": "Producto nuevo",
+                "price": 3000,
+                "updated_at": "2026-10-01T12:00:00Z",
+            },
+        ]
+    )
+    plain = repo.browse(sort="updated", size=10)
+    assert [item["product_id"] for item in plain["items"]] == ["new", "mid", "old"]
+
+    prioritized = repo.browse(
+        sort="updated",
+        size=10,
+        priority_keys=[("ripley", "old"), ("falabella", "mid")],
+    )
+    ids = [item["product_id"] for item in prioritized["items"]]
+    assert ids[:2] == ["mid", "old"]  # mismo sort entre prioritarios
+    assert ids[2] == "new"
+    assert prioritized["items"][0].get("price_alert_active") is True
+    assert prioritized["items"][1].get("price_alert_active") is True
+    assert "price_alert_active" not in prioritized["items"][2]
+
+    # Página 1: alerta + relleno. Página 2: resto sin la alerta.
+    page1 = repo.browse(
+        sort="updated",
+        page=1,
+        size=2,
+        priority_keys=[("ripley", "old")],
+    )
+    assert [item["product_id"] for item in page1["items"]] == ["old", "new"]
+    page2 = repo.browse(
+        sort="updated",
+        page=2,
+        size=2,
+        priority_keys=[("ripley", "old")],
+    )
+    assert [item["product_id"] for item in page2["items"]] == ["mid"]
+    assert all(not item.get("price_alert_active") for item in page2["items"])
+
+
 @pytest.mark.parametrize(
     "query",
     [

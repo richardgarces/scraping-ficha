@@ -22,6 +22,22 @@ def _as_int(value: Any) -> int | None:
         return None
 
 
+def alert_matches_change(alert: dict[str, Any], change: dict[str, Any]) -> bool:
+    """True si la suscripción debe avisarse ante este salto de precio.
+
+    - Sin ``target_price`` (o ``any_change``): cualquier subida/bajada.
+    - Con precio objetivo y sin ``any_change``: solo si el nuevo precio ≤ objetivo.
+    """
+    new_price = _as_int(change.get("price"))
+    if new_price is None:
+        return False
+    target = _as_int(alert.get("target_price"))
+    any_change = bool(alert.get("any_change", target is None))
+    if target is not None and not any_change:
+        return new_price <= target
+    return True
+
+
 def price_deltas(previous: dict[tuple[str, str], tuple[Any, ...]], products: list[Any]) -> list[dict[str, Any]]:
     """Cambios del precio de oferta/descuento vs lo último guardado.
 
@@ -137,7 +153,11 @@ def notify_price_changes(repo: Any, changes: list[dict[str, Any]]) -> int:
     prepared: list[dict[str, Any]] = []
     media: dict[str, dict[str, Any]] = {}
     for change in changes:
-        watchers = by_product.get((change["store"], change["product_id"])) or []
+        watchers = [
+            alert
+            for alert in (by_product.get((change["store"], change["product_id"])) or [])
+            if alert_matches_change(alert, change)
+        ]
         if not watchers:
             continue
         display_store_id, store_name = display_store(change)

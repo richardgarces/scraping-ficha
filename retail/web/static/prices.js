@@ -475,6 +475,27 @@ function updatedAgo(value, now = Date.now()) {
   return days === 1 ? "actualizado hace 1 día" : `actualizado hace ${days} días`;
 }
 
+/** Fecha corta en es-CL (p. ej. «12 oct 2026»). Vacío si no hay fecha. */
+function updatedDateLabel(value) {
+  if (!value) return "";
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleDateString("es-CL", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    timeZone: "America/Santiago",
+  });
+}
+
+/** Relativo + fecha absoluta para cards y fichas. */
+function updatedStamp(value, now = Date.now()) {
+  const relative = updatedAgo(value, now);
+  if (!relative) return "";
+  const absolute = updatedDateLabel(value);
+  return absolute ? `${relative} · ${absolute}` : relative;
+}
+
 /** Si /api/thumb falla, el <img> roto se cambia por el placeholder (un img no puede mostrar ::after). */
 function emptyThumb(img) {
   if (!img || !img.replaceWith) return;
@@ -997,8 +1018,30 @@ async function hydratePriceAlertButtons(root = document) {
   ).catch(() => {});
 }
 
+/** Precio objetivo desde input o prompt (solo dígitos). null = cualquier cambio; undefined = canceló. */
+function readPriceAlertTarget(button) {
+  const host = button.closest(".price-alert");
+  const input = host?.querySelector?.(".price-alert-target");
+  if (input) {
+    const digits = String(input.value || "").replace(/[^\d]/g, "");
+    if (!digits) return null;
+    const value = Number(digits);
+    return value > 0 ? value : null;
+  }
+  const raw = window.prompt(
+    "Precio máximo para avisarte (opcional). Vacío = cualquier cambio de precio.",
+    ""
+  );
+  if (raw === null) return undefined;
+  const digits = String(raw).replace(/[^\d]/g, "");
+  if (!digits) return null;
+  const value = Number(digits);
+  return value > 0 ? value : null;
+}
+
 document.addEventListener("click", async (event) => {
-  const button = event.target.closest("[data-price-alert]");
+  const target = event.target instanceof Element ? event.target : event.target?.parentElement;
+  const button = target?.closest?.("[data-price-alert]");
   if (!button || button.disabled) return;
   const store = button.dataset.store;
   const id = button.dataset.id;
@@ -1010,18 +1053,28 @@ document.addEventListener("click", async (event) => {
   }
   button.disabled = true;
   const turnOff = button.dataset.priceAlert === "off";
+  let targetPrice = null;
+  if (!turnOff) {
+    targetPrice = readPriceAlertTarget(button);
+    if (targetPrice === undefined) {
+      button.disabled = false;
+      return;
+    }
+  }
   const params = new URLSearchParams({ store, id });
   try {
+    const body = {
+      store,
+      product_id: id,
+      name: button.dataset.name || "",
+    };
+    if (targetPrice != null) body.target_price = targetPrice;
     const response = turnOff
       ? await fetch(`/api/price-alert?${params}`, { method: "DELETE" })
       : await fetch("/api/price-alert", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            store,
-            product_id: id,
-            name: button.dataset.name || "",
-          }),
+          body: JSON.stringify(body),
         });
     const data = await response.json().catch(() => ({}));
     if (response.status === 401) {

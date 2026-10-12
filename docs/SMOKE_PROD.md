@@ -25,10 +25,10 @@ Base: `https://precios.meincart.com` (ajustar si el host cambia).
 - [ ] Preferencias de tiendas en cuenta se guardan y vuelven a cargar.
 - [ ] `/siguiendo`: alta/baja de watch; prueba admin de push si hay VAPID configurado.
 
-## 4. Login-gated
+## 4. Ofertas verificadas (públicas) y login-gated
 
-- [ ] `/reales` muestra ofertas del día (`is_real`) o vacío con worker al día (revisar jobs failed si vacío inesperado).
-- [ ] `/reales?super=1` (alias `/super`) filtra super ofertas.
+- [ ] `/reales` (sin login) muestra ofertas del día (`is_real`) o vacío con worker al día.
+- [ ] `/reales?super=1` (alias `/super`) filtra super ofertas sin exigir sesión.
 - [ ] `/comparar?store=…&id=…` abre comparación para cuenta approved.
 
 ## 5. Admin

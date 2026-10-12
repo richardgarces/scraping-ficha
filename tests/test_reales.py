@@ -4,6 +4,7 @@ from retail.reales import (
     is_agotado,
     is_excluded_real_offer_store,
     is_super_offer,
+    opportunity_score_for_ficha,
     pick_real_offer,
     previous_full_price_day,
 )
@@ -553,3 +554,30 @@ def test_sodimac_vs_paris_si_es_comparacion_cross_store():
     assert deal["store"] == "sodimac"
     assert deal["rival_store"] == "paris"
     assert "comparacion" in deal["kinds"]
+
+
+def test_opportunity_score_for_ficha_needs_signals():
+    cold = opportunity_score_for_ficha({"store": "falabella", "product_id": "1", "price": 1000, "stats": {}})
+    assert cold is None
+
+    scored = opportunity_score_for_ficha(
+        {
+            "store": "falabella",
+            "product_id": "1",
+            "price": 8000,
+            "entity_confidence": 0.9,
+            "stats": {
+                "points": 5,
+                "percent_vs_median": -20,
+                "is_lowest_ever": True,
+                "max": 12000,
+                "verdict": "Es el precio más bajo que le hemos visto.",
+            },
+        },
+        others=[{"store": "ripley", "product_id": "2", "price": 10000}],
+        cheapest={"store": "falabella", "product_id": "1", "price": 8000},
+    )
+    assert scored is not None
+    assert scored["offer_score"] >= 70
+    assert scored["market_best"] is True
+    assert "puntaje" not in scored["reason"].casefold()

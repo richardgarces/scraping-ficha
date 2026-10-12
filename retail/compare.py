@@ -870,9 +870,15 @@ def collapse_mirrors(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def collapse_display(groups: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Colapsa variantes y espejos de la misma cadena, y recalcula comparables."""
+    """Colapsa variantes, avisos duplicados de la misma tienda y espejos, y recalcula comparables.
+
+    Falabella (u otra cadena) a veces publica el mismo producto con dos SKU y
+    precios distintos; en resultados solo debe quedar el más barato por tienda.
+    """
     for group in groups:
-        offers = collapse_mirrors(collapse_variants(group.get("offers") or []))
+        offers = collapse_cheapest_per_store(
+            collapse_mirrors(collapse_variants(group.get("offers") or []))
+        )
         priced_retailers = {
             retailer_key(row.get("store"))
             for row in offers

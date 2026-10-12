@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#258fdf">
   <title>Ofertas reales</title>
   <script>(function(){var m=localStorage.getItem("retail-theme");if(m==="day"||m==="night"){document.documentElement.dataset.theme=m;return;}var h=new Date().getHours();document.documentElement.dataset.theme=(h>=7&&h<19)?"day":"night";})();</script>
-  <link rel="stylesheet" href="/static/styles.css?v=79-reales-grid">
+  <link rel="stylesheet" href="/static/styles.css?v=110-meincart">
 </head>
 <body>
   <header class="top">
@@ -61,10 +61,28 @@
         <span class="filter-toggle-label" aria-hidden="true"></span>
       </summary>
       <div class="toolbar catalog-filter-grid real-filter-grid">
-        <label class="check compact-filter-check"><input id="comparacion" type="checkbox" checked data-filter-control> Ofertas en comparación</label>
-        <label class="check compact-filter-check"><input id="historial" type="checkbox" checked data-filter-control> Bajó de precio</label>
-        <label class="check compact-filter-check"><input id="iguales" type="checkbox" data-filter-control> Mismo precio</label>
-        <label class="check compact-filter-check"><input id="super-filter" type="checkbox" data-filter-control> Super ofertas: descuento superior al 50%</label>
+        <label class="day-picker-field">Día
+          <input type="hidden" id="day" data-filter-control data-filter-default="" value="">
+          <button type="button" id="day-picker-toggle" class="day-picker-toggle" aria-haspopup="dialog" aria-expanded="false">
+            <span id="day-picker-label">Hoy</span>
+          </button>
+          <div id="day-picker" class="day-picker" hidden role="dialog" aria-label="Calendario de ofertas reales">
+            <div class="day-picker-toolbar">
+              <button type="button" id="day-prev-month" class="secondary" aria-label="Mes anterior">‹</button>
+              <strong id="day-month-label"></strong>
+              <button type="button" id="day-next-month" class="secondary" aria-label="Mes siguiente">›</button>
+            </div>
+            <div class="day-picker-weekdays" aria-hidden="true">
+              <span>L</span><span>M</span><span>X</span><span>J</span><span>V</span><span>S</span><span>D</span>
+            </div>
+            <div id="day-picker-grid" class="day-picker-grid"></div>
+            <button type="button" id="day-today" class="secondary day-picker-latest">Hoy</button>
+          </div>
+        </label>
+        <label class="check compact-filter-check" title="Otra tienda cobra cerca del precio normal de este aviso y al menos 10% más cara que el precio de venta."><input id="comparacion" type="checkbox" checked data-filter-control> Ofertas en comparación</label>
+        <label class="check compact-filter-check" title="Hubo un día a precio lleno distinto del actual, o baja verificada ≥10% vs historial observado."><input id="historial" type="checkbox" checked data-filter-control> Bajó de precio</label>
+        <label class="check compact-filter-check" title="Otras tiendas al mismo precio de venta (±3%). El % off es de vitrina, no brecha entre tiendas."><input id="iguales" type="checkbox" data-filter-control> Mismo precio</label>
+        <label class="check compact-filter-check" title="Solo comparación o historial con brecha o descuento real mayor al 50%. Mismo precio no cuenta."><input id="super-filter" type="checkbox" data-filter-control> Super ofertas: descuento superior al 50%</label>
         <label>Categoría <select id="category" data-filter-control></select></label>
         <label>Tienda de la oferta <select id="store" data-filter-control></select></label>
         <label>% vs otra tienda
@@ -85,7 +103,7 @@
           </select>
         </label>
       </div>
-      <p class="filter-help muted">Comparación revisa otras tiendas; historial comprueba precios anteriores; mismo precio encuentra coincidencias sin brecha entre tiendas.</p>
+      <p class="filter-help muted">Por defecto muestra solo el día de hoy (Chile). Podés elegir otro día con marcas guardadas. Comparación revisa otras tiendas; historial comprueba precios anteriores; mismo precio encuentra coincidencias sin brecha entre tiendas.</p>
     </details>
   </section>
 
@@ -102,8 +120,8 @@
       <button type="button" id="next" class="secondary" aria-label="Ir a la página siguiente">Siguiente</button>
     </section>
   </main>
-  <script src="/static/prices.js?v=36"></script>
+  <script src="/static/prices.js?v=107-reales-day"></script>
   <script src="/static/pagination.js?v=1"></script>
-  <script src="/static/reales.js?v=19-no-knasta"></script>
+  <script src="/static/reales.js?v=21-reales-day"></script>
 </body>
 </html>

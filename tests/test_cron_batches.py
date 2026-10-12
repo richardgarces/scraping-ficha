@@ -132,7 +132,17 @@ class FakeCursor:
     def __init__(self, rows):
         self.rows = rows
 
-    def sort(self, *_args, **_kwargs):
+    def sort(self, *args, **_kwargs):
+        if not args:
+            return self
+        key = args[0]
+        reverse = False
+        if isinstance(key, list) and key:
+            reverse = key[0][1] == -1 or str(key[0][1]).lower() in {"desc", "descending"}
+            key = key[0][0]
+        elif len(args) > 1:
+            reverse = args[1] == -1 or str(args[1]).lower() in {"desc", "descending"}
+        self.rows.sort(key=lambda item: str(item.get(key) or ""), reverse=reverse)
         return self
 
     def limit(self, n):
@@ -177,6 +187,11 @@ class FakeRepo:
         from retail.mongo import ProductRepository
 
         return ProductRepository.latest_batch_runs_by_tienda(self)
+
+    def recent_runs(self, limit=10):
+        from retail.mongo import ProductRepository
+
+        return ProductRepository.recent_runs(self, limit)
 
     def _public_batch_run(self, item):
         from retail.mongo import ProductRepository
@@ -357,6 +372,9 @@ def test_build_cron_batch_status_uses_mongo(monkeypatch):
     assert by_id["retail"]["status"] == "idle"
     assert by_id["retail"]["schedule"]["label"] == "06:45"
     assert payload["store_jobs"] == []
+    assert len(payload["recent_runs"]) == 1
+    assert payload["recent_runs"][0]["grupo"] == "tecnologia"
+    assert payload["recent_runs"][0]["processed"] == 1
     assert any(item["id"] == "falabella" for item in payload["stores"])
 
 

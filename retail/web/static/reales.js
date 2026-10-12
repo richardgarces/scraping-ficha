@@ -1,16 +1,162 @@
-// $, money, attr y thumbMarkup vienen de prices.js
+// $, money, attr, thumbMarkup, priceAlertButtonHtml y hydratePriceAlertButtons vienen de prices.js
 
 let page = 1;
 let totalPages = 1;
 let loadToken = 0;
+let availableDays = [];
+let availableDaySet = new Set();
+let calendarCursor = null; // Date at first of visible month (UTC)
+let dayPickerOpen = false;
+let chileToday = "";
 const pageSearchForm = document.querySelector(".desktop-quick-search");
 const pageSearchInput = pageSearchForm?.querySelector('input[name="q"]');
+const MONTHS_ES = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"];
 $("super-filter").checked = new URLSearchParams(location.search).get("super") === "1";
 
 function flash(text, ok = false) {
   $("flash").hidden = false;
   $("flash").className = ok ? "summary" : "err";
   $("flash").textContent = text;
+}
+
+function parseDay(value) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value || "").trim());
+  if (!match) return null;
+  const date = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])));
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function formatDayKey(date) {
+  const year = date.getUTCFullYear();
+  const month = String(date.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(date.getUTCDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function formatDayLabel(value) {
+  if (!value || value === chileToday) return "Hoy";
+  const date = parseDay(value);
+  if (!date) return value;
+  return `${date.getUTCDate()} ${MONTHS_ES[date.getUTCMonth()].slice(0, 3)} ${date.getUTCFullYear()}`;
+}
+
+function monthStart(date) {
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1));
+}
+
+function shiftMonth(date, delta) {
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + delta, 1));
+}
+
+function syncDayLabel() {
+  const label = $("day-picker-label");
+  if (label) label.textContent = formatDayLabel($("day").value || chileToday);
+}
+
+function syncDayUrl() {
+  const url = new URL(location.href);
+  const selected = $("day").value;
+  if (!selected || selected === chileToday) url.searchParams.delete("day");
+  else url.searchParams.set("day", selected);
+  const next = `${url.pathname}${url.search}${url.hash}`;
+  if (`${location.pathname}${location.search}${location.hash}` !== next) {
+    history.replaceState(null, "", next);
+  }
+}
+
+function setAvailableDays(days, selected, today) {
+  chileToday = String(today || chileToday || "").trim();
+  availableDays = [...new Set((days || []).map((item) => String(item || "").trim()).filter(Boolean))]
+    .sort()
+    .reverse();
+  if (chileToday && !availableDays.includes(chileToday)) {
+    availableDays = [chileToday, ...availableDays];
+  }
+  availableDaySet = new Set(availableDays);
+  const wanted = String(selected || "").trim();
+  const current = availableDaySet.has(wanted) ? wanted : chileToday;
+  const anchor = parseDay(current || availableDays[0]) || new Date();
+  calendarCursor = monthStart(anchor);
+  // Vacío en el control = hoy (no cuenta como filtro activo).
+  $("day").value = current && current !== chileToday ? current : "";
+  syncDayLabel();
+  syncDayUrl();
+  renderDayCalendar();
+}
+
+function renderDayCalendar() {
+  const grid = $("day-picker-grid");
+  const monthLabel = $("day-month-label");
+  if (!grid || !monthLabel || !calendarCursor) return;
+  monthLabel.textContent = `${MONTHS_ES[calendarCursor.getUTCMonth()]} ${calendarCursor.getUTCFullYear()}`;
+  const selected = $("day").value || chileToday;
+  const year = calendarCursor.getUTCFullYear();
+  const month = calendarCursor.getUTCMonth();
+  const first = new Date(Date.UTC(year, month, 1));
+  const startOffset = (first.getUTCDay() + 6) % 7;
+  const daysInMonth = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+  const cells = [];
+  for (let i = 0; i < startOffset; i += 1) {
+    cells.push(`<span class="day-picker-cell empty" aria-hidden="true"></span>`);
+  }
+  for (let day = 1; day <= daysInMonth; day += 1) {
+    const key = formatDayKey(new Date(Date.UTC(year, month, day)));
+    const enabled = availableDaySet.has(key);
+    const isSelected = selected === key;
+    const classes = ["day-picker-cell"];
+    if (!enabled) classes.push("disabled");
+    if (isSelected) classes.push("selected");
+    if (enabled && key === chileToday) classes.push("latest");
+    cells.push(
+      enabled
+        ? `<button type="button" class="${classes.join(" ")}" data-day="${attr(key)}" aria-pressed="${isSelected ? "true" : "false"}">${day}</button>`
+        : `<span class="${classes.join(" ")}" aria-disabled="true">${day}</span>`
+    );
+  }
+  grid.innerHTML = cells.join("");
+  const earliest = availableDays.length ? parseDay(availableDays[availableDays.length - 1]) : null;
+  const latest = availableDays.length ? parseDay(availableDays[0]) : null;
+  const prev = $("day-prev-month");
+  const next = $("day-next-month");
+  if (prev) prev.disabled = Boolean(earliest && calendarCursor <= monthStart(earliest));
+  if (next) next.disabled = Boolean(latest && calendarCursor >= monthStart(latest));
+}
+
+function openDayPicker(open = true) {
+  const picker = $("day-picker");
+  const toggle = $("day-picker-toggle");
+  if (!picker || !toggle) return;
+  dayPickerOpen = open;
+  picker.hidden = !open;
+  toggle.setAttribute("aria-expanded", open ? "true" : "false");
+  if (open) renderDayCalendar();
+}
+
+function closeDayPicker() {
+  openDayPicker(false);
+}
+
+function setDayValue(value, { reload: shouldReload = false } = {}) {
+  const next = String(value || "").trim();
+  const resolved = !next || next === chileToday
+    ? ""
+    : (availableDaySet.has(next) ? next : "");
+  $("day").value = resolved;
+  syncDayLabel();
+  syncDayUrl();
+  if (resolved) {
+    const parsed = parseDay(resolved);
+    if (parsed) calendarCursor = monthStart(parsed);
+  } else if (chileToday) {
+    const parsed = parseDay(chileToday);
+    if (parsed) calendarCursor = monthStart(parsed);
+  }
+  renderDayCalendar();
+  updateFilterBadge("real-filters", "real-filter-count");
+  if (shouldReload) {
+    page = 1;
+    load();
+  }
 }
 
 function setDealsBusy(on) {
@@ -30,6 +176,7 @@ function setDealsBusy(on) {
   document.querySelectorAll("#real-filters [data-filter-control]").forEach((el) => {
     el.disabled = Boolean(on);
   });
+  $("day-picker-toggle")?.toggleAttribute("disabled", Boolean(on));
 }
 
 function kindLabel(kind) {
@@ -116,7 +263,11 @@ function dealCard(item) {
     ? '<span class="badge off">Es el menor precio actual</span>'
     : `<span class="badge ghost">No es el menor precio · ${attr(bestStore)} tiene ${money(item.best_price)}</span>`;
   const discountSummary = `Comercial: ${Math.round(item.commercial_discount || item.published_discount || 0)}% · ahorro real: ${Math.round(item.real_savings_percent || item.verified_discount || 0)}%`;
-  const fresh = typeof updatedAgo === "function" ? updatedAgo(item.updated_at) : "";
+  const fresh = typeof updatedStamp === "function"
+    ? updatedStamp(item.updated_at)
+    : typeof updatedAgo === "function"
+      ? updatedAgo(item.updated_at)
+      : "";
   const suspicion = (item.suspicion_labels || []).length
     ? `<p class="muted">${attr((item.suspicion_labels || []).join(" · "))}</p>`
     : "";
@@ -146,6 +297,10 @@ function dealCard(item) {
         ${timesfmSignal(item)}
         ${history}
         <ul class="compare-stores">${stores}</ul>
+        <div class="card-footer">
+          ${item.url ? `<a class="muted" href="${attr(item.url)}" target="_blank" rel="noreferrer">ir a la tienda</a>` : "<span></span>"}
+          ${typeof priceAlertButtonHtml === "function" ? priceAlertButtonHtml({ store: item.store, productId: item.product_id, name: item.name }) : ""}
+        </div>
       </div>
     </article>`;
 }
@@ -170,20 +325,26 @@ function render(data) {
       timesfmSummary.textContent = "";
     }
   }
+  const dayNote = data.day && data.day !== chileToday
+    ? ` del ${formatDayLabel(data.day)}`
+    : " de hoy";
   if (!comparacion && !historial && !iguales && !superOnly) {
     $("summary").textContent = "Activa al menos un tipo de oferta.";
   } else if (total) {
     const minGap = Number($("min-gap").value) || 0;
     const gapNote = minGap ? ` Mínimo ${minGap}% más barato que la otra tienda.` : "";
     const kind = superOnly ? ` super ofertas (más de ${data.min_super || 50}% de descuento real)` : " ofertas reales";
-    $("summary").textContent = `Mostrando ${rows.length} de ${total.toLocaleString("es-CL")}${kind}.${gapNote}`;
+    $("summary").textContent = `Mostrando ${rows.length} de ${total.toLocaleString("es-CL")}${kind}${dayNote}.${gapNote}`;
   } else {
-    $("summary").textContent = "No hay productos que cumplan esas comparaciones con los precios guardados.";
+    $("summary").textContent = `No hay productos${dayNote} que cumplan esas comparaciones con los precios guardados.`;
   }
   $("deals").innerHTML = rows.length
     ? rows.map(dealCard).join("")
     : `<p class="panel muted">Sin ofertas reales para estos filtros.</p>`;
   saveProductTrail(rows);
+  if (typeof hydratePriceAlertButtons === "function") {
+    hydratePriceAlertButtons($("deals")).catch(() => {});
+  }
   const pager = RetailPager.render(data.page || 1, totalPages);
   page = pager.page;
 }
@@ -201,6 +362,8 @@ function params() {
   if ($("category").value) query.set("category", $("category").value);
   if ($("store").value) query.set("store", $("store").value);
   if (Number($("min-gap").value) > 0) query.set("min_gap", $("min-gap").value);
+  const day = $("day").value || chileToday || new URLSearchParams(location.search).get("day") || "";
+  if (day) query.set("day", day);
   return query;
 }
 
@@ -214,10 +377,6 @@ async function load() {
   const response = await fetch(`/api/reales?${params()}`);
   const data = await response.json().catch(() => ({}));
   if (token !== loadToken) return;
-  if (response.status === 401) {
-    location.href = "/entrar?next=/reales";
-    return;
-  }
   if (!response.ok) {
     flash(typeof data.detail === "string" ? data.detail : response.statusText);
     $("deals").innerHTML = `<p class="panel muted">No se pudieron cargar las ofertas.</p>`;
@@ -225,6 +384,7 @@ async function load() {
     return;
   }
   $("flash").hidden = true;
+  setAvailableDays(data.days || [], data.day, data.today || data.day);
   fillSelect("store", data.stores || [], $("store").value, "todas");
   fillSelect("category", data.categories || [], $("category").value, "todas");
   render(data);
@@ -247,8 +407,49 @@ function reload() {
   load();
 }
 
+function applyStartFilters() {
+  const url = new URLSearchParams(location.search);
+  const day = String(url.get("day") || "").trim();
+  if (day) $("day").value = day;
+  if (pageSearchInput && url.get("q")) pageSearchInput.value = url.get("q");
+}
+
 ["comparacion", "historial", "iguales", "super-filter", "category", "store", "min-gap", "size"].forEach((id) => {
   $(id).addEventListener("change", reload);
+});
+
+$("day-picker-toggle")?.addEventListener("click", (event) => {
+  event.preventDefault();
+  openDayPicker(!dayPickerOpen);
+});
+$("day-prev-month")?.addEventListener("click", () => {
+  if (!calendarCursor) return;
+  calendarCursor = shiftMonth(calendarCursor, -1);
+  renderDayCalendar();
+});
+$("day-next-month")?.addEventListener("click", () => {
+  if (!calendarCursor) return;
+  calendarCursor = shiftMonth(calendarCursor, 1);
+  renderDayCalendar();
+});
+$("day-today")?.addEventListener("click", () => {
+  closeDayPicker();
+  setDayValue("", { reload: true });
+});
+$("day-picker-grid")?.addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-day]");
+  if (!button) return;
+  closeDayPicker();
+  setDayValue(button.dataset.day, { reload: true });
+});
+document.addEventListener("click", (event) => {
+  if (!dayPickerOpen) return;
+  const field = event.target.closest(".day-picker-field");
+  if (field) return;
+  closeDayPicker();
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && dayPickerOpen) closeDayPicker();
 });
 
 pageSearchForm?.addEventListener("submit", (event) => {
@@ -270,4 +471,5 @@ $("next").addEventListener("click", () => {
   }
 });
 
+applyStartFilters();
 load();

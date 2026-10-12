@@ -211,8 +211,13 @@ function renderCard(data) {
     : "";
   const cheaper = data.cheapest && data.cheapest.store !== item.store ? data.cheapest : null;
   const cheapest = cheaper ? `<p class="cheapest">${cheaperElsewhereLink(cheaper)}</p>` : "";
-  const fresh = typeof updatedAgo === "function" && item.updated_at
-    ? `<p class="muted" id="price-freshness">${attr(updatedAgo(item.updated_at))}</p>`
+  const freshText = typeof updatedStamp === "function" && item.updated_at
+    ? updatedStamp(item.updated_at)
+    : typeof updatedAgo === "function" && item.updated_at
+      ? updatedAgo(item.updated_at)
+      : "";
+  const fresh = freshText
+    ? `<p class="muted" id="price-freshness">${attr(freshText)}</p>`
     : `<p class="muted" id="price-freshness" hidden></p>`;
   $("card").innerHTML = `
     <div class="product-head">
@@ -228,6 +233,7 @@ function renderCard(data) {
         ${commercialDetails(item)}
         ${payments(item)}
         <p class="verdict ${stats.level || "unknown"}">${stats.verdict || ""}</p>
+        ${opportunityScoreMarkup(item)}
         ${timing(item.timing)}
         ${cheapest}
         <div class="product-cta">${storeOutLink(item, "Ver oferta")} <button type="button" class="btn secondary" id="refresh-price">Actualizar precio</button> <a id="compare-link" class="btn" href="${attr(compareUrl(item))}" data-auth hidden>Comparar</a></div>
@@ -849,7 +855,7 @@ function chartPointLabel(point) {
   return `${chartDateLabel(point.day, true)} · Precio oferta: ${money(point.offer)}`;
 }
 
-/** Índices con etiqueta visible: inicio, actual, mín/máx globales y cambios relevantes. */
+/** Índices con etiqueta visible: inicio, actual, mín/máx globales y extremos locales relevantes. */
 function chartValueLabelIndexes(observations) {
   const offerIndexes = observations
     .map((point, index) => (point.offer != null ? index : -1))
@@ -867,23 +873,17 @@ function chartValueLabelIndexes(observations) {
   labeled.add(maxIndex);
 
   const maxPrice = Math.max(...offerIndexes.map((index) => observations[index].offer));
-  const threshold = Math.max(Math.round(maxPrice * 0.01), 1000);
-  for (let rank = 0; rank < offerIndexes.length; rank += 1) {
+  const threshold = Math.max(Math.round(maxPrice * 0.015), 2000);
+  for (let rank = 1; rank < offerIndexes.length - 1; rank += 1) {
     const index = offerIndexes[rank];
     const price = observations[index].offer;
-    if (rank > 0) {
-      const prev = observations[offerIndexes[rank - 1]].offer;
-      if (Math.abs(price - prev) >= threshold) labeled.add(index);
-    }
-    if (rank > 0 && rank < offerIndexes.length - 1) {
-      const prev = observations[offerIndexes[rank - 1]].offer;
-      const next = observations[offerIndexes[rank + 1]].offer;
-      const localMin = price <= prev && price <= next;
-      const localMax = price >= prev && price >= next;
-      if ((localMin || localMax) && (Math.abs(price - prev) >= threshold || Math.abs(price - next) >= threshold)) {
-        labeled.add(index);
-      }
-    }
+    const prev = observations[offerIndexes[rank - 1]].offer;
+    const next = observations[offerIndexes[rank + 1]].offer;
+    const localMin = price < prev && price <= next;
+    const localMax = price > prev && price >= next;
+    if (!(localMin || localMax)) continue;
+    if (Math.abs(price - prev) < threshold && Math.abs(price - next) < threshold) continue;
+    labeled.add(index);
   }
   return [...labeled].sort((left, right) => left - right);
 }
@@ -897,19 +897,65 @@ function chartValueLabelMarkup(point, index, total, x, y, plotTop) {
 
 function mountChartPointInteractions(container, observations) {
   const tooltip = $("chart-tooltip");
-  for (const target of container.querySelectorAll("[data-chart-point]")) {
-    const show = () => {
-      const point = observations[Number(target.dataset.chartPoint)];
-      if (point && tooltip) tooltip.textContent = chartPointLabel(point);
-      target.classList.add("is-hot");
-    };
-    const hide = () => target.classList.remove("is-hot");
-    target.addEventListener("click", show);
-    target.addEventListener("focus", show);
-    target.addEventListener("blur", hide);
-    target.addEventListener("mouseenter", show);
-    target.addEventListener("mouseleave", hide);
+  const hits = [...container.querySelectorAll("[data-chart-point]")];
+  const labeledHits = hits.filter((target) => target.classList.contains("has-value-label"));
+  let hot = null;
+
+  const setHot = (target) => {
+    if (hot === target) return;
+    if (hot) hot.classList.remove("is-hot");
+    hot = target || null;
+    if (!hot) return;
+    hot.classList.add("is-hot");
+    const point = observations[Number(hot.dataset.chartPoint)];
+    if (point && tooltip) tooltip.textContent = chartPointLabel(point);
+  };
+
+  for (const target of hits) {
+    target.addEventListener("click", () => setHot(target));
+    target.addEventListener("focus", () => setHot(target));
+    target.addEventListener("blur", () => {
+      if (hot === target) setHot(null);
+    });
+    target.addEventListener("mouseenter", () => setHot(target));
+    target.addEventListener("mouseleave", () => {
+      if (hot === target) setHot(null);
+    });
   }
+
+  const svg = container.querySelector("svg.chart");
+  if (!svg || !labeledHits.length) return;
+
+  const nearestLabeled = (clientX, clientY) => {
+    const rect = svg.getBoundingClientRect();
+    if (!rect.width || !rect.height) return null;
+    const view = svg.viewBox.baseVal;
+    const scaleX = view.width / rect.width;
+    const scaleY = view.height / rect.height;
+    const x = (clientX - rect.left) * scaleX + view.x;
+    const y = (clientY - rect.top) * scaleY + view.y;
+    const maxDist = 28 * Math.max(scaleX, scaleY);
+    let best = null;
+    let bestDist = maxDist;
+    for (const target of labeledHits) {
+      const point = target.querySelector(".chart-point");
+      if (!point) continue;
+      const cx = Number(point.getAttribute("cx"));
+      const cy = Number(point.getAttribute("cy"));
+      const dist = Math.hypot(cx - x, cy - y);
+      if (dist < bestDist) {
+        bestDist = dist;
+        best = target;
+      }
+    }
+    return best;
+  };
+
+  svg.addEventListener("mousemove", (event) => {
+    const near = nearestLabeled(event.clientX, event.clientY);
+    if (near) setHot(near);
+  });
+  svg.addEventListener("mouseleave", () => setHot(null));
 }
 
 /** Gráfico único: solo precio oferta (observaciones reales, sin rellenar días). */
@@ -984,10 +1030,10 @@ function renderCharts() {
       ${valueLabel}
     </g>`;
   }).join("");
-  const currentIndex = observations.length - 1;
-  const minimumIndex = observations.findIndex((point) => point.offer === offerStats.min);
-  const sameMarker = currentIndex === minimumIndex;
-  const markers = `
+  const currentIndex = observations.reduce((last, point, index) => (point.offer != null ? index : last), -1);
+  const minimumIndex = observations.findIndex((point) => point.offer != null && point.offer === offerStats.min);
+  const sameMarker = currentIndex >= 0 && currentIndex === minimumIndex;
+  const markers = minimumIndex < 0 || currentIndex < 0 ? "" : `
     <circle class="chart-marker minimum" cx="${toX(minimumIndex).toFixed(1)}" cy="${toY(observations[minimumIndex].offer).toFixed(1)}" r="8">
       <title>Mínimo del período: ${money(offerStats.min)}</title>
     </circle>
@@ -1230,13 +1276,42 @@ function otherRow(item) {
   const offer = item.url
     ? `<a class="deal-cta offer" href="${attr(item.url)}" target="_blank" rel="noreferrer">Ver oferta</a>`
     : "";
+  const fresh = typeof updatedStamp === "function"
+    ? updatedStamp(item.updated_at)
+    : typeof updatedAgo === "function"
+      ? updatedAgo(item.updated_at)
+      : "";
   return `
     <tr class="${item.url ? "click-offer" : ""}" data-store="${attr(otherStoreKey(item))}" data-offer="${attr(`${item.store || ""}:${item.product_id || ""}`)}" data-price="${item.price ?? ""}" ${item.url ? `data-url="${attr(item.url)}"` : ""}>
-      <td>${storeNameLink(item)}${soldBy(item)}</td>
+      <td>${storeNameLink(item)}${soldBy(item)}${fresh ? `<div class="muted deal-fresh">${attr(fresh)}</div>` : ""}</td>
       <td class="price">${money(item.price)}</td>
       <td class="muted">${stats.median ? money(stats.median) : "—"}</td>
       <td class="offer-actions">${ficha}${offer}</td>
     </tr>`;
+}
+
+function otherCompareCard(item, { best = false } = {}) {
+  const stats = item.stats || {};
+  const ficha = productUrl(item);
+  const fresh = typeof updatedStamp === "function"
+    ? updatedStamp(item.updated_at)
+    : typeof updatedAgo === "function"
+      ? updatedAgo(item.updated_at)
+      : "";
+  return `
+    <article class="compare-store-card${best ? " is-best" : ""}">
+      <div class="compare-store-card-head">
+        ${storeLogo(item.display_store || item.store, item.store_title || item.store)}
+        ${best ? `<span class="deal-tag">Mejor precio</span>` : ""}
+      </div>
+      <p class="compare-store-card-price">${money(item.price)}</p>
+      <p class="muted">${stats.median ? `Habitual ${money(stats.median)}` : "Sin precio habitual"}</p>
+      ${fresh ? `<p class="muted deal-fresh">${attr(fresh)}</p>` : ""}
+      <div class="offer-actions">
+        <a class="deal-cta" href="${attr(ficha)}">Ver ficha</a>
+        ${item.url ? `<a class="deal-cta offer" href="${attr(item.url)}" target="_blank" rel="noreferrer">Ver oferta</a>` : ""}
+      </div>
+    </article>`;
 }
 
 function renderOthers(others) {
@@ -1244,6 +1319,13 @@ function renderOthers(others) {
   if (!rows.length) return;
   $("others-panel").hidden = false;
   $("others").innerHTML = rows.map(otherRow).join("");
+  const grid = $("others-cards");
+  if (grid) {
+    const bestPrice = Math.min(...rows.map((item) => Number(item.price)).filter(Number.isFinite));
+    grid.innerHTML = rows
+      .map((item) => otherCompareCard(item, { best: Number(item.price) === bestPrice }))
+      .join("");
+  }
 }
 
 function findOtherRowByStore(item) {
@@ -1720,6 +1802,13 @@ function priceAlertBox() {
   return box;
 }
 
+function opportunityScoreMarkup(item) {
+  const score = Number(item.offer_score ?? item.opportunity?.offer_score);
+  if (!Number.isFinite(score)) return "";
+  const reason = item.opportunity?.reason || "";
+  return `<p class="opportunity-score muted">Puntaje ${score.toLocaleString("es-CL")}/100${reason ? ` · ${attr(reason)}` : ""}</p>`;
+}
+
 function paintPriceAlert(box, item, state) {
   const user = state && state.user;
   if (!user) {
@@ -1728,11 +1817,20 @@ function paintPriceAlert(box, item, state) {
     return;
   }
   const active = Boolean(state.active);
+  const target = state.target_price;
   const note = active
-    ? "Te avisamos por los canales de tu cuenta (push, correo, Telegram) si el precio cambia."
-    : "Te avisamos por los canales de tu cuenta (push, correo, Telegram) si el precio sube o baja.";
+    ? target
+      ? `Te avisamos cuando el precio de oferta sea ${money(target)} o menos.`
+      : "Te avisamos por los canales de tu cuenta (push, correo, Telegram) si el precio cambia."
+    : "Opcional: indica un precio máximo. Vacío = avisar ante cualquier cambio.";
+  const targetField = active
+    ? ""
+    : `<label class="muted price-alert-target-label">Precio objetivo (opcional)
+        <input type="number" class="price-alert-target" min="1" step="1" inputmode="numeric" placeholder="Ej. 379990">
+      </label>`;
   box.innerHTML = `
-    <button type="button" class="secondary${active ? " current" : ""}" data-price-alert="${active ? "off" : "on"}" data-store="${attr(item.store)}" data-id="${attr(item.product_id)}">${active ? "Alerta activa" : "Activar alerta"}</button>
+    ${targetField}
+    <button type="button" class="secondary${active ? " current" : ""}" data-price-alert="${active ? "off" : "on"}" data-store="${attr(item.store)}" data-id="${attr(item.product_id)}" data-name="${attr(item.name || "")}">${active ? "Alerta activa" : "Activar alerta"}</button>
     <p class="muted price-alert-note">${note}</p>`;
 }
 
@@ -1752,7 +1850,13 @@ async function mountPriceAlert(item) {
     paintPriceAlert(box, item, null);
     return;
   }
-  paintPriceAlert(box, item, { user, active: data.active, email: data.email || user.email });
+  paintPriceAlert(box, item, {
+    user,
+    active: data.active,
+    email: data.email || user.email,
+    target_price: data.target_price,
+    any_change: data.any_change,
+  });
 }
 
 $("others").addEventListener("click", (event) => {

@@ -15,9 +15,25 @@ from retail.auth import normalize_email
 from retail.registry import group_of, list_stores
 from retail.search import connect_repo
 from retail.web.deps import clear_session, current_user, repo_or_503, set_session
-from retail.notification_preferences import normalize_preferences
+from retail.membership import UPGRADE_PATH, has_advanced_account_prefs
+from retail.notification_preferences import (
+    ADVANCED_PREF_KEYS,
+    advanced_preference_overrides,
+    normalize_preferences,
+)
 from retail.predictive_alerts import anticipated_drop_validation_status, predictive_validation_status
 from retail.store_categories import list_store_categories
+
+
+def _membership_required_detail(message: str, *, keys: list[str] | None = None) -> dict:
+    detail: dict = {
+        "code": "membership_required",
+        "message": message,
+        "upgrade_path": UPGRADE_PATH,
+    }
+    if keys:
+        detail["keys"] = keys
+    return detail
 
 router = APIRouter()
 
@@ -305,6 +321,14 @@ async def update_store_preferences(request: Request) -> dict:
     store = repo_or_503()
     try:
         user = current_user(request, store, required=True) or {}
+        document = store.find_user_by_id(str(user.get("id") or "")) or {}
+        if not has_advanced_account_prefs(document):
+            raise HTTPException(
+                status_code=403,
+                detail=_membership_required_detail(
+                    "Las tiendas preferidas y excluidas forman parte de la membresía."
+                ),
+            )
         favorites = _normalize_store_preferences(body.get("favorites"))
         excluded = _normalize_store_preferences(body.get("excluded"))
         excluded_set = set(excluded)
@@ -434,10 +458,27 @@ async def update_notification_settings(request: Request) -> dict:
         telegram = _normalize_telegram_username(body.get("telegram"))
         if len(telegram) > 100:
             raise HTTPException(status_code=400, detail="El usuario o chat de Telegram es demasiado largo.")
-        preferences = normalize_preferences(body.get("preferences"))
+        current = store.find_user_by_id(str(user.get("id") or "")) or {}
+        prefs_raw = body.get("preferences")
+        if not has_advanced_account_prefs(current):
+            overrides = advanced_preference_overrides(prefs_raw)
+            if overrides:
+                raise HTTPException(
+                    status_code=403,
+                    detail=_membership_required_detail(
+                        "Los filtros exclusivos del correo y umbrales de descuento "
+                        "forman parte de la membresía.",
+                        keys=overrides,
+                    ),
+                )
+        preferences = normalize_preferences(prefs_raw)
+        if not has_advanced_account_prefs(current):
+            # Conserva umbrales/categorías ya guardados; la cuenta free no los edita.
+            kept = normalize_preferences(current.get("notification_preferences"))
+            for key in ADVANCED_PREF_KEYS:
+                preferences[key] = kept[key]
         if "telegram" in preferences["channels"] and not telegram:
             raise HTTPException(status_code=400, detail="Indica tu usuario de Telegram y conecta el bot.")
-        current = store.find_user_by_id(str(user.get("id") or "")) or {}
         fields = {"notification_preferences": preferences}
         unset: tuple[str, ...] = ()
         if telegram.lstrip("-").isdigit():

@@ -74,31 +74,57 @@ async function json(url, options) {
   return payload;
 }
 
-function target(item) {
-  if (item.target_price) return `bajo ${money(item.target_price)}`;
-  if (item.drop_percent) return `baja ${item.drop_percent}%`;
+function storeLabel(store) {
+  const key = String(store || "").trim().toLowerCase();
+  if (!key) return "—";
+  if (typeof window.storeTitle === "function") {
+    try {
+      return window.storeTitle(key) || key;
+    } catch (_error) {
+      /* fall through */
+    }
+  }
+  return key;
+}
+
+function productHref(item) {
+  const store = String(item.store || "").trim();
+  const id = String(item.product_id || "").trim();
+  if (!store || !id) return "";
+  return `/producto?store=${encodeURIComponent(store)}&id=${encodeURIComponent(id)}`;
+}
+
+function alertThresholdLabel(item) {
+  const target = Number(item.target_price);
+  if (target > 0 && item.any_change === false) {
+    return typeof money === "function" ? `≤ ${money(target)}` : `≤ ${target}`;
+  }
   return "cualquier cambio";
 }
 
 function render(items) {
   $("watches").innerHTML = items.length
     ? items
-        .map(
-          (item) => `
+        .map((item) => {
+          const href = productHref(item);
+          const name = item.name || item.product_id || "Producto";
+          const title = href
+            ? `<a href="${attr(href)}">${name}</a>`
+            : name;
+          return `
           <tr>
-            <td>${item.name || item.query}</td>
-            <td class="muted">${item.query}</td>
-            <td>${target(item)}</td>
-            <td class="muted">${item.last_notified_price ? money(item.last_notified_price) : "sin avisos"}</td>
-            <td><button type="button" class="secondary remove" data-id="${attr(item.id)}">Dejar de seguir</button></td>
-          </tr>`
-        )
+            <td>${title}</td>
+            <td class="muted">${storeLabel(item.store)}</td>
+            <td>${attr(alertThresholdLabel(item))}</td>
+            <td><button type="button" class="secondary remove" data-store="${attr(item.store)}" data-id="${attr(item.product_id)}">Quitar alerta</button></td>
+          </tr>`;
+        })
         .join("")
-    : `<tr><td colspan="5" class="muted">Todavía no sigues ningún producto. Búscalo y usa el botón "Seguir".</td></tr>`;
+    : `<tr><td colspan="4" class="muted">No tienes alertas activas. En la ficha de un producto usa «Activar alerta».</td></tr>`;
 }
 
 async function load() {
-  render(await json("/api/watches"));
+  render(await json("/api/price-alerts"));
 }
 
 function checked(name) {
@@ -221,6 +247,23 @@ function refreshEmailCategorySummary() {
     : "Todas las categorías";
 }
 
+function hasAdvancedAccountPrefs(user) {
+  const tier = user?.membership?.tier || (user?.role === "admin" ? "admin" : "user");
+  return tier === "paid" || tier === "admin";
+}
+
+function applyAdvancedPrefsVisibility(user) {
+  const advanced = hasAdvancedAccountPrefs(user);
+  const filters = $("advanced-notification-prefs");
+  const upgrade = $("advanced-prefs-upgrade");
+  const stores = $("store-preferences-panel");
+  const storesUpgrade = $("store-preferences-upgrade");
+  if (filters) filters.hidden = !advanced;
+  if (upgrade) upgrade.hidden = advanced;
+  if (stores) stores.hidden = !advanced;
+  if (storesUpgrade) storesUpgrade.hidden = advanced;
+}
+
 async function loadNotifications() {
   const data = await json("/api/account/notifications");
   const preferences = data.preferences || {};
@@ -229,10 +272,12 @@ async function loadNotifications() {
   $("notice-email").value = data.email || "";
   $("notice-telegram").value = data.telegram || "";
   renderTelegramStatus(Boolean(data.telegram_connected), data.telegram || "");
-  $("min-discount-self").value = preferences.min_discount_self ?? 0;
-  $("min-discount-stores").value = preferences.min_discount_other_stores ?? 0;
-  $("email-min-real-discount").value = preferences.email_min_real_discount ?? 0;
-  renderEmailCategories(data.notification_categories, preferences.email_categories);
+  if (hasAdvancedAccountPrefs(window.retailUser)) {
+    $("min-discount-self").value = preferences.min_discount_self ?? 0;
+    $("min-discount-stores").value = preferences.min_discount_other_stores ?? 0;
+    $("email-min-real-discount").value = preferences.email_min_real_discount ?? 0;
+    renderEmailCategories(data.notification_categories, preferences.email_categories);
+  }
   const predictive = data.predictive || {};
   const anticipated = predictive.anticipated || {};
   const baseStatus = predictive.enabled
@@ -301,9 +346,9 @@ async function loadStorePreferences() {
   renderStorePreferences($("store-preference-filter").value);
 }
 
-$("store-preference-filter").addEventListener("input", (event) => renderStorePreferences(event.target.value));
+$("store-preference-filter")?.addEventListener("input", (event) => renderStorePreferences(event.target.value));
 
-$("store-preference-list").addEventListener("change", (event) => {
+$("store-preference-list")?.addEventListener("change", (event) => {
   const input = event.target.closest("input[data-store-state]");
   if (!input) return;
   const favorites = new Set(storePreferenceData.favorites || []);
@@ -320,7 +365,7 @@ $("store-preference-list").addEventListener("change", (event) => {
   refreshStorePreferenceSummary();
 });
 
-$("store-preference-list").addEventListener("click", (event) => {
+$("store-preference-list")?.addEventListener("click", (event) => {
   const button = event.target.closest("button[data-group-state]");
   if (!button) return;
   const control = button.closest("[data-store-group]");
@@ -340,9 +385,13 @@ $("store-preference-list").addEventListener("click", (event) => {
   renderStorePreferences($("store-preference-filter").value);
 });
 
-$("store-preferences-form").addEventListener("submit", async (event) => {
+$("store-preferences-form")?.addEventListener("submit", async (event) => {
   event.preventDefault();
   const form = event.currentTarget;
+  if (!hasAdvancedAccountPrefs(window.retailUser)) {
+    flash("Las tiendas preferidas y excluidas forman parte de la membresía.", false, form);
+    return;
+  }
   try {
     const data = await saving(form, () => json("/api/account/store-preferences", {
       method: "PUT",
@@ -387,19 +436,22 @@ $("notification-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   const form = event.currentTarget;
   try {
+    const preferences = {
+      channels: checked("notice-channel"),
+      kinds: checked("notice-kind"),
+    };
+    if (hasAdvancedAccountPrefs(window.retailUser)) {
+      preferences.min_discount_self = $("min-discount-self").value;
+      preferences.min_discount_other_stores = $("min-discount-stores").value;
+      preferences.email_categories = checked("email-category");
+      preferences.email_min_real_discount = $("email-min-real-discount").value;
+    }
     const data = await saving(form, () => json("/api/account/notifications", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         telegram: $("notice-telegram").value.trim(),
-        preferences: {
-          channels: checked("notice-channel"),
-          kinds: checked("notice-kind"),
-          min_discount_self: $("min-discount-self").value,
-          min_discount_other_stores: $("min-discount-stores").value,
-          email_categories: checked("email-category"),
-          email_min_real_discount: $("email-min-real-discount").value,
-        },
+        preferences,
       }),
     }));
     if (data === undefined) return;
@@ -464,14 +516,14 @@ $("telegram-verify").addEventListener("click", async () => {
   }
 });
 
-$("email-categories").addEventListener("change", refreshEmailCategorySummary);
+$("email-categories")?.addEventListener("change", refreshEmailCategorySummary);
 
-$("email-categories-all").addEventListener("click", () => {
+$("email-categories-all")?.addEventListener("click", () => {
   document.querySelectorAll('input[name="email-category"]').forEach((item) => { item.checked = true; });
   refreshEmailCategorySummary();
 });
 
-$("email-categories-none").addEventListener("click", () => {
+$("email-categories-none")?.addEventListener("click", () => {
   document.querySelectorAll('input[name="email-category"]').forEach((item) => { item.checked = false; });
   refreshEmailCategorySummary();
 });
@@ -479,9 +531,14 @@ $("email-categories-none").addEventListener("click", () => {
 $("watches").addEventListener("click", async (event) => {
   const button = event.target.closest(".remove");
   if (!button) return;
+  const store = button.dataset.store || "";
+  const productId = button.dataset.id || "";
+  if (!store || !productId) return;
   try {
-    await json(`/api/watches/${button.dataset.id}`, { method: "DELETE" });
-    await load();
+    const params = new URLSearchParams({ store, id: productId });
+    await json(`/api/price-alert?${params}`, { method: "DELETE" });
+    await Promise.all([load(), loadMembership()]);
+    flash("Alerta quitada.", true, button);
   } catch (error) {
     flash(error.message, false, button);
   }
@@ -510,7 +567,7 @@ async function loadMembership() {
     const summary = $("membership-summary");
     const quotaEl = $("membership-quota");
     if (role === "admin") {
-      summary.textContent = "Cuenta administrador: sin límite práctico de alertas.";
+      summary.textContent = "Cuenta administrador.";
       quotaEl.textContent = `Alertas activas: ${quota.count ?? 0}.`;
       $("promo-form").hidden = true;
       return;
@@ -545,7 +602,12 @@ $("promo-form")?.addEventListener("submit", async (event) => {
     if (data === undefined) return;
     $("promo-code").value = "";
     flash(data.message || "Membresía de regalo activada.", true, form);
+    if (data.user) window.retailUser = { ...(window.retailUser || {}), ...data.user };
     await loadMembership();
+    applyAdvancedPrefsVisibility(window.retailUser);
+    if (hasAdvancedAccountPrefs(window.retailUser)) {
+      await Promise.all([loadNotifications(), loadStorePreferences()]);
+    }
   } catch (error) {
     flash(error.message || "No se pudo canjear el código.", false, form);
   }
@@ -553,18 +615,26 @@ $("promo-form")?.addEventListener("submit", async (event) => {
 
 async function ready() {
   const user = await ensureUser();
+  window.retailUser = user || null;
   $("guest-box").hidden = Boolean(user);
   $("membership-panel").hidden = !user;
   $("watch-panel").hidden = !user;
   $("watch-list").hidden = !user;
   $("notification-panel").hidden = !user;
-  $("store-preferences-panel").hidden = !user;
   $("password-panel").hidden = !user;
   if (!user) {
+    if ($("store-preferences-panel")) $("store-preferences-panel").hidden = true;
+    if ($("store-preferences-upgrade")) $("store-preferences-upgrade").hidden = true;
+    if ($("advanced-notification-prefs")) $("advanced-notification-prefs").hidden = true;
+    if ($("advanced-prefs-upgrade")) $("advanced-prefs-upgrade").hidden = true;
     render([]);
     return;
   }
-  await Promise.all([load(), loadNotifications(), loadStorePreferences(), loadPushState(), loadMembership()]);
+  applyAdvancedPrefsVisibility(user);
+  const loaders = [load(), loadNotifications(), loadPushState(), loadMembership()];
+  if (hasAdvancedAccountPrefs(user)) loaders.push(loadStorePreferences());
+  await Promise.all(loaders);
+  applyAdvancedPrefsVisibility(user);
   if (location.hash === "#membresia") {
     $("membership-panel")?.scrollIntoView({ block: "start" });
   }

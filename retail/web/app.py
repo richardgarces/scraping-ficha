@@ -318,10 +318,8 @@ def hoy() -> FileResponse:
 
 
 @app.get("/reales")
-def reales(request: Request):
-    gate = require_login_html(request, next_path="/reales")
-    if gate is not None:
-        return gate
+def reales() -> FileResponse:
+    """Ofertas verificadas: públicas (sin login)."""
     return FileResponse(STATIC / "reales.html")
 
 

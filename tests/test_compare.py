@@ -455,6 +455,48 @@ def test_collapse_display_stops_calling_mirrors_comparable():
     assert groups[0]["offers"][0]["comparable"] is False
 
 
+def test_collapse_display_keeps_one_falabella_when_two_skus_differ():
+    """Mismo producto, dos publicaciones Falabella con nombre/SKU distintos → la más barata."""
+    from retail.compare import collapse_display
+
+    groups = collapse_display(
+        [
+            {
+                "comparable": True,
+                "offers": [
+                    {
+                        "store": "falabella",
+                        "display_store": "falabella",
+                        "product_id": "111",
+                        "name": "Home Gym G9000",
+                        "price": 379990,
+                    },
+                    {
+                        "store": "hites",
+                        "display_store": "hites",
+                        "product_id": "333",
+                        "name": "Home Gym G9000",
+                        "price": 379990,
+                    },
+                    {
+                        "store": "falabella",
+                        "display_store": "falabella",
+                        "product_id": "222",
+                        "name": "Home Gym G9000 Ten Series",
+                        "price": 799990,
+                    },
+                ],
+            }
+        ]
+    )
+    offers = groups[0]["offers"]
+    assert len(offers) == 2
+    falabella = next(row for row in offers if row["store"] == "falabella")
+    assert falabella["product_id"] == "111"
+    assert falabella["price"] == 379990
+    assert any(row["store"] == "hites" for row in offers)
+
+
 def test_collapse_variants_keeps_cheapest_and_reports_range():
     from retail.compare import collapse_variants
 

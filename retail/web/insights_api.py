@@ -222,6 +222,14 @@ def product(store: str = Query(...), id: str = Query(...)) -> dict:
                 timing=card.get("timing"),
                 cheaper=cheapest_payload,
             )
+        from retail.reales import opportunity_score_for_ficha
+
+        opportunity = opportunity_score_for_ficha(
+            card, others=others, cheapest=cheapest_payload
+        )
+        if opportunity:
+            card["opportunity"] = opportunity
+            card["offer_score"] = opportunity.get("offer_score")
         return {
             "product": card,
             "others": others,
@@ -428,8 +436,6 @@ def deals(
             page=page,
             size=size,
         )
-        user = current_user(request, repo)
-        runs = repo.recent_runs(5) if user and user.get("role") == "admin" else []
         from retail.store_display import display_store
 
         titles = {spec.id: spec.title for spec in list_stores()}
@@ -449,7 +455,6 @@ def deals(
             "size": found["size"],
             "total_saving": found["total_saving"],
             "deals": found["items"],
-            "runs": runs,
         }
     finally:
         repo.close()
@@ -518,10 +523,8 @@ def catalog(
 ) -> dict:
     repo = _repo_or_404()
     try:
-        want_counts = False
-        if include_counts:
-            user = current_user(request, repo)
-            want_counts = bool(user and user.get("role") == "admin")
+        user = current_user(request, repo)
+        want_counts = bool(include_counts and user and user.get("role") == "admin")
 
         facets = repo.browse_facets(category=category, store=store, include_counts=want_counts)
         # Si cambió la categoría, un store/brand anterior puede ya no pertenecer
@@ -541,6 +544,15 @@ def catalog(
             facets = repo.browse_facets(category=category, store=store, include_counts=want_counts)
         from retail.search_cache import rewrite_search_query
 
+        # Productos con alerta activa del usuario van primero en el catálogo.
+        priority_keys: list[tuple[str, str]] = []
+        if user and hasattr(repo, "list_price_alerts"):
+            for alert in repo.list_price_alerts(user["id"], active_only=True):
+                store_id = str(alert.get("store") or "").strip().lower()
+                product_id = str(alert.get("product_id") or "").strip()
+                if store_id and product_id:
+                    priority_keys.append((store_id, product_id))
+
         found = repo.browse(
             text=rewrite_search_query(q) if q else q,
             category=category,
@@ -553,6 +565,7 @@ def catalog(
             sort=sort,
             page=page,
             size=size,
+            priority_keys=priority_keys or None,
         )
         from retail.store_display import display_store
 
@@ -575,19 +588,15 @@ def reales(
     q: str | None = Query(default=None),
     store: str | None = Query(default=None),
     category: str | None = Query(default=None),
+    day: str | None = Query(default=None),
     min_gap: float = Query(default=0, ge=0, le=100),
     super_ofertas: bool = Query(default=False, alias="super"),
     page: int = Query(default=1, ge=1),
     size: int = Query(default=40, ge=1, le=120),
 ) -> dict:
+    """Ofertas verificadas: API pública."""
     repo = _repo_or_404()
     try:
-        current_user(
-            request,
-            repo,
-            required=True,
-            detail="Inicia sesión para ver ofertas reales.",
-        )
         from retail.reales import MIN_SUPER_PERCENT
 
         found = repo.real_offers(
@@ -597,6 +606,7 @@ def reales(
             text=q,
             store=store,
             category=category,
+            day=day,
             min_gap=min_gap,
             min_super=MIN_SUPER_PERCENT if super_ofertas else None,
             page=page,
@@ -619,17 +629,11 @@ def super_ofertas(
     page: int = Query(default=1, ge=1),
     size: int = Query(default=40, ge=1, le=120),
 ) -> dict:
-    """Ofertas reales cuyo descuento o brecha entre tiendas supera el 50%."""
+    """Ofertas reales cuyo descuento o brecha entre tiendas supera el 50%. API pública."""
     from retail.reales import MIN_SUPER_PERCENT
 
     repo = _repo_or_404()
     try:
-        current_user(
-            request,
-            repo,
-            required=True,
-            detail="Inicia sesión para ver super ofertas.",
-        )
         found = repo.real_offers(
             comparacion=True,
             historial=True,
@@ -945,6 +949,19 @@ def list_watches(request: Request) -> list[dict]:
         repo.close()
 
 
+@router.get("/api/price-alerts")
+def list_price_alerts(request: Request) -> list[dict]:
+    """Alertas activas del usuario logueado (cupo de membresía / página Siguiendo)."""
+    repo = _repo_or_404()
+    try:
+        user = current_user(request, repo, required=True)
+        if hasattr(repo, "list_price_alerts"):
+            return repo.list_price_alerts(user["id"], active_only=True)
+        return []
+    finally:
+        repo.close()
+
+
 @router.post("/api/watches")
 async def create_watch(request: Request) -> dict:
     body = await request.json()
@@ -1034,6 +1051,8 @@ def price_alert_status(request: Request, store: str = Query(...), id: str = Quer
             "logged_in": True,
             "active": bool(found),
             "email": user.get("email") or "",
+            "target_price": (found or {}).get("target_price"),
+            "any_change": bool((found or {}).get("any_change", True)) if found else True,
             "quota": {
                 "count": quota["count"],
                 "limit": quota["limit"],
@@ -1067,7 +1086,16 @@ async def activate_price_alert(request: Request) -> dict:
             status = 403 if isinstance(detail, dict) and detail.get("code") == "alert_limit" else 400
             raise HTTPException(status_code=status, detail=detail)
         document = repo.product_detail(store_id, product_id) or {}
-        repo.save_price_alert(
+        target_raw = body.get("target_price")
+        target_price = None
+        if target_raw not in (None, ""):
+            try:
+                target_price = int(target_raw)
+            except (TypeError, ValueError) as exc:
+                raise HTTPException(status_code=400, detail="Precio objetivo inválido.") from exc
+            if target_price <= 0:
+                raise HTTPException(status_code=400, detail="Precio objetivo inválido.")
+        saved = repo.save_price_alert(
             {
                 "user_id": user["id"],
                 "email": user.get("email") or "",
@@ -1075,8 +1103,7 @@ async def activate_price_alert(request: Request) -> dict:
                 "product_id": product_id,
                 "name": document.get("name") or body.get("name") or "",
                 "url": document.get("url") or "",
-                "any_change": True,
-                "watch_changes": True,
+                "target_price": target_price,
             }
         )
         try:
@@ -1102,6 +1129,8 @@ async def activate_price_alert(request: Request) -> dict:
         return {
             "active": True,
             "email": user.get("email") or "",
+            "target_price": saved.get("target_price"),
+            "any_change": bool(saved.get("any_change", True)),
             "quota": {
                 "count": quota["count"],
                 "limit": quota["limit"],

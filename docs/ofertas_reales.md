@@ -2,7 +2,7 @@
 
 Página `/reales` (API `/api/reales`). Lista avisos cuyo descuento se sostiene al **comparar tiendas** o al **historial**, no solo el “antes” de vitrina.
 
-Requiere sesión. Código: `retail/reales.py`, listado en `retail/mongo.py` (`real_offers`), UI en `retail/web/static/reales.html` + `reales.js`.
+Requiere sesión. Por defecto solo el **día Chile actual** (`America/Santiago`); query `?day=YYYY-MM-DD` y el filtro «Día» permiten otro día con marcas en `daily_real_offers`. Código: `retail/reales.py`, listado en `retail/mongo.py` (`real_offers`), UI en `retail/web/static/reales.html` + `reales.js`.
 
 ## Por qué a veces no hay productos
 

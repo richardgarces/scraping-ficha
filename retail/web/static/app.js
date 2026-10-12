@@ -104,8 +104,68 @@ function renderCategoryShortcuts(categories) {
       </a>`;
   }).join("");
   section.removeAttribute("aria-busy");
-  section.hidden = Boolean(currentQuery);
+  // Home Meincart: sin carrusel de categorías; el catálogo queda en /catalogo.
+  section.hidden = true;
   loadAdminCategoryCounts(rail);
+}
+
+function setHomeSearching(active) {
+  document.body.classList.toggle("is-searching", Boolean(active));
+  const featured = $("featured-section");
+  if (featured && active) featured.hidden = true;
+}
+
+function featuredDealTag(item) {
+  const discount = Number(item.discount) || 0;
+  const gap = Number(item.gap_percent) || 0;
+  if (discount >= 20 || gap >= 15) return "Bajo promedio";
+  if (discount > 0 || (Number(item.saving) || 0) > 0) return "Precio conveniente";
+  return "Oferta de hoy";
+}
+
+function featuredDealCard(item) {
+  const image = typeof thumbMarkup === "function"
+    ? thumbMarkup(
+        "deal-img",
+        item.product_id
+          ? `/api/thumb?store=${encodeURIComponent(item.store)}&id=${encodeURIComponent(item.product_id)}`
+          : ""
+      )
+    : "";
+  const ficha = item.product_id
+    ? `/producto?store=${encodeURIComponent(item.store)}&id=${encodeURIComponent(item.product_id)}`
+    : item.url || "#";
+  const fresh = typeof updatedStamp === "function"
+    ? updatedStamp(item.updated_at || item.created_at)
+    : "";
+  return `
+    <article class="panel deal">
+      <a href="${attr(ficha)}">${image}</a>
+      <div class="deal-body">
+        <a class="deal-name" href="${attr(ficha)}">${attr(item.name || "Producto")}</a>
+        <p class="deal-price">${money(item.price)}</p>
+        <span class="deal-tag">${attr(featuredDealTag(item))}</span>
+        ${fresh ? `<p class="muted deal-fresh">${attr(fresh)}</p>` : ""}
+      </div>
+    </article>`;
+}
+
+async function loadFeaturedDeals() {
+  const section = $("featured-section");
+  const grid = $("featured-deals");
+  if (!section || !grid || currentQuery) return;
+  try {
+    const data = await json("/api/deals?size=4&sort=discount");
+    const rows = data.deals || [];
+    if (!rows.length) {
+      section.hidden = true;
+      return;
+    }
+    grid.innerHTML = rows.map(featuredDealCard).join("");
+    section.hidden = false;
+  } catch (_) {
+    section.hidden = true;
+  }
 }
 
 /** True after /api/stores has populated #stores (even if the admin filters UI is hidden). */
@@ -674,7 +734,7 @@ function setSearching(on, { live = false } = {}) {
     button.disabled = on;
     button.innerHTML = on
       ? `<span class="spinner" aria-hidden="true"></span>Buscando…`
-      : "Buscar";
+      : `<span class="home-search-icon" aria-hidden="true"></span>Buscar`;
   }
   if (typeof setQuickSearchBusy === "function") {
     setQuickSearchBusy(on || live, live ? "Actualizando…" : "Buscando…");
@@ -879,6 +939,18 @@ function sortRows(rows) {
   return copy;
 }
 
+function searchResultTag(row) {
+  const stats = row.price_stats || {};
+  if (row.is_lowest && row.comparable) return "Mejor precio";
+  if (isRealOffer(row)) {
+    const discount = discountOf(row);
+    if (discount >= 20 || Number(row.cheaper_elsewhere?.gap_percent) >= 15) return "Bajo promedio";
+    return "Precio conveniente";
+  }
+  if (stats.is_lowest_ever) return "Mínimo histórico";
+  return "";
+}
+
 function searchDealCard(row) {
   const stats = row.price_stats || {};
   const saving = offerSaving(row);
@@ -898,10 +970,17 @@ function searchDealCard(row) {
   const cta = ficha
     ? `<a class="deal-cta" href="${attr(ficha)}">Ver ficha</a>`
     : "";
+  const compare = ficha
+    ? `<a class="deal-cta" href="${attr(ficha)}#others-panel">Comparar tiendas</a>`
+    : "";
   const offer = row.url
     ? `<a class="deal-cta" href="${attr(row.url)}" target="_blank" rel="noreferrer">Ver oferta</a>`
     : "";
   const hints = cheaperHints(row);
+  const tag = searchResultTag(row);
+  const fresh = typeof updatedStamp === "function"
+    ? updatedStamp(row.updated_at || row.scraped_at || row.created_at)
+    : "";
   let reason = "";
   if (!hints) {
     if (stats.level && stats.level !== "unknown" && stats.verdict) reason = stats.verdict;
@@ -913,21 +992,42 @@ function searchDealCard(row) {
       ${linkedImage}
       <div class="deal-body">
         ${title}
-        <p class="muted">${attr(row.brand || row.category || "")}</p>
+        <p class="muted">${attr(row.brand || row.category || "")}${fresh ? ` · ${attr(fresh)}` : ""}</p>
         <div class="deal-meta">
           ${storeLogo(row.display_store || row.store, row.store_title || row.store)}
-          <div class="deal-ctas">${cta}${offer}</div>
+          <div class="deal-ctas">${cta}${compare}${offer}</div>
         </div>
         ${dealPricesBlock({
           price: row.price,
           normal: publishedNormal(row),
           savingHtml: `${saving ? money(saving) : "—"}${discountBadge(row)}`,
         })}
+        ${tag ? `<span class="deal-tag">${attr(tag)}</span>` : ""}
+        ${searchDealEffectiveCost(row)}
         ${hints}
         ${reason ? `<p class="deal-reason"><span>Motivo</span> ${attr(reason)}</p>` : ""}
         ${typeof priceAlertButtonHtml === "function" ? priceAlertButtonHtml({ store: row.store, productId: row.product_id, name: row.name }) : ""}
       </div>
     </article>`;
+}
+
+/** Despacho / tarjeta solo con datos reales (no inventa costos). */
+function searchDealEffectiveCost(row) {
+  const bits = [];
+  const card = row.price_card ?? row.price_cmr;
+  if (card != null && Number(card) > 0 && Number(card) !== Number(row.price)) {
+    const label = row.payment_card_name ? `Con ${row.payment_card_name}` : "Con tarjeta";
+    bits.push(`${label}: ${money(card)}`);
+  }
+  if (row.shipping_cost === 0) {
+    bits.push("Despacho gratis");
+    if (row.price != null) bits.push(`Total c/ despacho: ${money(row.price)}`);
+  } else if (row.shipping_cost != null && Number(row.shipping_cost) >= 0 && row.price != null) {
+    bits.push(`Despacho: ${money(row.shipping_cost)}`);
+    bits.push(`Total c/ despacho: ${money(Number(row.price) + Number(row.shipping_cost))}`);
+  }
+  if (!bits.length) return "";
+  return `<p class="muted deal-effective-cost">${bits.map((part) => attr(part)).join(" · ")}</p>`;
 }
 
 function resultCard(group) {
@@ -941,6 +1041,10 @@ function resultCard(group) {
   const best = group.lowest_price != null
     ? `menor en ${group.lowest_stores.join(", ")}`
     : "sin precio";
+  const freshSource = group.offers.find((item) => item.updated_at) || first;
+  const fresh = typeof updatedStamp === "function"
+    ? updatedStamp(freshSource.updated_at || freshSource.scraped_at)
+    : "";
   const thumbRow = group.thumb || first;
   const image = thumbMarkup("result-img", group.thumb ? thumbUrl(group.thumb) : "", {
     store: thumbRow.store,
@@ -957,11 +1061,13 @@ function resultCard(group) {
         ${linkedImage}
         <div class="result-info">
           <h3>${title}</h3>
-          <p class="result-meta">${group.brand ? `${attr(group.brand)} · ` : ""}${stores}</p>
+          <p class="result-meta">${group.brand ? `${attr(group.brand)} · ` : ""}${stores}${fresh ? ` · ${attr(fresh)}` : ""}</p>
           <p class="result-price">${money(group.lowest_price)}<span>${best}</span></p>
+          ${group.stores > 1 ? `<span class="deal-tag">Comparación entre ${group.stores} tiendas</span>` : ""}
         </div>
         <div class="result-actions">
           ${typeof priceAlertButtonHtml === "function" ? priceAlertButtonHtml({ store: (ficha || first).store, productId: (ficha || first).product_id, name: group.name }) : ""}
+          ${ficha ? `<a class="ghost" href="${attr(productUrl(ficha))}#others-panel">Comparar</a>` : ""}
           ${ficha ? `<a class="ghost" href="${productUrl(ficha)}">Ficha</a>` : ""}
         </div>
       </div>
@@ -1191,6 +1297,7 @@ async function refreshMeta() {
   fillStores(stores);
   fillHistory(Array.isArray(history) ? history : []);
   renderCategoryShortcuts(explore.categories || []);
+  loadFeaturedDeals().catch(() => {});
 }
 
 function withStopped(result) {
@@ -1254,6 +1361,7 @@ function runSearch(query) {
   const headerInput = document.querySelector('.desktop-quick-search input[name="q"]');
   if (headerInput) headerInput.value = query;
   currentQuery = query;
+  setHomeSearching(Boolean(query));
   hideCategoryShortcuts();
   currentDiscarded = [];
   lastResult = null;
