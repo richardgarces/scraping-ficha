@@ -8,6 +8,14 @@ if [[ "$(uname -s)" != "Linux" ]]; then
   exit 1
 fi
 
+# BMAX usa docker-compose v1; cargar su cliente compatible sin alterar Python del sistema.
+COMPOSE_COMPAT_VENV="${HOME}/.cache/docker-compose-compat"
+if [[ -x "${COMPOSE_COMPAT_VENV}/bin/python" ]]; then
+  COMPOSE_COMPAT_SITE="$("${COMPOSE_COMPAT_VENV}/bin/python" -c \
+    'import sysconfig; print(sysconfig.get_paths()["purelib"])')"
+  export PYTHONPATH="${COMPOSE_COMPAT_SITE}${PYTHONPATH:+:${PYTHONPATH}}"
+fi
+
 export SRC_DIR="${GITHUB_WORKSPACE:-$ROOT}"
 export DEPLOY_DIR="${DEPLOY_DIR:-${HOME}/precios}"
 bash "${ROOT}/scripts/sync-to-precios.sh"
