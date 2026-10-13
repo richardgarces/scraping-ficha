@@ -1284,20 +1284,26 @@ function renderExpandedSearchOffer() {
 
 async function refreshMeta() {
   // /api/stores es lo único bloqueante para buscar; el resto no debe impedir fillStores.
-  const [health, stores, history, explore] = await Promise.all([
-    json("/api/health").catch(() => ({})),
+  const [stores, explore] = await Promise.all([
     json("/api/stores"),
-    json("/api/history").catch(() => []),
     json("/api/explore-categories").catch(() => ({})),
   ]);
-  const mongo = health.mongo ? `MongoDB ${health.products} productos` : "MongoDB no disponible";
-  const qdrant = health.qdrant ? "Qdrant conectado" : "Qdrant no disponible";
-  const redis = health.redis ? "Redis hoy" : "Redis no disponible";
-  console.info(`health ${mongo} · ${qdrant} · ${redis} · ${health.stores ?? "?"} tiendas`);
   fillStores(stores);
-  fillHistory(Array.isArray(history) ? history : []);
   renderCategoryShortcuts(explore.categories || []);
-  loadFeaturedDeals().catch(() => {});
+  const user = await ensureUser().catch(() => null);
+  if (user && user.role === "admin") {
+    const [health, history] = await Promise.all([
+      json("/api/admin/health").catch(() => ({})),
+      json("/api/admin/search-history").catch(() => []),
+    ]);
+    const mongo = health.mongo ? `MongoDB ${health.products} productos` : "MongoDB no disponible";
+    const qdrant = health.qdrant ? "Qdrant conectado" : "Qdrant no disponible";
+    const redis = health.redis ? "Redis hoy" : "Redis no disponible";
+    console.info(`health ${mongo} · ${qdrant} · ${redis} · ${health.stores ?? "?"} tiendas`);
+    fillHistory(Array.isArray(history) ? history : []);
+  } else {
+    fillHistory([]);
+  }
 }
 
 function withStopped(result) {
@@ -1465,7 +1471,7 @@ function runSearch(query) {
       searchSettled = true;
       setSearching(false);
       offerExpandedSearch();
-      json("/api/history").then(fillHistory).catch(() => {});
+      json("/api/admin/search-history").then(fillHistory).catch(() => {});
       return;
     }
     if (payload.type === "end") {
@@ -1477,7 +1483,7 @@ function runSearch(query) {
         currentSearchId = "";
       }
       offerExpandedSearch();
-      json("/api/history").then(fillHistory).catch(() => {});
+      json("/api/admin/search-history").then(fillHistory).catch(() => {});
     }
   };
   source.onerror = () => {
@@ -1627,6 +1633,7 @@ document.querySelectorAll('input[name="source"], #max, #price-band, #fresh').for
   control.addEventListener("input", updateExploreFilterBadge);
 });
 
+loadFeaturedDeals().catch(() => {});
 refreshMeta()
   .then(() => {
     const start = new URLSearchParams(location.search);

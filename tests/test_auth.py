@@ -76,9 +76,8 @@ def test_ofertas_and_history_are_admin_only(anonymous_repo):
     assert matching_audit.headers["location"].startswith("/entrar")
     matching_api = client.get("/api/admin/matching-audit/runs")
     assert matching_api.status_code == 401
-    history = client.get("/api/history")
-    assert history.status_code == 200
-    assert history.json() == []
+    assert client.get("/api/admin/search-history").status_code == 401
+    assert client.get("/api/history").status_code == 404
     settings = client.get("/api/settings")
     assert settings.status_code == 401
 

@@ -713,15 +713,13 @@ def stores() -> list[dict[str, str | int]]:
     return rows
 
 
-@app.get("/api/history")
-def history(request: Request, limit: int = Query(default=12, ge=1, le=50)) -> list[dict]:
+@app.get("/api/admin/search-history")
+def search_history(request: Request, limit: int = Query(default=12, ge=1, le=50)) -> list[dict]:
     repo = connect_repo()
     if repo is None:
-        return []
+        raise HTTPException(status_code=503, detail="MongoDB no está disponible.")
     try:
-        user = current_user(request, repo)
-        if not user or user.get("role") != "admin":
-            return []
+        current_user(request, repo, admin=True)
         return repo.recent_searches(limit)
     finally:
         repo.close()
