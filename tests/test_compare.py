@@ -141,15 +141,21 @@ def test_product_from_dict_ignores_extra_fields():
     assert product.product_id == "9"
 
 
-def test_web_health_and_stores():
+def test_public_health_is_minimal_and_admin_telemetry_requires_auth(monkeypatch):
+    class AnonymousRepo:
+        def close(self):
+            return None
+
+    monkeypatch.setattr("retail.web.deps.connect_repo", lambda: AnonymousRepo())
     client = TestClient(app)
     health = client.get("/api/health")
     assert health.status_code == 200
-    body = health.json()
-    assert body["ok"] is True
-    assert "degraded" in body
-    assert "mongo_error" in body
-    assert body["stores"] > 0
+    assert health.json() == {"ok": True}
+    assert client.get("/api/admin/health").status_code == 401
+
+
+def test_web_health_and_stores():
+    client = TestClient(app)
     page = client.get("/")
     assert page.status_code == 200
     assert "Comparador de precios" in page.text
@@ -175,7 +181,6 @@ def test_web_health_and_stores():
     assert "deal-grid" in hoy.text
     assert 'id="today-filters" class="collapsible-filters"' in hoy.text
     assert 'id="q"' not in hoy.text
-    assert health.json().get("qdrant") in {True, False}
     stores = client.get("/api/stores")
     assert any(item["id"] == "falabella" for item in stores.json())
     by_id = {item["id"]: item for item in stores.json()}
@@ -214,7 +219,8 @@ def test_web_health_marks_degraded_when_mongo_queries_fail(monkeypatch):
     monkeypatch.setattr("retail.web.app.connect_repo", lambda: BrokenRepo())
     monkeypatch.setattr("retail.web.app.connect_qdrant", lambda: None)
     monkeypatch.setattr("retail.search_cache.connect_redis", lambda: None)
-    body = TestClient(app).get("/api/health").json()
+    monkeypatch.setattr("retail.web.app.current_user", lambda *args, **kwargs: {"role": "admin"})
+    body = TestClient(app).get("/api/admin/health").json()
     assert body["ok"] is False
     assert body["degraded"] is True
     assert body["mongo"] is False

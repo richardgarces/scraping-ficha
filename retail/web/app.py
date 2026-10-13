@@ -456,8 +456,7 @@ async def track_click(request: Request) -> dict:
     return {"ok": True}
 
 
-@app.get("/api/health")
-def health() -> dict:
+def _health_details() -> dict:
     repo = connect_repo()
     mongo = False
     products = 0
@@ -505,6 +504,18 @@ def health() -> dict:
         "stores": len(list_stores()),
         "products": products,
     }
+
+
+@app.get("/api/health")
+def health() -> dict[str, bool]:
+    """Minimal process liveness endpoint; dependency details are admin-only."""
+    return {"ok": True}
+
+
+@app.get("/api/admin/health")
+def admin_health(request: Request) -> dict:
+    current_user(request, admin=True)
+    return _health_details()
 
 
 _LOGO_FILES = {
