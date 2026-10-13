@@ -4,9 +4,10 @@ import json
 import os
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi import FastAPI, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.types import Scope
 
 from retail.auth import safe_next
 from retail.registry import group_of, list_stores
@@ -52,6 +53,32 @@ from retail.web.anti_scraping import (
 )
 
 STATIC = Path(__file__).resolve().parent / "static"
+
+ADMIN_STATIC_HTML_PATHS = {
+    "ofertas.html": "/ofertas",
+    "cron.html": "/cron",
+    "cyber-day.html": "/cyber-day",
+    "cyber-day-evolucion.html": "/cyber-day/evolucion",
+    "cambios-precio.html": "/cambios-precio",
+    "hosts.html": "/hosts",
+    "estadisticas.html": "/estadisticas",
+    "pronosticos.html": "/pronosticos",
+    "analisis-producto.html": "/analisis-producto",
+    "tiendas.html": "/tiendas",
+    "usuarios.html": "/usuarios",
+    "cotizaciones.html": "/cotizaciones",
+}
+
+
+class AdminProtectedStaticFiles(StaticFiles):
+    async def get_response(self, path: str, scope: Scope) -> Response:
+        next_path = ADMIN_STATIC_HTML_PATHS.get(path)
+        if next_path:
+            gate = require_admin_html(Request(scope), next_path=next_path)
+            if gate is not None:
+                return gate
+        return await super().get_response(path, scope)
+
 
 app = FastAPI(title="Comparador retail Chile", version="2.0.0")
 app.include_router(auth_router)
@@ -331,7 +358,7 @@ def auditoria_matching(request: Request):
     return FileResponse(STATIC / "matching-audit.html")
 
 
-app.mount("/static", StaticFiles(directory=STATIC), name="static")
+app.mount("/static", AdminProtectedStaticFiles(directory=STATIC), name="static")
 
 
 @app.get("/hoy")

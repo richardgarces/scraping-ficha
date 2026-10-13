@@ -259,6 +259,24 @@ def test_logged_in_user_can_open_offer_pages(monkeypatch):
         assert '<h2 id="auth-title">Entrar</h2>' in stuck.text
 
 
+def test_direct_admin_static_html_requires_admin(monkeypatch):
+    from fastapi.responses import RedirectResponse
+
+    monkeypatch.setattr(
+        "retail.web.app.require_admin_html",
+        lambda request, *, next_path: RedirectResponse(f"/entrar?next={next_path}", status_code=303),
+    )
+    client = TestClient(app)
+    response = client.get("/static/cron.html", follow_redirects=False)
+    assert response.status_code == 303
+    assert response.headers["location"] == "/entrar?next=/cron"
+
+    monkeypatch.setattr("retail.web.app.require_admin_html", lambda *args, **kwargs: None)
+    allowed = client.get("/static/cron.html")
+    assert allowed.status_code == 200
+    assert "<h1>Cron / lotes</h1>" in allowed.text
+
+
 def test_logged_in_admin_redirects_from_entrar_to_admin_pages(monkeypatch):
     class Store:
         def close(self):
