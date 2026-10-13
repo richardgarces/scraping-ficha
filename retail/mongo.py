@@ -245,6 +245,14 @@ class ProductRepository:
         self.matching_audit_reviews = self.db["matching_audit_reviews"]
         self.offer_verification_runs = self.db["offer_verification_runs"]
         self.offer_verification_checks = self.db["offer_verification_checks"]
+        self.catalog_products = self.db["catalog_products"]
+        self.product_variants = self.db["product_variants"]
+        self.sellers = self.db["sellers"]
+        self.offers = self.db["offers"]
+        self.price_observations = self.db["price_observations"]
+        self.promotion_conditions = self.db["promotion_conditions"]
+        self.shipping_quotes = self.db["shipping_quotes"]
+        self.product_matches = self.db["product_matches"]
         self.quote_miss_jobs = self.db["quote_miss_jobs"]
         self.cyber_day_products = self.db["cyber_day_products"]
         self.cyber_day_lists = self.db["cyber_day_lists"]
@@ -576,6 +584,9 @@ class ProductRepository:
             )
         except OperationFailure:
             pass
+        from retail.product_identity import ensure_product_identity_indexes
+
+        ensure_product_identity_indexes(self.db)
         self.matching_audit_runs.create_index(
             [("created_at", DESCENDING)],
             name="matching_audit_run_created",
@@ -712,6 +723,7 @@ class ProductRepository:
                         str(row.get("store") or ""), str(row.get("product_id") or "")
                     )] = str(row["entity_override"])
         operations: list[UpdateOne] = []
+        identity_documents: list[dict[str, Any]] = []
         now = _now()
         for product in unique:
             key = (product.store, product.product_id)
@@ -734,6 +746,7 @@ class ProductRepository:
                 document.pop("image_url", None)
             if not product.image_urls:
                 document.pop("image_urls", None)
+            identity_documents.append(document)
             update: dict[str, Any] = {
                 "$set": document,
                 "$setOnInsert": {"created_at": now},
@@ -766,6 +779,10 @@ class ProductRepository:
         except Exception as exc:
             print(f"Alerta de precio: no se pudo comparar el precio anterior ({exc}).")
         result = self.collection.bulk_write(operations, ordered=False)
+        if hasattr(self, "db"):
+            from retail.product_identity import sync_product_identity_batch
+
+            sync_product_identity_batch(self.db, identity_documents, now=now)
         try:
             from retail.scrape_stats import record_product_writes
 

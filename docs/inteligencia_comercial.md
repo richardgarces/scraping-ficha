@@ -20,6 +20,57 @@ inventan precios, stock ni despacho.
   variantes diferentes o restablecer la decisión automática desde la página de
   análisis. La corrección queda guardada en la base de datos.
 
+### Persistencia relacional de identidad y ofertas
+
+El catálogo existente `products` sigue siendo la proyección compatible que usan
+la búsqueda y las páginas actuales: una ficha por tienda e ID externo, con su
+último estado y hasta 400 observaciones de precio embebidas. El modelo separado
+se escribe en paralelo en estas colecciones Mongo:
+
+| Colección | Contenido y decisiones |
+|---|---|
+| `catalog_products` | Identidad compartida: GTIN validado, marca, MPN/modelo, categoría, cantidad y unidad. |
+| `product_variants` | Capacidad, talla/tamaño, color, pack y versión, solo cuando la ficha los informa explícitamente. |
+| `sellers` | Vendedor identificado dentro de una tienda; usa el ID externo si existe y, si no, el nombre normalizado. |
+| `offers` | Publicación de una tienda/vendedor, enlazada a producto y variante cuando la variante se puede identificar sin ambigüedad. |
+| `price_observations` | Precio, moneda, stock opcional, instante y base del precio. Sin vencimiento automático. |
+| `promotion_conditions` | Precio con tarjeta y cupón como condiciones separadas, con vigencia solo si la fuente la informa. |
+| `shipping_quotes` | Costo, comuna y plazo. Una región como `RM` no se transforma en una comuna; queda en `region` y `comuna` permanece vacía. |
+| `product_matches` | Puntaje de confianza, método (`deterministic`, `ai` o `manual`), clave candidata y estado (`pending`, `approved`, `rejected` o `arbitration_required`). |
+
+Los productos solo se agrupan automáticamente cuando comparten un GTIN válido
+según checksum o una unión manual existente. Los agrupamientos heurísticos se
+conservan como candidatos pendientes: no se convierten en equivalencias
+confirmadas ni fusionan variantes. En el modelo nuevo, el precio base, el
+precio condicionado y el despacho nunca se suman ni se sustituyen entre sí.
+Un `PriceObservation` sin fecha fuente no se inventa; `timestamp_source`
+distingue `scraped_at` de la hora de actualización heredada.
+
+Los índices cubren búsqueda por texto y categoría/marca, GTIN único, relaciones
+oferta-producto-vendedor, cola de revisión y consultas cronológicas por oferta
+y producto. Se usa una colección Mongo normal con índices temporales compuestos,
+sin TTL, para admitir deduplicación idempotente y conservar el histórico.
+
+La migración es una copia reanudable; no borra ni modifica `products` ni su
+historial. Primero revisar la proyección en modo lectura:
+
+```sh
+python scripts/migrate_product_identity.py
+```
+
+Aplicar o continuar desde el último checkpoint:
+
+```sh
+python scripts/migrate_product_identity.py --apply
+```
+
+Se puede limitar una ejecución con `--limit 1000`; una ejecución `--apply`
+posterior continúa desde el checkpoint. `--reset-checkpoint` reinicia el cursor
+pero no elimina datos del modelo nuevo, por lo que puede volver a procesar el
+catálogo de forma idempotente. Durante el backfill y después, los scrapers
+escriben en `products` y en las colecciones separadas. Las lecturas públicas
+siguen usando `products` hasta una futura migración validada.
+
 La evaluación de una oferta conserva conceptos separados:
 
 - **Descuento comercial / publicado:** compara el precio normal informado por la
