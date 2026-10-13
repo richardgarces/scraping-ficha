@@ -1,5 +1,4 @@
 from pathlib import Path
-from urllib.parse import parse_qs, urlsplit
 
 from fastapi.testclient import TestClient
 import pytest
@@ -174,7 +173,7 @@ def test_siguiendo_nav_is_hidden_until_login():
     assert home.text.index("Cuenta") < home.text.index("Inscribirse")
 
 
-def test_real_offers_are_public_and_compare_still_requires_login():
+def test_real_offers_and_comparison_are_public():
     client = TestClient(app)
     reales = client.get("/reales", follow_redirects=False)
     assert reales.status_code == 200
@@ -186,9 +185,8 @@ def test_real_offers_are_public_and_compare_still_requires_login():
     assert tiendas.status_code == 303
     assert tiendas.headers["location"].startswith("/entrar?next=/tiendas")
     comparar = client.get("/comparar?store=cugat&id=18221", follow_redirects=False)
-    assert comparar.status_code == 303
-    comparar_next = parse_qs(urlsplit(comparar.headers["location"]).query)["next"][0]
-    assert comparar_next == "/comparar?store=cugat&id=18221"
+    assert comparar.status_code == 200
+    assert "Comparar productos" in comparar.text
     for path in ("/api/stores-report", "/api/stores-drops?store=falabella"):
         denied = client.get(path)
         assert denied.status_code in {401, 503}
@@ -210,7 +208,7 @@ def test_real_offers_are_public_and_compare_still_requires_login():
     assert entrar.status_code == 200
     js = Path("retail/web/static/entrar.js").read_text()
     assert "Inicia sesión para ver ofertas reales." not in js
-    assert "Inicia sesión para comparar productos." in js
+    assert "Inicia sesión para comparar productos." not in js
     assert "Solo administradores pueden ver el ranking de tiendas." in js
     assert '"/tiendas"' in js
     assert '"/pronosticos"' in js

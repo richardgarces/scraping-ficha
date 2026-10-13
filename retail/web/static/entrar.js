@@ -1,7 +1,6 @@
 function offerLoginHint() {
   const raw = new URLSearchParams(location.search).get("next") || "";
   if (raw.startsWith("/tiendas")) return "Solo administradores pueden ver el ranking de tiendas.";
-  if (raw.startsWith("/comparar")) return "Inicia sesión para comparar productos.";
   return "";
 }
 

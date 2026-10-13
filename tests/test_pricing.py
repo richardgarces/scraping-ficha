@@ -308,9 +308,8 @@ def test_new_pages_and_apis_are_wired():
     reales_page = client.get("/reales", follow_redirects=False)
     assert reales_page.status_code == 200
     assert "Ofertas reales" in reales_page.text
-    denied = client.get("/comparar?store=cugat&id=18221", follow_redirects=False)
-    assert denied.status_code == 303
-    assert denied.headers["location"].startswith("/entrar?next=")
+    comparison = client.get("/comparar?store=cugat&id=18221", follow_redirects=False)
+    assert comparison.status_code == 200
     old_super = client.get("/super", follow_redirects=False)
     assert old_super.status_code == 302
     assert old_super.headers["location"] == "/reales?super=1"

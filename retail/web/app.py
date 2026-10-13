@@ -424,13 +424,7 @@ def short_product_redirect(code: str):
 
 
 @app.get("/comparar")
-def comparar(request: Request):
-    next_path = request.url.path
-    if request.url.query:
-        next_path += f"?{request.url.query}"
-    gate = require_login_html(request, next_path=next_path)
-    if gate is not None:
-        return gate
+def comparar():
     return FileResponse(STATIC / "comparar.html")
 
 
