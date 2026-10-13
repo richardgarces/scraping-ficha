@@ -482,46 +482,59 @@ def test_cotizaciones_api_alias_requires_login(anonymous_repo, monkeypatch):
     assert client.get("/api/quotes").status_code == 401
 
 
-def test_quotes_page_requires_admin(anonymous_repo, monkeypatch):
+def test_quotes_page_requires_login_but_not_admin(anonymous_repo, monkeypatch):
     monkeypatch.setattr("retail.web.quotes_api.connect_repo", lambda: anonymous_repo)
     client = TestClient(app)
     page = client.get("/cotizaciones", follow_redirects=False)
     assert page.status_code == 303
     assert page.headers["location"].startswith("/entrar")
     assert "cotizaciones" in page.headers["location"]
+    monkeypatch.setattr("retail.web.quotes_api.require_login_html", lambda *args, **kwargs: None)
+    authorized = client.get("/cotizaciones")
+    assert authorized.status_code == 200
+    assert "Mis listas y cotizaciones" in authorized.text
 
 
-def test_approved_non_admin_cannot_use_quotes_api(monkeypatch):
-    quotes = Collection()
-    events = Collection()
-    user = {"id": "user-1", "role": "user", "status": "approved"}
-    repo = SimpleNamespace(
-        db=SimpleNamespace(business_quotes=quotes, business_quote_events=events),
-        product_detail=lambda *args: None,
-        find_by_query=lambda *args, **kwargs: [],
-        close=lambda: None,
-    )
-    monkeypatch.setattr("retail.web.quotes_api.connect_repo", lambda: repo)
-    monkeypatch.setattr("retail.web.quotes_api.current_user", _fake_current_user(user))
+def test_direct_cotizaciones_static_html_requires_login(anonymous_repo, monkeypatch):
+    monkeypatch.setattr("retail.web.deps.connect_repo", lambda: anonymous_repo)
     client = TestClient(app)
-    assert client.get("/api/quotes").status_code == 403
-    assert client.get("/api/cotizaciones").status_code == 403
-    assert client.post("/api/quotes/import-csv", json={"title": "Compra", "text": "nombre\nProducto"}).status_code == 403
+    response = client.get("/static/cotizaciones.html", follow_redirects=False)
+    assert response.status_code == 303
+    assert response.headers["location"].startswith("/entrar?next=/cotizaciones")
+
+
+def test_approved_non_admin_can_use_owned_quotes_but_not_admin_metrics(quotes_client, monkeypatch):
+    client, _, quotes, _ = quotes_client
+    user = {"id": "user-1", "role": "user", "status": "approved"}
+    monkeypatch.setattr("retail.web.quotes_api.current_user", _fake_current_user(user))
+    quote_id = create(client)
+    quotes.documents.append({
+        "_id": "other-owner-quote",
+        "owner_id": "other-user",
+        "title": "Privado de otra cuenta",
+        "items": [],
+        "status": "draft",
+    })
+    listed = client.get("/api/quotes")
+    assert listed.status_code == 200
+    assert all(row["id"] != "other-owner-quote" for row in listed.json()["quotes"])
+    assert client.get(f"/api/quotes/{quote_id}").status_code == 200
+    assert client.get("/api/quotes/other-owner-quote").status_code == 404
     assert client.get("/api/admin/purchasing-metrics").status_code == 403
 
 
-def test_quotes_menu_link_is_admin_only():
+def test_quotes_menu_link_is_available_to_signed_in_users():
     from pathlib import Path
 
     prices = Path("retail/web/static/prices.js").read_text(encoding="utf-8")
     assert 'link.href = "/cotizaciones"' in prices
-    assert 'link.setAttribute("data-admin", "")' in prices
-    assert "if (admin)" in prices
+    assert "if (loggedIn)" in prices
     assert 'user.role === "admin"' in prices
     html = Path("retail/web/static/cotizaciones.html").read_text(encoding="utf-8")
-    assert 'href="/cotizaciones" class="current" data-admin hidden' in html
+    assert 'href="/cotizaciones" class="current"' in html
     script = Path("retail/web/static/cotizaciones.js").read_text(encoding="utf-8")
-    assert 'user.role !== "admin"' in script
+    assert 'if (!user)' in script
+    assert 'if (user.role === "admin")' in script
 
 
 def test_oversized_quote_is_rejected_before_processing():

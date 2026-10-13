@@ -17,7 +17,6 @@ ADMIN_HTML_PREFIXES: tuple[str, ...] = (
     "/cyber",
     "/estadisticas",
     "/usuarios",
-    "/cotizaciones",
     "/tiendas",
     "/pronosticos",
     "/cambios-precio",
@@ -27,7 +26,7 @@ ADMIN_HTML_PREFIXES: tuple[str, ...] = (
 
 # Páginas que cualquier cuenta aprobada puede abrir (path sin query).
 # /reales y /super son públicas; /comparar sigue requiriendo sesión.
-MEMBER_HTML_PATHS: frozenset[str] = frozenset({"/comparar"})
+MEMBER_HTML_PATHS: frozenset[str] = frozenset({"/comparar", "/reales", "/cotizaciones"})
 
 
 def admin_next_allowed(path: str) -> bool:

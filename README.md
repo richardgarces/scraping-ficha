@@ -12,7 +12,9 @@ Inventario de funcionalidades (qué hay / qué falta / MVP):
 
 El piloto de **[cotizaciones comparadas](docs/COTIZACIONES.md)** conecta listas
 CSV y documentos de scraping/Docling con el catálogo, revisión de equivalencias
-y comparación de costos. Disponible en `/cotizaciones` solo para administradores.
+y comparación de costos. `/cotizaciones` requiere una cuenta aprobada; cada
+cuenta solo puede acceder a sus listas y las métricas del piloto son exclusivas
+de administradores.
 
 - `retail/sources/`: una tienda por módulo (se descubren solas)
 - `retail/platforms/`: motores VTEX, Shopify y Magento

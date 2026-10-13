@@ -21,7 +21,7 @@ from retail.shopping_list import (MODE_SHOPPING_LIST, available_store_groups,
                                   list_candidate_for, matrix_export_csv,
                                   refresh_quote_prices, resolve_list_stores,
                                   search_line_documents, shopping_matrix_report)
-from retail.web.deps import current_user, require_admin_html
+from retail.web.deps import current_user, require_login_html
 
 def private_response(response: Response):
     response.headers["Cache-Control"] = "no-store"
@@ -308,7 +308,7 @@ def _create(repo, user, payload: QuoteInput, *, event_kind: str = "import"):
 
 @router.get("/cotizaciones", include_in_schema=False)
 def quotes_page(request: Request):
-    gate = require_admin_html(request, next_path="/cotizaciones")
+    gate = require_login_html(request, next_path="/cotizaciones")
     if gate is not None:
         return gate
     from retail.web.app import STATIC
@@ -319,7 +319,7 @@ def quotes_page(request: Request):
 def create_quote(request: Request, payload: QuoteInput):
     repo = _repository()
     try:
-        user = current_user(request, repo, admin=True)
+        user = current_user(request, repo, required=True) or {}
         try:
             return _create(repo, user, payload, event_kind="import")
         except HTTPException:
@@ -335,7 +335,7 @@ def create_quote(request: Request, payload: QuoteInput):
 def import_csv(request: Request, payload: CsvInput):
     repo = _repository()
     try:
-        user = current_user(request, repo, admin=True)
+        user = current_user(request, repo, required=True) or {}
         try:
             items = parse_csv_quote(payload.text, payload.source_name)
             if payload.mode == MODE_SHOPPING_LIST:
@@ -369,7 +369,7 @@ def quote_store_groups(request: Request):
     """Categorías de tiendas disponibles para el modo lista de compra."""
     repo = _repository()
     try:
-        current_user(request, repo, admin=True)
+        current_user(request, repo, required=True)
         return {"groups": available_store_groups(repo=repo)}
     finally:
         repo.close()
@@ -524,7 +524,7 @@ def save_shopping_cart(request: Request, payload: ShoppingCartSave):
     """Crea o actualiza una lista de compra (carrito) sin scrapear ni armar matriz."""
     repo = _repository()
     try:
-        user = current_user(request, repo, admin=True)
+        user = current_user(request, repo, required=True) or {}
         created = payload.quote_id is None
         quote = _save_cart_document(repo, user, payload)
         return {"quote": quote, "created": created}
@@ -537,7 +537,7 @@ def add_cart_item(request: Request, quote_id: str, payload: AddCartItem):
     """Agrega un producto al carrito e invalida la matriz previa."""
     repo = _repository()
     try:
-        user = current_user(request, repo, admin=True)
+        user = current_user(request, repo, required=True) or {}
         quote = _owned(repo, user, quote_id)
         if not is_shopping_list(quote):
             raise HTTPException(status_code=422, detail="Solo aplica al modo lista de compra.")
@@ -570,7 +570,7 @@ def remove_cart_item(request: Request, quote_id: str, index: int, version: int):
     """Quita un producto del carrito e invalida la matriz previa."""
     repo = _repository()
     try:
-        user = current_user(request, repo, admin=True)
+        user = current_user(request, repo, required=True) or {}
         quote = _owned(repo, user, quote_id)
         if not is_shopping_list(quote):
             raise HTTPException(status_code=422, detail="Solo aplica al modo lista de compra.")
@@ -603,7 +603,7 @@ def update_cart_stores(request: Request, quote_id: str, payload: UpdateCartStore
     """Actualiza tiendas/categoría del carrito (add/remove) sin scrapear."""
     repo = _repository()
     try:
-        user = current_user(request, repo, admin=True)
+        user = current_user(request, repo, required=True) or {}
         quote = _owned(repo, user, quote_id)
         if not is_shopping_list(quote):
             raise HTTPException(status_code=422, detail="Solo aplica al modo lista de compra.")
@@ -644,7 +644,7 @@ def cotizar_lista(request: Request, quote_id: str, payload: CotizarBody):
     """Cotiza rápido contra MongoDB solamente (sin scrape live ni FlareSolverr)."""
     repo = _repository()
     try:
-        user = current_user(request, repo, admin=True)
+        user = current_user(request, repo, required=True) or {}
         return _run_matrix(
             repo, user, quote_id,
             version=payload.version,
@@ -660,7 +660,7 @@ def rebuild_matrix(request: Request, quote_id: str):
     """Vuelve a buscar matches por tienda desde el catálogo Mongo actual."""
     repo = _repository()
     try:
-        user = current_user(request, repo, admin=True)
+        user = current_user(request, repo, required=True) or {}
         quote = _owned(repo, user, quote_id)
         version = int(quote.get("version") or 1)
         return _run_matrix(
@@ -678,7 +678,7 @@ def refresh_prices(request: Request, quote_id: str):
     """Sube prioridad de scrape de los SKUs matcheados (sin scrapear en la petición)."""
     repo = _repository()
     try:
-        user = current_user(request, repo, admin=True)
+        user = current_user(request, repo, required=True) or {}
         quote = _owned(repo, user, quote_id)
         result = refresh_quote_prices(repo, quote)
         _record_event(
@@ -701,7 +701,7 @@ def refresh_prices(request: Request, quote_id: str):
 def list_quotes(request: Request):
     repo = _repository()
     try:
-        user = current_user(request, repo, admin=True)
+        user = current_user(request, repo, required=True) or {}
         quotes = []
         for row in repo.db.business_quotes.find(
             {"owner_id": user["id"]}, {"items": 0, "selections": 0},
@@ -721,7 +721,7 @@ async def enqueue_docling_job(request: Request):
 
     repo = _repository()
     try:
-        user = current_user(request, repo, admin=True)
+        user = current_user(request, repo, required=True) or {}
         form = await request.form()
         upload = form.get("file")
         if upload is None or not hasattr(upload, "read"):
@@ -757,7 +757,7 @@ def docling_job_status(request: Request, job_id: str):
 
     repo = _repository()
     try:
-        user = current_user(request, repo, admin=True)
+        user = current_user(request, repo, required=True) or {}
         job = get_job(repo, job_id, owner_id=user["id"])
         if not job:
             raise HTTPException(status_code=404, detail="Conversión no encontrada.")
@@ -774,7 +774,7 @@ def import_docling_job_result(request: Request, job_id: str):
 
     repo = _repository()
     try:
-        user = current_user(request, repo, admin=True)
+        user = current_user(request, repo, required=True) or {}
         try:
             payload = load_result_json(repo, job_id, owner_id=user["id"])
             quote = QuoteInput.model_validate(payload)
@@ -793,7 +793,7 @@ def import_docling_job_result(request: Request, job_id: str):
 def get_quote(request: Request, quote_id: str):
     repo = _repository()
     try:
-        user = current_user(request, repo, admin=True)
+        user = current_user(request, repo, required=True) or {}
         quote = _owned(repo, user, quote_id)
         quote, report = _apply_status(repo, quote, _report(repo, quote))
         return {"quote": _public(quote), "report": report}
@@ -805,7 +805,7 @@ def get_quote(request: Request, quote_id: str):
 def get_candidates(request: Request, quote_id: str, index: int, store: str | None = None):
     repo = _repository()
     try:
-        user = current_user(request, repo, admin=True)
+        user = current_user(request, repo, required=True) or {}
         quote = _owned(repo, user, quote_id)
         if not 0 <= index < len(quote["items"]):
             raise HTTPException(status_code=404, detail="Producto no encontrado.")
@@ -837,7 +837,7 @@ def get_candidates(request: Request, quote_id: str, index: int, store: str | Non
 def edit_quote(request: Request, quote_id: str, payload: QuoteEdit):
     repo = _repository()
     try:
-        user = current_user(request, repo, admin=True)
+        user = current_user(request, repo, required=True) or {}
         existing = _owned(repo, user, quote_id)
         values = payload.model_dump(mode="json", exclude={"version"})
         values.update(selections={}, store_matches={}, updated_at=datetime.now(timezone.utc).isoformat(),
@@ -875,7 +875,7 @@ def edit_quote(request: Request, quote_id: str, payload: QuoteEdit):
 def select_candidate(request: Request, quote_id: str, payload: Selection):
     repo = _repository()
     try:
-        user = current_user(request, repo, admin=True)
+        user = current_user(request, repo, required=True) or {}
         quote = _owned(repo, user, quote_id)
         if payload.index >= len(quote["items"]):
             raise HTTPException(status_code=404, detail="Producto no encontrado.")
@@ -936,7 +936,7 @@ def select_candidate(request: Request, quote_id: str, payload: Selection):
 def export_quote(request: Request, quote_id: str):
     repo = _repository()
     try:
-        user = current_user(request, repo, admin=True)
+        user = current_user(request, repo, required=True) or {}
         quote = _owned(repo, user, quote_id)
         report = _report(repo, quote)
         if is_shopping_list(quote):
@@ -1015,7 +1015,7 @@ def export_quote(request: Request, quote_id: str):
 def quote_feedback(request: Request, quote_id: str, payload: PilotEvent):
     repo = _repository()
     try:
-        user = current_user(request, repo, admin=True)
+        user = current_user(request, repo, required=True) or {}
         _owned(repo, user, quote_id)
         repo.db.business_quotes.update_one({"_id": quote_id, "owner_id": user["id"]},
                                           {"$set": {"feedback": payload.kind}})

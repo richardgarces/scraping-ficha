@@ -1,7 +1,8 @@
 # Cotizaciones y listas de compra
 
-La página `/cotizaciones`, disponible solo para administradores (como `/ofertas`)
-desde el menú Cuenta, ofrece **dos modos**:
+La página `/cotizaciones` requiere una cuenta aprobada y aparece en el menú
+Cuenta. A diferencia de `/ofertas`, no requiere rol administrador y ofrece
+**dos modos**:
 
 1. **Lista de compra (carrito)** — buscás productos en el catálogo, los agregás al
    carrito con cantidad, elegís tiendas por categoría (add/remove) y pulsáis
@@ -13,8 +14,8 @@ desde el menú Cuenta, ofrece **dos modos**:
    **con** `precio_unitario`, confirmas coincidencias y comparas ahorro potencial
    vs retail.
 
-Cada cuenta admin accede solo a sus listas/cotizaciones (`owner_id`). Los precios
-importados son referencias privadas: no modifican el catálogo ni el historial.
+Cada cuenta aprobada accede solo a sus listas/cotizaciones (`owner_id`). Los
+precios importados son referencias privadas: no modifican el catálogo ni el historial.
 **Cotizar responde desde Mongo** (sin esperar FlareSolverr). Los misses encolan
 jobs en `quote_miss_jobs` (worker en `precios-web` o `python -m retail.quote_miss_jobs`).
 «Actualizar precios» solo sube prioridad de scrape de SKUs ya matcheados.
@@ -79,7 +80,7 @@ Solo aplica al modo cotización:
 
 1. Obtener el PDF o imagen del proveedor en un entorno con Docling (`pip install -e '.[documents]'` o el entorno `scraping`/Soyo).
 2. Convertir a JSON del piloto: `python scripts/convert_quote_document.py proveedor.pdf --output output/cotizacion.json --title "…" --supplier "…"`.
-3. Abrir `/cotizaciones`, modo cotización, iniciar sesión como administrador, importar el JSON o pegar CSV equivalente.
+3. Abrir `/cotizaciones`, modo cotización, iniciar sesión con una cuenta aprobada e importar el JSON o pegar CSV equivalente.
 4. Confirmar IVA, vigencia y filas con avisos; buscar y confirmar coincidencias por línea.
 5. Exportar CSV de comparación; registrar feedback útil/corrección si aplica.
 
@@ -117,7 +118,9 @@ Cada cotización avanza `borrador → revisión → comparada → exportada`:
 ## API y métricas
 
 La API canónica es `/api/quotes`. El alias español `/api/cotizaciones` expone las
-mismas rutas. La página HTML sigue en `/cotizaciones` y exige rol administrador.
+mismas rutas. Las operaciones de listas requieren una cuenta aprobada, se limitan
+al propietario y no elevan sus permisos; las métricas globales del piloto siguen
+reservadas a administradores.
 
 Endpoints relevantes (lista / carrito):
 
@@ -156,5 +159,6 @@ node --check retail/web/static/cotizaciones.js
 
 Empujar con `./push-to-server.sh` y en BMAX `EDGE=platform ./scripts/deploy-prod.sh`
 (compose habitual). Mantener `precios-cyber-worker` parado si el scrape Cyber corre
-en otro host. Verificar `https://precios.meincart.cl/cotizaciones` con sesión admin:
-flujo carrito → Cotizar → matriz.
+en otro host. Verificar `https://precios.meincart.cl/cotizaciones` con sesión de
+usuario aprobado: flujo carrito → Cotizar → matriz. Comprobar además que
+`/api/admin/purchasing-metrics` siga reservado a administradores.

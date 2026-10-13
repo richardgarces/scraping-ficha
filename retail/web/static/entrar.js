@@ -11,7 +11,6 @@ const ADMIN_HTML_PREFIXES = [
   "/cyber",
   "/estadisticas",
   "/usuarios",
-  "/cotizaciones",
   "/tiendas",
   "/pronosticos",
   "/cambios-precio",

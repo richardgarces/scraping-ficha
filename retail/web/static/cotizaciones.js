@@ -1040,17 +1040,19 @@ document.querySelectorAll("[data-feedback]").forEach(button => button.addEventLi
 }));
 
 ensureUser().then(async user => {
-  if (!user || user.role !== "admin") {
+  if (!user) {
     location.href = "/entrar?next=/cotizaciones";
     return;
   }
   setImportMode("shopping_list");
   await loadStoreGroups().catch(showQuoteError);
   renderCart();
-  quoteRequest("/api/admin/purchasing-metrics").then(metrics => {
-    $("quote-pilot-metrics").hidden = false;
-    $("quote-pilot-metrics").textContent = `Piloto: ${metrics.imports} importaciones · ${metrics.matches} matches · ${metrics.exports} exportaciones · ${metrics.errors} errores · ahorro potencial exportado ${money(metrics.potential_saving_exported || 0)} · ${metrics.useful_quotes} útiles · ${metrics.needs_correction_quotes} necesitan corrección. ${metrics.note}`;
-  }).catch(showQuoteError);
+  if (user.role === "admin") {
+    quoteRequest("/api/admin/purchasing-metrics").then(metrics => {
+      $("quote-pilot-metrics").hidden = false;
+      $("quote-pilot-metrics").textContent = `Piloto: ${metrics.imports} importaciones · ${metrics.matches} matches · ${metrics.exports} exportaciones · ${metrics.errors} errores · ahorro potencial exportado ${money(metrics.potential_saving_exported || 0)} · ${metrics.useful_quotes} útiles · ${metrics.needs_correction_quotes} necesitan corrección. ${metrics.note}`;
+    }).catch(showQuoteError);
+  }
   return listQuotes().then(() => quoteMessage("Armá el carrito, elegí tiendas y pulsá Cotizar (solo Mongo)."));
 }).catch(showQuoteError);
 
