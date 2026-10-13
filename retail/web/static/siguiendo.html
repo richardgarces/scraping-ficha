@@ -56,6 +56,19 @@
   <main class="settings">
     <p id="flash" class="summary" hidden role="status" aria-live="polite"></p>
 
+    <section class="panel" id="watch-list" hidden>
+      <h2>Mis alertas de precio</h2>
+      <p class="muted">Estas alertas cuentan para el cupo de la membresía. Quítalas aquí o con «Alerta activa» en la ficha del producto.</p>
+      <div class="table-wrap">
+        <table class="results">
+          <thead>
+            <tr><th>Producto</th><th>Tienda</th><th>Aviso</th><th></th></tr>
+          </thead>
+          <tbody id="watches"></tbody>
+        </table>
+      </div>
+    </section>
+
     <section class="panel" id="guest-box">
       <h2>Guarda productos para seguimiento</h2>
       <p>Inscríbete para seguir precios y avisar cuando suban o bajen. No necesitas ser administrador.</p>
@@ -220,20 +233,8 @@
       </form>
     </section>
 
-    <section class="panel" id="watch-list" hidden>
-      <h2>Mis alertas de precio</h2>
-      <p class="muted">Estas alertas cuentan para el cupo de la membresía. Quítalas aquí o con «Alerta activa» en la ficha del producto.</p>
-      <div class="table-wrap">
-        <table class="results">
-          <thead>
-            <tr><th>Producto</th><th>Tienda</th><th>Aviso</th><th></th></tr>
-          </thead>
-          <tbody id="watches"></tbody>
-        </table>
-      </div>
-    </section>
   </main>
-  <script src="/static/prices.js?v=37"></script>
+  <script src="/static/prices.js?v=112-original-colors"></script>
   <script src="/static/siguiendo.js?v=22-price-alerts-list"></script>
 </body>
 </html>
